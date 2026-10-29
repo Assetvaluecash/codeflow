@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>TIA - Technical Impact Analysis</title>
+<script src="/vendor/cytoscape.min.js"></script>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d21;--mut:#5b6472;--line:#dfe3e8;--acc:#1f4fd8;--ok:#127a3b;--warn:#a86400;--bad:#b3261e}
+  @media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2127;--fg:#e8eaed;--mut:#9aa3af;--line:#2d333b;--acc:#7aa2ff;--ok:#5fd08a;--warn:#f0b35a;--bad:#ff8f87}}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);background:var(--card);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0} header small{color:var(--mut)}
+  main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:16px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px}
+  h2{font-size:15px;margin:0 0 10px}
+  label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+  input,select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
+  .row{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  button{padding:7px 14px;border:1px solid var(--acc);background:var(--acc);color:#fff;border-radius:6px;font:inherit;cursor:pointer}
+  button.sec{background:transparent;color:var(--acc)} button:disabled{opacity:.5;cursor:wait}
+  .tabs{display:flex;gap:6px;margin-bottom:8px} .tabs button{background:transparent;color:var(--fg);border-color:var(--line)} .tabs button.on{border-color:var(--acc);color:var(--acc)}
+  table{width:100%;border-collapse:collapse;margin-top:8px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:12px;color:var(--mut);font-weight:600}
+  .pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;border:1px solid var(--line)}
+  .critical,.high{color:var(--bad);border-color:var(--bad)} .medium{color:var(--warn);border-color:var(--warn)} .low,.unknown{color:var(--mut)}
+  .ok{color:var(--ok)} .err{color:var(--bad)} .mut{color:var(--mut)}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:420px;white-space:pre-wrap}
+  .banner{padding:8px 12px;border-radius:6px;border:1px solid var(--warn);color:var(--warn);margin:8px 0}
+  .hidden{display:none} code{font-size:12px}
+  #gwrap{display:grid;grid-template-columns:1fr 280px;gap:10px;margin-top:8px} @media(max-width:900px){#gwrap{grid-template-columns:1fr}}
+  #cy{height:540px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+  #gside{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:540px;overflow:auto}
+  #gside dt{color:var(--mut);margin-top:6px} #gside dd{margin:0;word-break:break-all}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--mut);margin-top:6px} .legend i{display:inline-block;width:18px;height:0;border-top:3px solid;vertical-align:middle;margin-right:4px}
+  .ctl{display:flex;gap:10px;flex-wrap:wrap;align-items:end} .ctl>div{min-width:130px}
+</style>
+</head>
+<body>
+<header><h1>TIA</h1><small>Technical Impact Analysis</small><small id="cfg" class="mut"></small></header>
+<main>
+
+<section>
+  <h2>1. Ingest repositories</h2>
+  <div class="tabs">
+    <button class="on" data-tab="url">Git URL (GitHub / Azure DevOps / other)</button>
+    <button data-tab="disc">Whole ADO project / GitHub org</button>
+    <button data-tab="path">Local path</button>
+  </div>
+
+  <div id="tab-url">
+    <div class="row">
+      <div><label>Repository URL</label><input id="url" placeholder="https://dev.azure.com/org/project/_git/repo  or  https://github.com/org/repo"></div>
+      <div><label>Access token (PAT) - needed for private repos; not stored</label><input id="token" type="password" autocomplete="off"></div>
+      <div><label>Name (optional)</label><input id="name"></div>
+      <div><label>Branch (optional)</label><input id="branch" placeholder="default branch"></div>
+    </div>
+    <p><button id="add">Ingest</button> <span id="addmsg"></span></p>
+  </div>
+
+  <div id="tab-disc" class="hidden">
+    <div class="row">
+      <div><label>Provider</label><select id="dprov"><option value="ado">Azure DevOps</option><option value="github">GitHub</option></select></div>
+      <div><label>Organisation / user</label><input id="dorg"></div>
+      <div><label>Project (Azure DevOps only)</label><input id="dproj"></div>
+      <div><label>PAT (required)</label><input id="dtoken" type="password" autocomplete="off"></div>
+      <div><label>API base (on-prem / GitHub Enterprise, optional)</label><input id="dapi" placeholder="https://tfs.company.com/tfs  or  https://ghe.company.com/api/v3"></div>
+    </div>
+    <p><button id="disc">Discover and ingest all</button> <span id="discmsg"></span></p>
+  </div>
+
+  <div id="tab-path" class="hidden">
+    <div class="row">
+      <div><label>Local git repository path (on the machine running TIA)</label><input id="lpath" placeholder="C:\src\my-service"></div>
+      <div><label>Name (optional)</label><input id="lname"></div>
+    </div>
+    <p><button id="addlocal">Register</button> <span id="localmsg"></span></p>
+  </div>
+
+  <table id="repos"><thead><tr><th>Name</th><th>Provider</th><th>Default branch</th><th>Latest commit</th><th>Branches</th><th>Synced</th><th></th></tr></thead><tbody></tbody></table>
+</section>
+
+<section>
+  <h2>2. Code graph</h2>
+  <p class="mut" style="margin:0 0 6px">Dependencies TIA extracted from the default branch of every ingested repository. Edge colour = evidence. Double-click a node to focus on its neighbourhood; click for details.</p>
+  <div class="ctl">
+    <div><label>Level of detail</label><select id="glevel"><option value="service">Services</option><option value="endpoint">Endpoints &amp; schemas</option><option value="function">Functions, call sites, tests</option></select></div>
+    <div><label>Repositories (none selected = all)</label><select id="grepos" multiple size="3"></select></div>
+    <div><label>Search</label><input id="gq" placeholder="name, path, file"></div>
+    <div><label>Layout</label><select id="glayout"><option>cose</option><option>breadthfirst</option><option>concentric</option><option>circle</option><option>grid</option></select></div>
+    <div><button id="gload">Load graph</button> <button class="sec" id="gimpact" disabled>Show impact of last analysis</button> <button class="sec" id="gfit">Fit</button></div>
+  </div>
+  <div id="ginfo" class="mut" style="margin-top:6px"></div>
+  <div id="gwrap"><div id="cy"></div><div id="gside"><span class="mut">Click a node or edge.</span></div></div>
+  <div class="legend">
+    <span><i style="border-color:#2e7d32"></i>source-confirmed / corroborated</span>
+    <span><i style="border-color:#1565c0"></i>contract-confirmed</span>
+    <span><i style="border-color:#ef6c00;border-top-style:dashed"></i>inferred</span>
+    <span><i style="border-color:#9e9e9e;border-top-style:dotted"></i>unresolved</span>
+    <span><i style="border-color:#b8c0cc"></i>structural</span>
+    <span id="legimpact" class="hidden">Impact view: red outline = changed; fill = severity (critical dark red, high red, medium amber, low grey)</span>
+  </div>
+</section>
+
+<section>
+  <h2>3. Analyse a change</h2>
+  <div class="row">
+    <div><label>Repository containing the change</label><select id="target"></select></div>
+    <div><label>Head: branch / tag / commit</label><input id="head" placeholder="feature/my-change"></div>
+    <div><label>or Pull request number</label><input id="pr" type="number" min="1" placeholder="e.g. 42"></div>
+    <div><label>Base (default: default branch)</label><input id="base" placeholder="main"></div>
+    <div><label>Token (only to fetch a private PR)</label><input id="atoken" type="password" autocomplete="off"></div>
+  </div>
+  <p><button id="run">Run analysis</button> <span id="runmsg"></span></p>
+</section>
+
+<section id="result" class="hidden">
+  <h2>4. Change Impact Report <span id="status" class="pill"></span></h2>
+  <div id="warn"></div>
+  <div id="summary" class="mut"></div>
+  <table id="findings"><thead><tr><th>Severity</th><th>Component</th><th>Evidence</th><th>Why</th><th>Tests</th></tr></thead><tbody></tbody></table>
+  <h2 style="margin-top:16px">Unknowns</h2><ul id="unknowns"></ul>
+  <h2>PR comment (markdown)</h2><pre id="comment"></pre>
+  <p><button class="sec" id="toimpact" disabled>Show on graph</button> <button class="sec" id="copy">Copy comment</button> <button class="sec" id="json">Show full JSON</button> <a id="permalink" class="mut"></a></p>
+  <pre id="raw" class="hidden"></pre>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function api(path, opts) {
+  const r = await fetch(path, opts && {method: opts.method, headers: {"Content-Type":"application/json"}, body: opts.body && JSON.stringify(opts.body)});
+  const t = await r.text(); let j; try { j = JSON.parse(t) } catch { j = t }
+  if (!r.ok) throw new Error((j && j.detail) || t || r.statusText);
+  return j;
+}
+function busy(btn, on) { btn.disabled = on; }
+function msg(id, text, cls) { $(id).className = cls || "mut"; $(id).textContent = text; }
+
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  ["url","disc","path"].forEach(t => $("tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
+});
+
+async function loadRepos() {
+  const repos = await api("/api/v1/repositories");
+  const tb = $("repos").querySelector("tbody");
+  tb.innerHTML = repos.map(r => `<tr><td><b>${esc(r.name)}</b><br><span class="mut">${esc(r.url)}</span>${r.last_error ? `<br><span class="err">${esc(r.last_error)}</span>`:""}</td>
+    <td>${esc(r.provider)}</td><td>${esc(r.default_branch)}</td><td><code>${esc((r.last_commit||"").slice(0,8))}</code></td>
+    <td>${esc((r.branches||[]).slice(0,6).join(", "))}${(r.branches||[]).length>6?" ...":""}</td>
+    <td class="mut">${r.last_synced ? new Date(r.last_synced*1000).toLocaleString() : ""}</td>
+    <td><button class="sec" onclick="syncRepo('${esc(r.name)}')">Sync</button> <button class="sec" onclick="delRepo('${esc(r.name)}')">Remove</button></td></tr>`).join("")
+    || `<tr><td colspan="7" class="mut">No repositories yet.</td></tr>`;
+  fillRepoFilter();
+  const cur = $("target").value;
+  $("target").innerHTML = repos.map(r => `<option ${r.name===cur?"selected":""}>${esc(r.name)}</option>`).join("");
+}
+async function syncRepo(n) { try { await api(`/api/v1/repositories/${encodeURIComponent(n)}/sync`, {method:"POST", body:{token: $("token").value || null}}); } catch(e) { alert(e.message) } loadRepos(); }
+async function delRepo(n) { if (confirm("Remove "+n+"?")) { await api(`/api/v1/repositories/${encodeURIComponent(n)}`, {method:"DELETE"}); loadRepos(); } }
+
+$("add").onclick = async () => {
+  busy($("add"), true); msg("addmsg", "Cloning...");
+  try { const r = await api("/api/v1/repositories", {method:"POST", body:{url:$("url").value.trim(), token:$("token").value||null, name:$("name").value||null, branch:$("branch").value||null}});
+        msg("addmsg", `Ingested ${r.name} (${r.branches.length} branches)`, "ok"); $("url").value=""; await loadRepos(); }
+  catch(e) { msg("addmsg", e.message, "err") } busy($("add"), false);
+};
+$("addlocal").onclick = async () => {
+  busy($("addlocal"), true);
+  try { const r = await api("/api/v1/repositories", {method:"POST", body:{path:$("lpath").value.trim(), name:$("lname").value||null}});
+        msg("localmsg", `Registered ${r.name}`, "ok"); await loadRepos(); } catch(e) { msg("localmsg", e.message, "err") } busy($("addlocal"), false);
+};
+$("disc").onclick = async () => {
+  busy($("disc"), true); msg("discmsg", "Discovering and cloning (can take a while)...");
+  try { const r = await api("/api/v1/repositories/discover", {method:"POST", body:{provider:$("dprov").value, org:$("dorg").value.trim(), project:$("dproj").value.trim()||null, token:$("dtoken").value, api_base:$("dapi").value.trim()||null}});
+        msg("discmsg", `Discovered ${r.discovered.length}, ingested ${r.ingested.length}, failed ${r.failed.length}` + (r.failed.length ? ": " + r.failed.map(f=>f.name+" ("+f.error+")").join("; ") : ""), r.failed.length ? "err" : "ok"); await loadRepos(); }
+  catch(e) { msg("discmsg", e.message, "err") } busy($("disc"), false);
+};
+
+$("run").onclick = async () => {
+  busy($("run"), true); msg("runmsg", "Analysing...");
+  try {
+    const body = {target:$("target").value, head:$("head").value.trim()||null, pr:$("pr").value?+$("pr").value:null, base:$("base").value.trim()||null, token:$("atoken").value||null};
+    const r = await api("/api/v1/impact-analyses", {method:"POST", body});
+    lastAnalysis = r.analysis_id; $("gimpact").disabled = false; $("toimpact").disabled = false;
+    msg("runmsg", "Done", "ok"); show(r.report, await api(`/api/v1/impact-analyses/${r.analysis_id}/comment`));
+  } catch(e) { msg("runmsg", e.message, "err") } busy($("run"), false);
+};
+function show(rep, comment) {
+  $("result").classList.remove("hidden");
+  $("status").textContent = rep.status;
+  $("warn").innerHTML = rep.status === "complete" ? "" : `<div class="banner">${rep.status === "failed" ? "The analysis failed: " + esc(rep.failure_reason) : "This is not a clean impact assessment: see the unknowns below."}</div>`;
+  const s = rep.summary || {};
+  $("summary").textContent = rep.status === "failed" ? "" : `${rep.change.repository} ${rep.change.base_revision.slice(0,7)} -> ${rep.change.proposed_revision.slice(0,7)}  |  change type: ${rep.change.change_type}  |  ${s.findings} finding(s), ${s.material_findings} material` + (rep.coverage && rep.coverage.outbound_call_sites ? `  |  ${rep.coverage.outbound_call_sites_resolved}/${rep.coverage.outbound_call_sites} outbound calls resolved` : "") + (s.message ? "  |  " + s.message : "");
+  $("findings").querySelector("tbody").innerHTML = (rep.findings||[]).map(f => `<tr><td><span class="pill ${f.severity}">${f.severity}</span></td><td>${esc(f.component)}<br><span class="mut">${esc(f.repository)}</span></td>
+    <td>${esc(f.evidence_status)}${f.resolution_strategy ? `<br><span class="mut">${esc(f.resolution_strategy)}</span>`:""}</td><td>${esc(f.reason)}${(f.limitations||[]).map(l=>`<br><span class="mut">- ${esc(l)}</span>`).join("")}</td>
+    <td>${(f.tests||[]).map(t=>esc(t.name)+` <span class="mut">(${esc(t.association)})</span>`).join("<br>") || '<span class="mut">none found</span>'}</td></tr>`).join("") || `<tr><td colspan="5" class="mut">No findings.</td></tr>`;
+  $("unknowns").innerHTML = (rep.unknowns||[]).map(u => `<li>${esc(u.reason)}${u.items ? "<ul>" + u.items.slice(0,15).map(i=>`<li class="mut">${esc(i.repo||"")} ${esc(i.file||"")}${i.line?":"+i.line:""} - ${esc(i.reason||i.error||"")}</li>`).join("") + (u.items.length>15?`<li class="mut">... ${u.items.length-15} more in JSON</li>`:"") + "</ul>" : ""}</li>`).join("");
+  $("comment").textContent = comment; $("raw").textContent = JSON.stringify(rep, null, 2);
+  $("permalink").textContent = rep.analysis_id; $("permalink").href = `/api/v1/impact-analyses/${rep.analysis_id}`;
+  $("result").scrollIntoView({behavior:"smooth"});
+}
+$("copy").onclick = () => navigator.clipboard.writeText($("comment").textContent);
+$("json").onclick = () => $("raw").classList.toggle("hidden");
+
+
+// ================= code graph =================
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let cy = null, lastAnalysis = null, gmode = "landscape";
+const STRUCT = new Set(["EXPOSES","USES_SCHEMA","HANDLES","ISSUES","CALLS","TESTS","CONTAINS"]);
+const SEV = {critical:"#7f1d1d", high:"#d32f2f", medium:"#f5a524", low:"#9aa3af", unknown:"#cbd5e1"};
+function gstyle() {
+  const fg = css("--fg") || "#222", line = css("--line") || "#ccc";
+  return [
+    {selector:"node", style:{label:"data(label)","font-size":9,color:fg,"text-valign":"bottom","text-margin-y":3,"text-wrap":"ellipsis","text-max-width":110,"background-color":"#9aa3af",width:16,height:16,"border-width":1,"border-color":line}},
+    {selector:'node[type="service"]', style:{shape:"round-rectangle","background-color":"#1f4fd8",width:46,height:30,"font-size":11,"font-weight":"bold","text-valign":"center","text-halign":"center",color:"#fff","text-max-width":90,"text-wrap":"wrap"}},
+    {selector:'node[type="endpoint"]', style:{shape:"diamond","background-color":"#2a9df4",width:20,height:20}},
+    {selector:'node[type="schema"]', style:{shape:"hexagon","background-color":"#8e5bd9"}},
+    {selector:'node[type="function"]', style:{shape:"ellipse","background-color":"#8b95a5",width:12,height:12}},
+    {selector:'node[type="callsite"]', style:{shape:"tag","background-color":"#12a594"}},
+    {selector:'node[type="contract_ref"]', style:{shape:"barrel","background-color":"#8a9a2e"}},
+    {selector:'node[type="test"]', style:{shape:"triangle","background-color":"#3ba55d",width:13,height:13}},
+    {selector:'node[type="unresolved"], node[?unresolved]', style:{shape:"octagon","background-color":"#e5e7eb","border-style":"dashed","border-color":"#6b7280","border-width":2}},
+    {selector:"edge", style:{width:2,"line-color":"#9aa3af","target-arrow-color":"#9aa3af","target-arrow-shape":"triangle","curve-style":"bezier","arrow-scale":.9,"font-size":8,color:fg,"text-background-color":css("--card")||"#fff","text-background-opacity":.85,"text-background-padding":1}},
+    {selector:"edge.struct", style:{width:1,"line-color":line,"target-arrow-color":line}},
+    {selector:'edge[status="source_confirmed"].dep, edge[status="corroborated"].dep', style:{"line-color":"#2e7d32","target-arrow-color":"#2e7d32"}},
+    {selector:'edge[status="corroborated"].dep', style:{width:4}},
+    {selector:'edge[status="contract_confirmed"].dep', style:{"line-color":"#1565c0","target-arrow-color":"#1565c0"}},
+    {selector:'edge[status="runtime_observed"].dep', style:{"line-color":"#00838f","target-arrow-color":"#00838f"}},
+    {selector:'edge[status="inferred"].dep', style:{"line-color":"#ef6c00","target-arrow-color":"#ef6c00","line-style":"dashed"}},
+    {selector:'edge[rel="UNRESOLVED_CALL"]', style:{"line-color":"#9e9e9e","target-arrow-color":"#9e9e9e","line-style":"dotted"}},
+    {selector:"edge[label]", style:{label:"data(label)"}},
+    {selector:'node[role="changed"]', style:{"border-color":"#d32f2f","border-width":5}},
+    {selector:'node[role="via"]', style:{opacity:.8}},
+    {selector:"node[sevcolor]", style:{"background-color":"data(sevcolor)",width:26,height:26,"font-size":10}},
+    {selector:"node:selected, edge:selected", style:{"overlay-color":"#1f4fd8","overlay-opacity":.18,"overlay-padding":6}},
+  ];
+}
+function gelements(data, impact) {
+  const nodes = data.nodes.map(n => { const d = {...n}; if (impact && n.severity) d.sevcolor = SEV[n.severity]; return {data:d}; });
+  const edges = data.edges.map(e => { const d = {...e};
+    if (e.rel === "CONSUMES_API" && e.count) d.label = (e.count > 1 ? e.count + "x " : "") + (e.strategies || []).join("+");
+    else if (e.rel === "CONSUMES_API" && e.strategy) d.label = e.strategy;
+    return {data:d, classes: STRUCT.has(e.rel) ? "struct" : "dep"}; });
+  return [...nodes, ...edges];
+}
+function renderGraph(data, impact) {
+  if (cy) cy.destroy();
+  cy = cytoscape({container:$("cy"), elements:gelements(data, impact), style:gstyle(), wheelSensitivity:.25});
+  const layout = impact && $("glayout").value === "cose" ? "breadthfirst" : $("glayout").value;
+  const opts = {name:layout, animate:false, padding:30, fit:true};
+  if (layout === "cose") Object.assign(opts, {nodeRepulsion:() => 22000, idealEdgeLength:() => 100, nodeOverlap:20, nodeDimensionsIncludeLabels:true, randomize:true, numIter:2500});
+  if (layout === "breadthfirst") Object.assign(opts, {directed:true, spacingFactor:1.2, roots: impact ? cy.nodes('[role="changed"]') : undefined});
+  cy.layout(opts).run();
+  cy.on("tap", "node", e => showNode(e.target.data()));
+  cy.on("tap", "edge", e => showEdge(e.target.data()));
+  cy.on("tap", evt => { if (evt.target === cy) $("gside").innerHTML = '<span class="mut">Click a node or edge.</span>'; });
+  cy.on("dbltap", "node", e => { if (!impact) { $("gq").value = ""; gload(e.target.id()); } });
+}
+function dl(obj, skip) {
+  return "<dl>" + Object.entries(obj).filter(([k, v]) => !skip.includes(k) && v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && !v.length))
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(Array.isArray(v) ? v.join("\n") : v).replace(/\n/g, "<br>")}</dd>`).join("") + "</dl>";
+}
+function showNode(d) { $("gside").innerHTML = `<b>${esc(d.label)}</b> <span class="pill">${esc(d.type)}</span>${dl(d, ["label","sevcolor","type"])}<p class="mut">${gmode === "landscape" ? "Double-click to focus on neighbours." : ""}</p>`; }
+function showEdge(d) { $("gside").innerHTML = `<b>${esc(d.rel)}</b> <span class="pill">${esc(d.status || "")}</span>${dl(d, ["id","label","rel","status","source","target"])}<dl><dt>from</dt><dd>${esc(d.source)}</dd><dt>to</dt><dd>${esc(d.target)}</dd></dl>`; }
+
+async function gload(focus) {
+  busy($("gload"), true); msg("ginfo", "Loading graph...");
+  try {
+    const p = new URLSearchParams({level:$("glevel").value, limit: $("glevel").value === "function" ? 400 : 600});
+    const repos = [...$("grepos").selectedOptions].map(o => o.value); if (repos.length) p.set("repos", repos.join(","));
+    if ($("gq").value.trim()) p.set("q", $("gq").value.trim());
+    if (focus) { p.set("focus", focus); p.set("depth", 2); }
+    const g = await api("/api/v1/graph?" + p); gmode = "landscape"; $("legimpact").classList.add("hidden");
+    renderGraph(g, false);
+    const st = g.stats;
+    msg("ginfo", `${st.nodes} nodes, ${st.edges} edges` + (st.truncated ? ` (showing the ${st.limit} best-connected of ${st.total_nodes}; narrow by repository, search, or focus)` : "") + (focus ? "  |  focused view: press Load graph for the full view" : "") + (st.unresolved_call_sites ? `  |  ${st.unresolved_call_sites} outbound call(s) could not be resolved` : ""), st.truncated ? "err" : "mut");
+    if (!g.nodes.length) msg("ginfo", "Nothing to show. Ingest repositories first, or change the filters.");
+  } catch (e) { msg("ginfo", e.message, "err"); }
+  busy($("gload"), false);
+}
+async function gimpact() {
+  if (!lastAnalysis) return; busy($("gimpact"), true);
+  try {
+    const g = await api(`/api/v1/impact-analyses/${lastAnalysis}/graph`); gmode = "impact";
+    renderGraph(g, true); $("legimpact").classList.remove("hidden");
+    msg("ginfo", g.nodes.length ? `Impact of ${lastAnalysis}: ${g.stats.nodes} components on ${g.edges.length} evidence edges` : "This analysis has no impact paths to draw.");
+    $("cy").scrollIntoView({behavior:"smooth", block:"center"});
+  } catch (e) { msg("ginfo", e.message, "err"); }
+  busy($("gimpact"), false);
+}
+async function fillRepoFilter() {
+  const repos = await api("/api/v1/repositories"); const cur = new Set([...$("grepos").selectedOptions].map(o => o.value));
+  $("grepos").innerHTML = repos.map(r => `<option value="${esc(r.name)}" ${cur.has(r.name) ? "selected" : ""}>${esc(r.name)}</option>`).join("");
+}
+$("gload").onclick = () => gload(); $("gimpact").onclick = gimpact; $("toimpact").onclick = gimpact;
+$("gfit").onclick = () => cy && cy.fit(undefined, 30);
+$("glevel").onchange = () => gload(); $("glayout").onchange = () => cy && (gmode === "impact" ? gimpact() : gload());
+$("gq").onkeydown = e => { if (e.key === "Enter") gload(); };
+
+api("/api/v1/config").then(c => { $("cfg").textContent = c.allow_local_paths ? "development mode - local paths enabled, no authentication" : "no authentication configured";
+  if (!c.allow_local_paths) document.querySelector('[data-tab="path"]').classList.add("hidden"); });
+loadRepos().then(() => gload());
+</script>
+</body>
+</html>
