@@ -8,8 +8,11 @@ This folder contains the **Architecture Diagram** and **Interactive Codebase Min
 
 | Document | Format | Description |
 | :--- | :--- | :--- |
-| 🌐 [**Interactive Architecture Diagram**](file:///C:/Users/DELL/Downloads/TIA/Project%20TIA/docs/architecture-diagram.html) | HTML (Mermaid.js + Interactive Controls) | Layer-by-layer breakdown: API, Services, AST Extractors, Graph Store, Analysis & Impact Engine, Database & Webhooks. |
-| 🧠 [**Interactive Codebase Mind Map**](file:///C:/Users/DELL/Downloads/TIA/Project%20TIA/docs/mind-map.html) | HTML (Interactive Tabs & Module Cards) | Conceptual mind map covering core domains, lifecycle pipelines, data models, and module reference cards. |
+| 🌐 [**Interactive Architecture Diagram**](architecture-diagram.html) | HTML (Mermaid.js + Interactive Controls) | Layer-by-layer breakdown: API, Services, AST Extractors, Graph Store, Analysis & Impact Engine, Database & Webhooks. |
+| 🧠 [**Interactive Codebase Mind Map**](mind-map.html) | HTML (Interactive Tabs & Module Cards) | Conceptual mind map covering core domains, lifecycle pipelines, data models, and module reference cards. |
+| 📄 [**PRD (Product Requirements Document)**](PRD.md) ([PDF](PRD.pdf)) | Markdown & PDF | Complete product specification, user journeys, release phases, and acceptance criteria. |
+| 🏛️ [**Architecture Specification**](ARCHITECTURE.md) ([PDF](ARCHITECTURE.pdf)) | Markdown & PDF | High-level system design, multi-tenant isolation, data flows, and component models. |
+| ⚙️ [**Technical Framework**](TECHNICAL-FRAMEWORK.md) ([PDF](TECHNICAL-FRAMEWORK.pdf)) | Markdown & PDF | Technical implementation framework, algorithm specifications, and integration requirements. |
 
 > **Tip:** You can double-click either `.html` file in Windows Explorer or open them in any browser (Chrome, Edge, etc.) for full pan/zoom, interactive filtering, and styled Mermaid visualisations.
 
