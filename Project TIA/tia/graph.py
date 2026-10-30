@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import asdict
 
+from .data import add_data_layer
 from .extract_python import module_name
 from .models import INFERRED, SOURCE_CONFIRMED, Edge, RepoExtract
 from .resolve import resolve_consumers
@@ -31,12 +33,25 @@ class Graph:
         # impact direction (who is affected when `key` changes)
         if e.rel == "HANDLES":                 # handler change -> endpoint
             self._impact[e.src].append((e.dst, e))
-        elif e.rel in ("CALLS", "USES_SCHEMA", "CONSUMES_API", "ISSUES", "TESTS"):
-            self._impact[e.dst].append((e.src, e))
-        # EXPOSES / OWNED_BY are not traversed
+        elif e.rel in ("CALLS", "USES_SCHEMA", "CONSUMES_API", "ISSUES", "TESTS", "MAPS_TO", "MAPS_COLUMN", "READS", "WRITES"):
+            self._impact[e.dst].append((e.src, e))     # table/column -> entity -> function: who is affected by a data change
+        # EXPOSES / OWNED_BY / MIGRATES are not traversed
 
     def impacted_by(self, nid: str):
         return sorted(self._impact.get(nid, []), key=lambda t: (t[0], t[1].rel))
+
+    def to_dict(self) -> dict:
+        return {"nodes": self.nodes, "edges": [asdict(e) for e in self.edges], "unresolved": self.unresolved,
+                "resolution_stats": self.resolution_stats, "ambiguous_calls": self.ambiguous_calls}
+
+    @staticmethod
+    def from_dict(d: dict) -> "Graph":
+        g = Graph()
+        g.nodes = d["nodes"]
+        for e in d["edges"]:
+            g.add_edge(Edge(**e))
+        g.unresolved, g.resolution_stats, g.ambiguous_calls = d["unresolved"], d["resolution_stats"], d["ambiguous_calls"]
+        return g
 
 
 def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
@@ -103,7 +118,10 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
                             linked = True
             if test_naming and not linked:
                 stem = t.file.rsplit("/", 1)[-1]
-                stem = stem[5:-3] if stem.startswith("test_") else stem[:-8] if stem.endswith("_test.py") else None
+                if stem.endswith(".java"):
+                    stem = next((stem[:-len(x) - 5] for x in ("Tests", "Test", "IT") if stem.endswith(x + ".java")), None)
+                else:
+                    stem = stem[5:-3] if stem.startswith("test_") else stem[:-8] if stem.endswith("_test.py") else None
                 if stem:
                     for mod, funcs in funcs_by_module.items():
                         if mod.rsplit(".", 1)[-1] == stem:
@@ -117,4 +135,5 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
     for e in edges:
         g.add_edge(e)
     g.unresolved, g.resolution_stats = unresolved, stats
+    add_data_layer(g, extracts)
     return g

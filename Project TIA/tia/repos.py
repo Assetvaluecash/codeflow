@@ -37,13 +37,19 @@ class Repo:
     name: str
     url: str                  # remote URL, or the local path for kind == "local"
     provider: str             # github | ado | git | local
-    kind: str                 # remote | local
+    kind: str                 # remote | local | upload (TIA-owned bare repository created from an uploaded zip/folder)
     path: str                 # directory TIA reads from
     default_branch: str = "HEAD"
     last_synced: Optional[float] = None
     last_commit: Optional[str] = None
     last_error: Optional[str] = None
     branches: list = field(default_factory=list)
+    # scan state (FR-005): a scan is a fetch plus an extraction of the default-branch head
+    scan_status: str = "never"                  # never | ok | partial (some files unparseable) | failed
+    scan_error: Optional[str] = None
+    analysed_commit: Optional[str] = None       # revision of the last extraction that completed
+    last_successful_scan: Optional[float] = None
+    scan_files_failed: int = 0
 
     def public(self) -> dict:
         d = asdict(self)
@@ -137,6 +143,37 @@ class RepoService:
                          url=repo.url, commit=repo.last_commit)
         return repo
 
+    def commit_upload(self, name: str, stage: Path, label: str, files: int, size: int, skipped: int) -> tuple:
+        """Record a staged upload as the next revision of the repository `name` (created on first upload).
+        Returns (Repo, commit, created)."""
+        from .upload import commit_tree          # local import: upload builds on this module
+        rname = _clean(name)
+        existing = self.store.get_repo(rname)
+        if existing and existing.kind != "upload":
+            raise IngestError(f"a repository named '{rname}' is already registered from {existing.provider}; "
+                              "choose another name for the upload")
+        dest = self.workspace / rname
+        if not existing and dest.exists():
+            _rmtree(dest)
+        sha, created = commit_tree(dest, stage, label)
+        repo = existing or Repo(name=rname, url=f"upload://{rname}", provider="upload", kind="upload", path=str(dest))
+        repo = self._refresh_meta(repo, "main")
+        repo.last_error = None
+        self.store.put_repo(repo)
+        self.store.audit("repository_uploaded", name=rname, commit=sha, files=files, bytes=size, skipped=skipped,
+                         unchanged=not created, first=existing is None)
+        return repo, sha, created
+
+    def revisions(self, name: str, limit: int = 50) -> list:
+        """Upload history (newest first): the revisions between which a change can be analysed."""
+        repo = self.get(name)
+        out = gitutil._git(repo.path, "log", f"--max-count={int(limit)}", "--format=%H%x09%ct%x09%s", repo.default_branch)
+        rows = []
+        for line in out.splitlines():
+            sha, ts, subject = line.split("\t", 2)
+            rows.append({"commit": sha, "time": int(ts), "label": subject})
+        return rows
+
     def _register_local(self, path: str, name: Optional[str]) -> Repo:
         if not self.allow_local:
             raise IngestError("local paths are disabled on this server (set TIA_ALLOW_LOCAL_PATHS=true)")
@@ -179,26 +216,58 @@ class RepoService:
         except IngestError:
             pass
         return self._refresh_meta(repo, branch)
-
     # ---- sync / refs ----------------------------------------------------------------------------------
     def _fetch_heads(self, repo: Repo, token: Optional[str]):
         _git(["fetch", "--prune", "--no-tags", "origin", "+refs/heads/*:refs/heads/*"], cwd=repo.path,
              provider=repo.provider, token=token)
+
+    def _follow_remote_default(self, repo: Repo, token: Optional[str]):
+        """Point the bare clone's HEAD at the remote's current default branch (it can change after registration)."""
+        out = _git(["ls-remote", "--symref", "origin", "HEAD"], cwd=repo.path, provider=repo.provider, token=token)
+        for line in out.splitlines():
+            if line.startswith("ref: refs/heads/") and line.rstrip().endswith("\tHEAD"):
+                branch = line[len("ref: refs/heads/"):].split("\t")[0]
+                gitutil._git(repo.path, "symbolic-ref", "HEAD", f"refs/heads/{branch}")
+                return
 
     def sync(self, name: str, token: Optional[str] = None) -> Repo:
         repo = self.get(name)
         try:
             if repo.kind == "remote":
                 self._fetch_heads(repo, token)
+                try:
+                    self._follow_remote_default(repo, token)
+                except (IngestError, gitutil.GitError):
+                    pass                # keep the last known default rather than fail the sync
             repo = self._refresh_meta(repo, None)
             repo.last_error = None
         except IngestError as e:
             repo.last_error = str(e)
+            repo.scan_status, repo.scan_error = "failed", str(e)
             self.store.put_repo(repo)
+            self.store.audit("repository_sync_failed", name=repo.name, error=str(e)[:300])
             raise
         self.store.put_repo(repo)
         self.store.audit("repository_synced", name=repo.name, commit=repo.last_commit)
         return repo
+
+    def record_scan(self, name: str, commit: Optional[str] = None, files_failed: int = 0, error: Optional[str] = None):
+        """Record the outcome of an extraction (called after the fetch): ok, partial or failed.
+        A failed fetch is not cleared by extracting the old revision again; only a successful sync clears it."""
+        repo = self.get(name)
+        if error is None and repo.last_error:
+            error = repo.last_error
+        before = (repo.scan_status, repo.scan_error, repo.analysed_commit, repo.scan_files_failed)
+        if error is not None:
+            repo.scan_status, repo.scan_error = "failed", error
+        else:
+            repo.scan_status = "partial" if files_failed else "ok"
+            repo.scan_error, repo.analysed_commit, repo.scan_files_failed = None, commit, files_failed
+        if (repo.scan_status, repo.scan_error, repo.analysed_commit, repo.scan_files_failed) == before:
+            return
+        if error is None:
+            repo.last_successful_scan = time.time()
+        self.store.put_repo(repo)
 
     def _refresh_meta(self, repo: Repo, branch: Optional[str] = None) -> Repo:
         try:
@@ -218,7 +287,7 @@ class RepoService:
     def fetch_pull_request(self, name: str, number: int, token: Optional[str] = None) -> str:
         """Fetch a pull request head into refs/tia/pr/<n>; returns the commit sha."""
         repo = self.get(name)
-        if repo.kind == "local":
+        if repo.kind != "remote":
             raise IngestError("pull-request refs are only available for remote repositories")
         last = None
         for src in (f"refs/pull/{number}/head", f"refs/pull/{number}/merge"):
@@ -231,6 +300,21 @@ class RepoService:
             except IngestError as e:
                 last = e
         raise IngestError(f"could not fetch pull request {number}: {last}")
+
+    def pin_commits(self, name: str, shas) -> int:
+        """Keep analysed commits reachable (refs/tia/pin/<sha>) so evidence survives force-pushes and garbage collection.
+        Only TIA's own clones are touched; a local repository is read in place and never modified."""
+        repo = self.get(name)
+        if repo.kind == "local":
+            return 0
+        n = 0
+        for sha in sorted(set(shas)):
+            try:
+                gitutil._git(repo.path, "update-ref", f"refs/tia/pin/{sha}", sha)
+                n += 1
+            except gitutil.GitError:
+                continue
+        return n
 
     def resolve(self, name: str, ref: Optional[str]) -> str:
         repo = self.get(name)
@@ -260,8 +344,8 @@ class RepoService:
 
     def remove(self, name: str):
         r = self.get(name)
-        if r.kind == "remote":
-            _rmtree(Path(r.path))       # only TIA's own clone; never a user's local repo
+        if r.kind in ("remote", "upload"):
+            _rmtree(Path(r.path))       # only TIA's own storage; never a user's local repo
         self.store.delete_repo(name)
         self.store.audit("repository_removed", name=name, kind=r.kind)
 

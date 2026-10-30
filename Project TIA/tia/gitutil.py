@@ -27,6 +27,44 @@ def list_files(repo_path: str, rev: str) -> list[str]:
     return [l for l in out.splitlines() if l]
 
 
+def list_tree(repo_path: str, rev: str) -> dict[str, str]:
+    """Regular files at a revision: path -> git blob id (content identity; submodules and symlinks are skipped)."""
+    out = _git(repo_path, "ls-tree", "-r", "-z", rev, text=False)
+    tree = {}
+    for entry in out.split(b"\0"):
+        if not entry:
+            continue
+        meta, path = entry.split(b"\t", 1)
+        mode, typ, sha = meta.decode().split()
+        if typ == "blob" and mode in ("100644", "100755"):
+            tree[path.decode("utf-8", "surrogateescape")] = sha
+    return tree
+
+
+def read_blobs(repo_path: str, shas: list) -> dict[str, bytes]:
+    """Contents of the given blobs in one git process (git cat-file --batch)."""
+    if not shas:
+        return {}
+    request = "".join(f"{s}\n" for s in shas).encode()
+    try:
+        r = subprocess.run(["git", "-C", repo_path, "cat-file", "--batch"], input=request,
+                           capture_output=True, check=False)
+    except FileNotFoundError as e:
+        raise GitError(str(e))
+    if r.returncode != 0:
+        raise GitError(r.stderr.decode("utf-8", "replace").strip() or "git cat-file failed")
+    out, buf, pos = {}, r.stdout, 0
+    while pos < len(buf):
+        nl = buf.index(b"\n", pos)
+        head = buf[pos:nl].decode().split()
+        if len(head) != 3:
+            raise GitError(f"blob not found: {head[0] if head else '?'}")
+        size = int(head[2])
+        out[head[0]] = buf[nl + 1:nl + 1 + size]
+        pos = nl + 1 + size + 1
+    return out
+
+
 def read_file(repo_path: str, rev: str, path: str) -> str:
     return _git(repo_path, "show", f"{rev}:{path}")
 

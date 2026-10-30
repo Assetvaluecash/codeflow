@@ -48,6 +48,7 @@ class Schema:
     fields: dict            # name -> {"type": str, "required": bool}
     file: str
     line: int
+    extends: Optional[str] = None     # Java: simple name of the superclass (its fields are merged at assembly)
 
 
 @dataclass
@@ -91,6 +92,53 @@ class TestCase:
 
 
 @dataclass
+class Entity:
+    """An ORM-mapped data entity (JPA entity, SQLAlchemy/SQLModel model, Django model) and the table it maps."""
+    id: str
+    service: str
+    repo: str
+    name: str
+    table: str                  # normalised: lower-case, unqualified
+    table_source: str           # declared | naming_strategy | django_default | unresolved
+    columns: dict               # column name -> {"field": str, "type": str, "nullable": bool, "pk": bool}
+    kind: str                   # jpa | sqlalchemy | django
+    file: str
+    line: int
+    bases: list = field(default_factory=list)       # superclasses / mixins whose columns are merged at assembly
+    abstract: bool = False      # @MappedSuperclass / abstract model / mixin: contributes columns, maps no table
+    app: Optional[str] = None   # Django app label (table prefix)
+    joins: list = field(default_factory=list)       # owning relationships whose column name depends on the target's key
+    embedded: list = field(default_factory=list)    # @Embedded types merged at assembly
+    join_tables: list = field(default_factory=list)  # [{"table", "columns": {name: {...}}}] many-to-many link tables
+    notes: list = field(default_factory=list)       # why a mapping is approximate
+
+
+@dataclass
+class DataAccess:
+    """A function that reads or writes an entity through the ORM."""
+    function_id: str
+    entity: str                 # Entity.id
+    op: str                     # read | write
+    file: str
+    line: int
+    via: str                    # e.g. OwnerRepository.save, Order.objects.filter, session.query
+
+
+@dataclass
+class Migration:
+    """One versioned schema-migration file and the structural operations it declares."""
+    id: str
+    repo: str
+    service: str
+    file: str
+    tool: str                   # flyway | liquibase | alembic | django | sql
+    version: str
+    ops: list = field(default_factory=list)         # [{"op", "table", "column"?, ...}]
+    unparsed: list = field(default_factory=list)    # [{"line", "reason", "text"}] statements that could not be analysed
+    parent: Optional[str] = None                    # Alembic down_revision
+
+
+@dataclass
 class Edge:
     src: str
     rel: str
@@ -117,6 +165,15 @@ class RepoExtract:
     tests: list = field(default_factory=list)
     contracts: list = field(default_factory=list)          # pact-like dicts
     service_map: dict = field(default_factory=dict)
+    clients: list = field(default_factory=list)            # Java: declared HTTP clients (OpenFeign interfaces)
+    typed_calls: list = field(default_factory=list)        # Java: calls on typed variables, resolved at assembly
+    unsupported_clients: list = field(default_factory=list)  # files that use HTTP client libraries the adapters do not analyse
+    entities: list = field(default_factory=list)           # ORM-mapped data entities
+    data_access: list = field(default_factory=list)        # DataAccess, resolved at assembly
+    migrations: list = field(default_factory=list)
+    data_unknowns: list = field(default_factory=list)      # data access that is declared but not analysed [{file, line, kind, reason}]
+    repositories: list = field(default_factory=list)       # Java: Spring Data repository declarations (assembly input)
+    data_refs: list = field(default_factory=list)          # Python: model references in functions (assembly input)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -133,7 +190,14 @@ class RepoExtract:
             callsites=[CallSite(**c) for c in d["callsites"]],
             functions=[Function(**f) for f in d["functions"]],
             tests=[TestCase(**t) for t in d["tests"]],
-            contracts=d["contracts"], service_map=d["service_map"])
+            contracts=d["contracts"], service_map=d["service_map"],
+            clients=d.get("clients", []), typed_calls=d.get("typed_calls", []),
+            unsupported_clients=d.get("unsupported_clients", []),
+            entities=[Entity(**e) for e in d.get("entities", [])],
+            data_access=[DataAccess(**a) for a in d.get("data_access", [])],
+            migrations=[Migration(**m) for m in d.get("migrations", [])],
+            data_unknowns=d.get("data_unknowns", []), repositories=d.get("repositories", []),
+            data_refs=d.get("data_refs", []))
 
 
 def normalize_path(path: str, strip_prefixes: tuple = ()) -> str:

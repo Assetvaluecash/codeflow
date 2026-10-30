@@ -33,9 +33,20 @@ def redact(report: dict, readable_repos) -> dict:
             u["items"] = [i for i in u["items"] if i.get("repo") in readable]
             if len(u["items"]) != n:
                 u["redacted_items"] = n - len(u["items"])
+                if u.get("area") in ("repository_freshness", "stale_relationships"):      # free text names repositories
+                    u["reason"] = f"{u['redacted_items']} item(s) concerning repositories you cannot access were omitted."
+                    u.pop("count", None)
         if "files_by_repo" in u:
             u["files_by_repo"] = {k: v for k, v in u["files_by_repo"].items() if k in readable}
+    for c in r["change"]["changed_components"]:
+        if "mapped_by" in c:                                    # entities of repositories the audience cannot read are not named
+            n = len(c["mapped_by"])
+            c["mapped_by"] = [m for m in c["mapped_by"] if m["repo"] in readable]
+            if len(c["mapped_by"]) != n:
+                c["mapped_by_redacted"] = n - len(c["mapped_by"])
     cov = r["coverage"]
+    if "data" in cov:
+        cov["data"].pop("databases", None)                      # private databases are named after their services
     cov["repositories_analysed"] = [x for x in cov["repositories_analysed"] if x["repo"] in readable]
     cov["repositories_inaccessible"] = [x for x in cov["repositories_inaccessible"] if x["repo"] in readable]
     r["change"]["tests_in_changed_repository"] = (
@@ -52,6 +63,41 @@ def redact(report: dict, readable_repos) -> dict:
     return r
 
 
+def redact_snapshot(snap: dict, readable_repos) -> dict:
+    """An audience sees only the repositories it can read in a snapshot."""
+    if readable_repos is None:
+        return snap
+    ok = set(readable_repos)
+    out = copy.deepcopy(snap)
+    out["revisions"] = {r: c for r, c in out["revisions"].items() if r in ok}
+    out["freshness"] = {r: f for r, f in out["freshness"].items() if r in ok}
+    out["stale_relationships"] = [x for x in out["stale_relationships"] if x["consumer_repo"] in ok and x["provider_repo"] in ok]
+    return out
+
+
+def evidence_view(report: dict, snapshot: dict) -> dict:
+    """What an authorised reviewer needs to audit a result (AC-015): the snapshot (source revisions, versions, freshness)
+    and, for every material finding, the evidence path with the exact revision of each repository on it."""
+    revs = snapshot["revisions"]
+    mats = []
+    for f in report["findings"]:
+        if not f["material"]:
+            continue
+        mats.append({"id": f["id"], "component": f["component"], "severity": f["severity"], "severity_rule": f["severity_rule"],
+                     "evidence_status": f["evidence_status"], "resolution_strategy": f.get("resolution_strategy"),
+                     "hops": [{"node": p["node"], "type": p["type"], "repo": p["repo"], "revision": revs.get(p["repo"]),
+                               "file": p["file"], "line": p["line"]} for p in f["path"]],
+                     "edges": f["path_edges"], "evidence": f["evidence"]})
+    return {"analysis_id": report["analysis_id"], "evidence_snapshot_id": snapshot["id"], "snapshot": snapshot,
+            "material_findings": mats}
+
+
+def differences(original: dict, repeated: dict) -> list:
+    """Top-level report sections that differ, ignoring the generation time."""
+    keys = (set(original) | set(repeated)) - {"generated_at"}
+    return sorted(k for k in keys if original.get(k) != repeated.get(k))
+
+
 def to_json(report: dict) -> str:
     return json.dumps(report, indent=2, sort_keys=False, ensure_ascii=False)
 
@@ -60,7 +106,12 @@ def _short(sha: str) -> str:
     return (sha or "")[:7]
 
 
-def render_comment(report: dict, max_rows: int = 12) -> str:
+def permalink(public_url: str | None, analysis_id: str) -> str | None:
+    """Stable address of an analysis's report page (UC1-16), or None when TIA has no public URL configured."""
+    return f"{public_url.rstrip('/')}/analyses/{analysis_id}" if public_url else None
+
+
+def render_comment(report: dict, max_rows: int = 12, link: str | None = None) -> str:
     ch, st = report["change"], report["status"]
     L = [MARKER, f"### TIA impact analysis - `{st}`", ""]
     if st != "failed":
@@ -68,7 +119,7 @@ def render_comment(report: dict, max_rows: int = 12) -> str:
     if st == "failed":
         L += [f"**The analysis failed**: {report.get('failure_reason', 'unknown error')}.",
               "No impact conclusions can be drawn from this result.", ""]
-        return "\n".join(L + [_footer(report)])
+        return "\n".join(L + [_footer(report, link)])
     L.append(f"`{ch['repository']}` {_short(ch['base_revision'])} -> {_short(ch['proposed_revision'])}"
              f" - change type: **{ch['change_type']}**")
     if st != "complete":
@@ -80,8 +131,12 @@ def render_comment(report: dict, max_rows: int = 12) -> str:
     L += ["", f"**{s['findings']} finding(s), {s['material_findings']} material** - "
           + " / ".join(f"{sev[k]} {k}" for k in ("critical", "high", "medium", "low", "unknown") if sev.get(k)) if s["findings"]
           else "", ""]
-    if not s["findings"]:
+    withheld = report.get("redacted", {}).get("findings", 0)
+    if not s["findings"] and not withheld:
         L += [s.get("message", "No findings."), ""]
+    elif not s["findings"]:
+        L += [f"**{withheld} finding(s) in other repositories are withheld from this comment** (visibility policy). "
+              "This is not a clean result: open the TIA report for the full impact.", ""]
     mat = [f for f in report["findings"] if f["material"]]
     if mat:
         L += ["| Severity | Component | Evidence | Why |", "|---|---|---|---|"]
@@ -108,6 +163,12 @@ def render_comment(report: dict, max_rows: int = 12) -> str:
         L += ["", "**Contract changes**"]
         for c in cc:
             L.append(f"- {'BREAKING' if c.get('breaking') else 'non-breaking'}: {c['detail']}")
+    dc = [c for c in ch["changed_components"] if c["type"] in ("db_table", "db_column") and c["change"] not in
+          ("table_added", "column_added", "column_made_nullable", "column_type_widened")]
+    if dc:
+        L += ["", "**Data changes**"]
+        for c in dc:
+            L.append(f"- {'BREAKING' if c.get('breaking') else 'non-breaking'}: {c['detail']} (`{c['file']}`)")
     cov = report["coverage"]
     if cov.get("outbound_call_sites"):
         L += ["", f"**Coverage:** {len(cov['repositories_analysed'])} repo(s) analysed; "
@@ -118,11 +179,12 @@ def render_comment(report: dict, max_rows: int = 12) -> str:
         L += ["", "**Unknowns that affect confidence**"]
         for u in unk:
             L.append(f"- {u['reason']}")
-    if report.get("redacted", {}).get("findings"):
-        L += ["", f"_{report['redacted']['note']}_"]
-    return "\n".join(L + ["", _footer(report)])
+    if withheld and s["findings"]:
+        L += ["", f"_{withheld} more finding(s) in other repositories are withheld from this comment (visibility policy)._"]
+    return "\n".join(L + ["", _footer(report, link)])
 
 
-def _footer(report: dict) -> str:
-    return (f"<sub>Advisory only - does not block merge. analysis `{report['analysis_id']}` - "
+def _footer(report: dict, link: str | None = None) -> str:
+    return ((f"[Full report]({link})\n\n" if link else "") +
+            f"<sub>Advisory only - does not block merge. analysis `{report['analysis_id']}` - "
             f"snapshot `{report.get('evidence_snapshot_id', 'n/a')}` - config `{report['configuration_version']}`</sub>")

@@ -47,6 +47,93 @@ class Store:
                       "on conflict (tenant_id, key) do update set data = excluded.data",
                       (self.tenant_id, self._key(ex.repo, ex.commit, ex.extractor_version), Jsonb(ex.to_dict())))
 
+    def get_file_extracts(self, keys: list) -> dict:
+        """Per-file facts already extracted for these (blob-identified) keys."""
+        if not keys:
+            return {}
+        with self.db.tx(self.tenant_id) as c:
+            rows = c.execute("select key, data from file_extracts where key = any(%s)", (list(keys),)).fetchall()
+        return {k: RepoExtract.from_dict(d) for k, d in rows}
+
+    def put_file_extracts(self, items: dict, overwrite: bool = False):
+        if not items:
+            return
+        action = "do update set data = excluded.data" if overwrite else "do nothing"
+        with self.db.tx(self.tenant_id) as c:
+            for k, ex in items.items():
+                c.execute("insert into file_extracts (tenant_id, key, data) values (%s, %s, %s) "
+                          f"on conflict (tenant_id, key) {action}", (self.tenant_id, k, Jsonb(ex.to_dict())))
+
+    # ---- persisted graph versions (immutable) and the current head --------------------------------------------
+    def get_graph(self, graph_id: str) -> Optional[dict]:
+        with self.db.tx(self.tenant_id) as c:
+            r = c.execute("select data from graph_versions where id = %s", (graph_id,)).fetchone()
+        return r[0] if r else None
+
+    def put_graph(self, graph_id: str, inputs: dict, stats: dict, data: dict, overwrite: bool = False):
+        action = "do update set stats = excluded.stats, data = excluded.data" if overwrite else "do nothing"
+        with self.db.tx(self.tenant_id) as c:
+            c.execute("insert into graph_versions (tenant_id, id, inputs, stats, data) values (%s, %s, %s, %s, %s) "
+                      f"on conflict (tenant_id, id) {action}",
+                      (self.tenant_id, graph_id, Jsonb(inputs), Jsonb(stats), Jsonb(data)))
+
+    def list_graphs(self, limit: int = 50) -> list:
+        with self.db.tx(self.tenant_id) as c:
+            rows = c.execute("select id, created_at, inputs, stats from graph_versions order by created_at desc, id limit %s",
+                             (limit,)).fetchall()
+        return [{"id": i, "created_at": t.isoformat(), "inputs": inp, "stats": st} for i, t, inp, st in rows]
+
+    def get_head(self, scope: str) -> Optional[dict]:
+        with self.db.tx(self.tenant_id) as c:
+            r = c.execute("select graph_id, previous_id, updated_at from graph_heads where scope = %s", (scope,)).fetchone()
+        return {"graph_id": r[0], "previous_id": r[1], "updated_at": r[2].isoformat()} if r else None
+
+    def set_head(self, scope: str, graph_id: str) -> bool:
+        """Point the scope at a graph version; returns True if the head moved."""
+        with self.db.tx(self.tenant_id) as c:
+            cur = c.execute("select graph_id from graph_heads where scope = %s for update", (scope,)).fetchone()
+            if cur and cur[0] == graph_id:
+                return False
+            c.execute("insert into graph_heads (tenant_id, scope, graph_id, previous_id) values (%s, %s, %s, %s) "
+                      "on conflict (tenant_id, scope) do update set graph_id = excluded.graph_id, "
+                      "previous_id = graph_heads.graph_id, updated_at = now()",
+                      (self.tenant_id, scope, graph_id, cur[0] if cur else None))
+        return True
+
+    # ---- relationship history ---------------------------------------------------------------------------------
+    def list_relationships(self, state: Optional[str] = None) -> list:
+        with self.db.tx(self.tenant_id) as c:
+            if state:
+                rows = c.execute("select data from relationships where state = %s order by key", (state,)).fetchall()
+            else:
+                rows = c.execute("select data from relationships order by key").fetchall()
+        return [r[0] for r in rows]
+
+    def put_relationships(self, items: list):
+        if not items:
+            return
+        with self.db.tx(self.tenant_id) as c:
+            for d in items:
+                c.execute("insert into relationships (tenant_id, key, state, data) values (%s, %s, %s, %s) "
+                          "on conflict (tenant_id, key) do update set state = excluded.state, data = excluded.data, "
+                          "updated_at = now()", (self.tenant_id, d["key"], d["state"], Jsonb(d)))
+
+    def delete_relationships(self, keys: list):
+        if keys:
+            with self.db.tx(self.tenant_id) as c:
+                c.execute("delete from relationships where key = any(%s)", (list(keys),))
+
+    # ---- evidence snapshots (immutable) -------------------------------------------------------------------------
+    def put_snapshot(self, snapshot_id: str, data: dict):
+        with self.db.tx(self.tenant_id) as c:
+            c.execute("insert into evidence_snapshots (tenant_id, id, data) values (%s, %s, %s) "
+                      "on conflict (tenant_id, id) do nothing", (self.tenant_id, snapshot_id, Jsonb(data)))
+
+    def get_snapshot(self, snapshot_id: str) -> Optional[dict]:
+        with self.db.tx(self.tenant_id) as c:
+            r = c.execute("select data, created_at from evidence_snapshots where id = %s", (snapshot_id,)).fetchone()
+        return {**r[0], "created_at": r[1].isoformat()} if r else None
+
     # ---- immutable analysis results ------------------------------------------------------------------------
     def put_analysis(self, report: dict):
         with self.db.tx(self.tenant_id) as c:

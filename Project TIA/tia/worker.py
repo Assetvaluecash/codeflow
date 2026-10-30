@@ -59,6 +59,7 @@ class Worker:
 def main():
     from .analysis_service import make_handlers
     from .db import Database
+    from .webhooks import ScmConfig
     dsn = os.environ.get("TIA_WORKER_DATABASE_URL")
     if not dsn:
         sys.exit("TIA_WORKER_DATABASE_URL is required")
@@ -67,7 +68,8 @@ def main():
     handlers = make_handlers(db, allow_local=os.environ.get("TIA_ALLOW_LOCAL_PATHS", "").lower() in ("1", "true", "yes"),
                              allowed_hosts=hosts or None,
                              audit_key=os.environ["TIA_AUDIT_KEY"].encode() if os.environ.get("TIA_AUDIT_KEY") else None,
-                             workspace=os.environ.get("TIA_WORKSPACE", ".tia-data/repos"))
+                             workspace=os.environ.get("TIA_WORKSPACE", ".tia-data/repos"),
+                             scm=ScmConfig.from_env())
     stop = threading.Event()
     print(f"worker started; kinds={list(handlers)}", file=sys.stderr)
     try:

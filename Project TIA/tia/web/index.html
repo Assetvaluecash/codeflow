@@ -47,6 +47,7 @@
     <button class="on" data-tab="url">Git URL (GitHub / Azure DevOps / other)</button>
     <button data-tab="disc">Whole ADO project / GitHub org</button>
     <button data-tab="path">Local path</button>
+    <button data-tab="up">Upload zip / folder</button>
   </div>
 
   <div id="tab-url">
@@ -68,6 +69,18 @@
       <div><label>API base (on-prem / GitHub Enterprise, optional)</label><input id="dapi" placeholder="https://tfs.company.com/tfs  or  https://ghe.company.com/api/v3"></div>
     </div>
     <p><button id="disc">Discover and ingest all</button> <span id="discmsg"></span></p>
+  </div>
+
+  <div id="tab-up" class="hidden">
+    <p class="mut">Send code from your own computer. Each upload is a snapshot stored as a revision; upload the same name again with a changed copy and use
+      <b>Analyse vs previous upload</b> to see its impact, with no Git host involved. Folders such as <code>.git</code>, <code>node_modules</code>, <code>__pycache__</code> and virtual environments are skipped. Limit: 2 GB per upload.</p>
+    <div class="row">
+      <div><label>Repository name (optional: defaults to the zip / folder name)</label><input id="upname"></div>
+      <div><label>Zip file</label><input id="zipfile" type="file" accept=".zip,application/zip"></div>
+      <div><label>or a whole folder</label><input id="folderfiles" type="file" webkitdirectory multiple></div>
+    </div>
+    <p><button id="upzip">Upload zip</button> <button id="upfolder">Upload folder</button> <span id="upmsg"></span></p>
+    <div id="upbar" class="hidden" style="height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden"><div id="upfill" style="height:8px;width:0;background:#2563eb"></div></div>
   </div>
 
   <div id="tab-path" class="hidden">
@@ -99,6 +112,8 @@
     <span><i style="border-color:#ef6c00;border-top-style:dashed"></i>inferred</span>
     <span><i style="border-color:#9e9e9e;border-top-style:dotted"></i>unresolved</span>
     <span><i style="border-color:#b8c0cc"></i>structural</span>
+    <span><i style="border-color:#b8651b"></i>entity</span>
+    <span><i style="border-color:#0b6e4f"></i>table</span>
     <span id="legimpact" class="hidden">Impact view: red outline = changed; fill = severity (critical dark red, high red, medium amber, low grey)</span>
   </div>
 </section>
@@ -141,7 +156,7 @@ function msg(id, text, cls) { $(id).className = cls || "mut"; $(id).textContent 
 
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
-  ["url","disc","path"].forEach(t => $("tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
+  ["url","disc","path","up"].forEach(t => $("tab-"+t).classList.toggle("hidden", t !== b.dataset.tab));
 });
 
 async function loadRepos() {
@@ -151,7 +166,7 @@ async function loadRepos() {
     <td>${esc(r.provider)}</td><td>${esc(r.default_branch)}</td><td><code>${esc((r.last_commit||"").slice(0,8))}</code></td>
     <td>${esc((r.branches||[]).slice(0,6).join(", "))}${(r.branches||[]).length>6?" ...":""}</td>
     <td class="mut">${r.last_synced ? new Date(r.last_synced*1000).toLocaleString() : ""}</td>
-    <td><button class="sec" onclick="syncRepo('${esc(r.name)}')">Sync</button> <button class="sec" onclick="delRepo('${esc(r.name)}')">Remove</button></td></tr>`).join("")
+    <td>${r.kind === "upload" ? `<button class="sec" onclick="useUpload('${esc(r.name)}')">Analyse vs previous upload</button>` : `<button class="sec" onclick="syncRepo('${esc(r.name)}')">Sync</button>`} <button class="sec" onclick="delRepo('${esc(r.name)}')">Remove</button></td></tr>`).join("")
     || `<tr><td colspan="7" class="mut">No repositories yet.</td></tr>`;
   fillRepoFilter();
   const cur = $("target").value;
@@ -166,6 +181,81 @@ $("add").onclick = async () => {
         msg("addmsg", `Ingested ${r.name} (${r.branches.length} branches)`, "ok"); $("url").value=""; await loadRepos(); }
   catch(e) { msg("addmsg", e.message, "err") } busy($("add"), false);
 };
+// ---- upload from the user's drive: a zip (streamed as one body) or a folder (sent in batches) ----------------------------
+function xhr(method, url, body, onprogress, headers) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest(); x.open(method, url);
+    Object.entries(headers || {}).forEach(([k, v]) => x.setRequestHeader(k, v));
+    if (onprogress) x.upload.onprogress = e => e.lengthComputable && onprogress(e.loaded);
+    x.onload = () => { let j; try { j = JSON.parse(x.responseText) } catch { j = x.responseText }
+                       x.status < 300 ? res(j) : rej(new Error((j && j.detail) || x.statusText || ("HTTP " + x.status))) };
+    x.onerror = () => rej(new Error("network error")); x.send(body);
+  });
+}
+const mb = n => (n / 1048576).toFixed(1) + " MB";
+const SKIP_DIRS = new Set([".git", "node_modules", "__pycache__", ".venv", "venv", ".tox", ".mypy_cache", ".pytest_cache", ".idea"]);
+function upProgress(done, total, what) {
+  $("upbar").classList.remove("hidden"); $("upfill").style.width = (total ? Math.min(100, 100 * done / total) : 0) + "%";
+  msg("upmsg", `${what}: ${mb(done)} of ${mb(total)} (${total ? Math.round(100 * done / total) : 0}%)`);
+}
+function upDone(r) {
+  return r.unchanged ? `${r.name}: identical to the previous upload, no new revision`
+    : `${r.name}: ${r.files} files stored as revision ${r.revision.slice(0, 8)}` + (r.skipped_files ? ` (${r.skipped_files} files in ignored folders skipped)` : "");
+}
+function upBusy(on) { busy($("upzip"), on); busy($("upfolder"), on); }
+async function upFinish(id) {
+  msg("upmsg", "Storing as a repository and updating the graph...");
+  const r = await api(`/api/v1/uploads/${id}/commit`, {method: "POST"});
+  msg("upmsg", upDone(r), "ok"); $("upbar").classList.add("hidden"); await loadRepos();
+}
+async function upAbort(id) { if (id) { try { await api(`/api/v1/uploads/${id}`, {method: "DELETE"}) } catch {} } $("upbar").classList.add("hidden"); }
+
+$("upzip").onclick = async () => {
+  const f = $("zipfile").files[0]; if (!f) return msg("upmsg", "Choose a .zip file first", "err");
+  const name = $("upname").value.trim() || f.name.replace(/\.zip$/i, "");
+  upBusy(true); let id;
+  try {
+    const s = await api("/api/v1/uploads", {method: "POST", body: {name}}); id = s.upload_id;
+    if (f.size > s.max_bytes) throw new Error(`This file is ${mb(f.size)}; the limit is ${mb(s.max_bytes)}`);
+    await xhr("PUT", `/api/v1/uploads/${id}/archive`, f, l => upProgress(l, f.size, "Uploading"), {"Content-Type": "application/zip"});
+    await upFinish(id);
+  } catch (e) { msg("upmsg", e.message, "err"); await upAbort(id); }
+  upBusy(false);
+};
+
+$("upfolder").onclick = async () => {
+  const all = [...$("folderfiles").files]; if (!all.length) return msg("upmsg", "Choose a folder first", "err");
+  const folder = all[0].webkitRelativePath.split("/")[0];
+  const items = all.map(f => ({f, rel: f.webkitRelativePath.split("/").slice(1).join("/")}))
+                   .filter(x => x.rel && !x.rel.split("/").some(p => SKIP_DIRS.has(p)));
+  if (!items.length) return msg("upmsg", "Nothing to upload (only ignored folders such as node_modules or .git)", "err");
+  const name = $("upname").value.trim() || folder, total = items.reduce((a, x) => a + x.f.size, 0);
+  upBusy(true); let id;
+  try {
+    const s = await api("/api/v1/uploads", {method: "POST", body: {name}}); id = s.upload_id;
+    if (total > s.max_bytes) throw new Error(`This folder is ${mb(total)}; the limit is ${mb(s.max_bytes)}`);
+    if (items.length > s.max_files) throw new Error(`This folder has ${items.length} files; the limit is ${s.max_files}`);
+    let sent = 0, i = 0;
+    while (i < items.length) {                                   // batches of up to 250 files / 48 MB
+      const batch = []; let size = 0;
+      while (i < items.length && batch.length < 250 && (batch.length === 0 || size + items[i].f.size <= 48 * 1048576)) { batch.push(items[i]); size += items[i].f.size; i++; }
+      const fd = new FormData();
+      batch.forEach(x => { fd.append("paths", x.rel); fd.append("files", x.f, x.f.name); });
+      await xhr("POST", `/api/v1/uploads/${id}/files`, fd, l => upProgress(sent + Math.min(l, size), total, "Uploading"));
+      sent += size;
+    }
+    await upFinish(id);
+  } catch (e) { msg("upmsg", e.message, "err"); await upAbort(id); }
+  upBusy(false);
+};
+
+async function useUpload(name) {
+  const revs = await api(`/api/v1/repositories/${encodeURIComponent(name)}/revisions`);
+  if (revs.length < 2) return alert("Upload a changed copy of " + name + " first: this is the only revision so far.");
+  $("target").value = name; $("head").value = "main"; $("base").value = "main~1"; $("pr").value = "";
+  $("run").scrollIntoView({behavior: "smooth", block: "center"});
+}
+
 $("addlocal").onclick = async () => {
   busy($("addlocal"), true);
   try { const r = await api("/api/v1/repositories", {method:"POST", body:{path:$("lpath").value.trim(), name:$("lname").value||null}});
@@ -208,7 +298,7 @@ $("json").onclick = () => $("raw").classList.toggle("hidden");
 // ================= code graph =================
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 let cy = null, lastAnalysis = null, gmode = "landscape";
-const STRUCT = new Set(["EXPOSES","USES_SCHEMA","HANDLES","ISSUES","CALLS","TESTS","CONTAINS"]);
+const STRUCT = new Set(["EXPOSES","USES_SCHEMA","HANDLES","ISSUES","CALLS","TESTS","CONTAINS","MAPS_TO","MAPS_COLUMN","MIGRATES"]);
 const SEV = {critical:"#7f1d1d", high:"#d32f2f", medium:"#f5a524", low:"#9aa3af", unknown:"#cbd5e1"};
 function gstyle() {
   const fg = css("--fg") || "#222", line = css("--line") || "#ccc";
@@ -221,6 +311,10 @@ function gstyle() {
     {selector:'node[type="callsite"]', style:{shape:"tag","background-color":"#12a594"}},
     {selector:'node[type="contract_ref"]', style:{shape:"barrel","background-color":"#8a9a2e"}},
     {selector:'node[type="test"]', style:{shape:"triangle","background-color":"#3ba55d",width:13,height:13}},
+    {selector:'node[type="entity"]', style:{shape:"round-pentagon","background-color":"#b8651b",width:18,height:18}},
+    {selector:'node[type="table"]', style:{shape:"round-rectangle","background-color":"#0b6e4f",width:22,height:16}},
+    {selector:'node[type="column"]', style:{shape:"ellipse","background-color":"#7bc4a4",width:9,height:9}},
+    {selector:'node[type="migration"]', style:{shape:"cut-rectangle","background-color":"#6b7280",width:14,height:14}},
     {selector:'node[type="unresolved"], node[?unresolved]', style:{shape:"octagon","background-color":"#e5e7eb","border-style":"dashed","border-color":"#6b7280","border-width":2}},
     {selector:"edge", style:{width:2,"line-color":"#9aa3af","target-arrow-color":"#9aa3af","target-arrow-shape":"triangle","curve-style":"bezier","arrow-scale":.9,"font-size":8,color:fg,"text-background-color":css("--card")||"#fff","text-background-opacity":.85,"text-background-padding":1}},
     {selector:"edge.struct", style:{width:1,"line-color":line,"target-arrow-color":line}},

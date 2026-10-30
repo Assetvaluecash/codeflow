@@ -9,12 +9,17 @@ import ast
 import hashlib
 import json
 import posixpath
+import re
 from typing import Optional
 from urllib.parse import urlsplit
 
 import yaml
 
 from . import EXTRACTOR_VERSION
+from .extract_data import (alembic_migration, django_migration, extract_file as extract_data_file, is_data_file,
+                           resolve_data)
+from .extract_java import extract_file as extract_java_file, keep_reachable_schemas, module_fqn, resolve_clients
+from .extract_orm import function_refs, model_entity
 from .models import (CallSite, Endpoint, Function, RepoExtract, Schema, TestCase,
                      normalize_path)
 
@@ -27,6 +32,8 @@ NON_CLIENT_PACKAGES = {"fastapi", "flask", "starlette", "pydantic", "django", "r
 
 
 def module_name(path: str) -> str:
+    if path.endswith(".java"):
+        return module_fqn(path)
     p = path[:-3] if path.endswith(".py") else path
     if p.endswith("/__init__"):
         p = p[: -len("/__init__")]
@@ -60,6 +67,7 @@ class _FileVisitor:
         self.router_prefix: dict[str, str] = {}
         self.client_vars: dict[str, tuple[str, str]] = {}  # unparsed target -> (pkg, class)
         self.is_test = _is_test_file(path)
+        self.is_migration = False        # Alembic / Django migration modules declare schema changes, not data access
 
     # ---- module-level pre-pass -------------------------------------------------
     def prepass(self):
@@ -131,6 +139,10 @@ class _FileVisitor:
                         self.maybe_callsite(sub, None)
 
     def visit_class(self, node: ast.ClassDef, scope):
+        if not (self.is_test or self.is_migration):
+            ent = model_entity(node, self.repo, self.service, self.path, self.imports, self.out)
+            if ent is not None:
+                self.out.entities.append(ent)
         bases = {_unparse(b).split(".")[-1] for b in node.bases}
         if "BaseModel" in bases:
             fields = {}
@@ -161,6 +173,8 @@ class _FileVisitor:
             self.out.functions.append(Function(id=fid, repo=self.repo, file=self.path, qualname=qual,
                                                line=node.lineno, hash=h, calls=sorted(set(calls))))
             self.maybe_endpoint(node, fid, qual)
+            if not self.is_migration:
+                self.out.data_refs += function_refs(node, fid, self.path, scope, self.out)
             for stmt in node.body:          # body only: decorators are route declarations, not calls
                 for sub in ast.walk(stmt):
                     if isinstance(sub, ast.Call):
@@ -325,9 +339,94 @@ class _FileVisitor:
             imports=sorted(set(self.import_modules)), called=sorted(set(calls)), http_calls=http))
 
 
-def extract_repo(repo: str, commit: str, files: dict[str, str], strip_prefixes: tuple = ()) -> RepoExtract:
-    """Extract all entities for one repository at one revision."""
-    # service identity + service map (R4) come from the owner-maintained tia-services.yaml
+BINARY_EXT = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".gz", ".tar", ".jar", ".class", ".exe", ".dll",
+              ".so", ".woff", ".woff2", ".ttf", ".pyc", ".bin", ".lock", ".svg")
+TEXT_EXT = (".md", ".txt", ".yaml", ".yml", ".json", ".toml", ".cfg", ".gitignore", ".xml", ".properties", ".gradle", ".sql")
+
+
+APP_CONFIG_NAMES = ("application.yml", "application.yaml", "bootstrap.yml", "bootstrap.yaml", "application.properties",
+                    "bootstrap.properties")
+_SPRING_NAME = re.compile(r"^\s*spring\.application\.name\s*[=:]\s*([^\s#]+)", re.M)
+
+
+def is_service_config(path: str) -> bool:
+    """Spring configuration files that can name the service (main resources only, never test resources)."""
+    return path.rsplit("/", 1)[-1] in APP_CONFIG_NAMES and "/src/test/" not in "/" + path
+
+
+def spring_application_name(files: dict) -> Optional[str]:
+    """spring.application.name: the name a Spring service registers under and is addressed by from other services."""
+    for path in sorted((p for p in files if is_service_config(p)), key=lambda p: (len(p), p)):
+        text = files[path]
+        name = None
+        if path.endswith((".yml", ".yaml")):
+            try:
+                for doc in yaml.safe_load_all(text):
+                    if not isinstance(doc, dict):
+                        continue
+                    name = ((doc.get("spring") or {}).get("application") or {}).get("name") if isinstance(doc.get("spring"), dict) else None
+                    name = name or doc.get("spring.application.name")
+                    if name:
+                        break
+            except yaml.YAMLError:
+                continue
+        else:
+            m = _SPRING_NAME.search(text)
+            name = m.group(1) if m else None
+        if isinstance(name, str) and name.strip() and "${" not in name:
+            return name.strip()
+    return None
+
+
+def _flatten(doc, prefix: str, out: dict) -> None:
+    if isinstance(doc, dict):
+        for k, v in doc.items():
+            _flatten(v, f"{prefix}.{k}" if prefix else str(k), out)
+    elif doc is not None:
+        out.setdefault(prefix, doc)
+
+
+def spring_properties(files: dict) -> dict:
+    """Flattened Spring Boot main configuration (application/bootstrap .yml/.properties); the shortest path wins."""
+    props: dict = {}
+    for path in sorted((p for p in files if is_service_config(p)), key=lambda p: (len(p), p)):
+        text = files[path]
+        if path.endswith((".yml", ".yaml")):
+            try:
+                for doc in yaml.safe_load_all(text):
+                    _flatten(doc, "", props)
+            except yaml.YAMLError:
+                continue
+        else:
+            for line in text.splitlines():
+                m = re.match(r"^\s*([\w.\-\[\]]+)\s*[=:]\s*(.*?)\s*$", line)
+                if m and not line.lstrip().startswith(("#", "!")):
+                    props.setdefault(m.group(1), m.group(2))
+    return props
+
+
+_EMBEDDED_DB = re.compile(r"^jdbc:(h2|hsqldb|derby|sqlite)\b", re.I)
+_JDBC = re.compile(r"^jdbc:(\w+):(?:thin:)?@?(?://)?([^/;:?]+)(?::(\d+))?(?:[/:;](.*))?$", re.I)
+
+
+def jdbc_database_id(url: str) -> Optional[str]:
+    """Identity of the database a JDBC URL names (driver://host:port/name), or None for embedded / unresolvable URLs."""
+    url = str(url).strip()
+    if not url.startswith("jdbc:") or "${" in url or _EMBEDDED_DB.match(url):
+        return None
+    m = _JDBC.match(url)
+    if not m:
+        return None
+    driver, host, port, rest = m.group(1).lower(), m.group(2).lower(), m.group(3) or "", m.group(4) or ""
+    dbm = re.search(r"databasename=([^;&]+)", rest, re.I)
+    name = dbm.group(1) if dbm else re.split(r"[?;&]", rest)[0].lstrip("/")
+    return f"{driver}://{host}{':' + port if port else ''}/{name.lower()}" if name else None
+
+
+def read_service_map(files: dict) -> dict:
+    """Service identity + service map (R4) come from the owner-maintained tia-services.yaml; a Spring service without one
+    is named by its spring.application.name. The database a service maps tables in is the declared ``database:`` or, for a
+    Spring service, the one named by a literal spring.datasource.url."""
     smap: dict = {}
     for name in ("tia-services.yaml", "tia-services.yml"):
         if name in files:
@@ -335,27 +434,116 @@ def extract_repo(repo: str, commit: str, files: dict[str, str], strip_prefixes: 
                 smap = yaml.safe_load(files[name]) or {}
             except yaml.YAMLError:
                 smap = {}
-    service = smap.get("service", repo)
-    out = RepoExtract(repo=repo, service=service, commit=commit,
-                      extractor_version=EXTRACTOR_VERSION, service_map=smap)
-    for path in sorted(files):
-        if path.endswith(".py"):
-            try:
-                tree = ast.parse(files[path], filename=path)
-            except SyntaxError as e:
-                out.files_failed.append({"file": path, "error": f"SyntaxError line {e.lineno}"})
-                continue
-            out.files_analysed += 1
-            _FileVisitor(repo, service, path, tree, out, strip_prefixes).run()
+            if not isinstance(smap, dict):
+                smap = {}
+    if not smap.get("service"):
+        spring = spring_application_name(files)
+        if spring:
+            smap = {**smap, "service": spring}
+    props = spring_properties(files)
+    if smap.get("database"):
+        smap = {**smap, "database": str(smap["database"]).strip().lower(), "database_source": "declared"}
+    else:
+        db = jdbc_database_id(props["spring.datasource.url"]) if "spring.datasource.url" in props else None
+        if db:
+            smap = {**smap, "database": db, "database_source": "datasource_url"}
+    naming = [str(v) for k, v in props.items() if k.startswith("spring.jpa.hibernate.naming")]
+    if any("SpringPhysicalNamingStrategy" not in v and "CamelCaseToUnderscoresNamingStrategy" not in v
+           and "SpringImplicitNamingStrategy" not in v and "ImplicitNamingStrategyJpaCompliantImpl" not in v for v in naming):
+        smap = {**smap, "jpa_custom_naming": True}
+    return smap
+
+
+SOURCE_EXT = (".py", ".java")
+
+
+def is_extractable(path: str) -> bool:
+    """Files whose facts are extracted per file and cached: Python and Java source, SQL and Liquibase migrations."""
+    return path.endswith(SOURCE_EXT) or is_data_file(path)
+
+
+def extract_source(repo: str, service: str, path: str, text: str, strip_prefixes: tuple = ()) -> RepoExtract:
+    """Facts from one source or migration file in any supported language."""
+    if path.endswith(".java"):
+        return extract_java_file(repo, service, path, text, strip_prefixes)
+    if path.endswith(".py"):
+        return extract_file(repo, service, path, text, strip_prefixes)
+    return extract_data_file(repo, service, path, text)
+
+
+def extract_file(repo: str, service: str, path: str, text: str, strip_prefixes: tuple = ()) -> RepoExtract:
+    """Facts from one Python file, as a partial RepoExtract. Depends only on (repo, service, path, text, strip)."""
+    out = RepoExtract(repo=repo, service=service, commit="", extractor_version=EXTRACTOR_VERSION)
+    try:
+        tree = ast.parse(text, filename=path)
+    except SyntaxError as e:
+        out.files_failed.append({"file": path, "error": f"SyntaxError line {e.lineno}"})
+        return out
+    out.files_analysed = 1
+    tool = migration_tool(tree)
+    v = _FileVisitor(repo, service, path, tree, out, strip_prefixes)
+    v.is_migration = tool is not None
+    v.run()
+    if tool:
+        mig = (alembic_migration if tool == "alembic" else django_migration)(repo, service, path, tree)
+        if mig is not None:
+            out.migrations.append(mig)
+    return out
+
+
+def migration_tool(tree: ast.Module) -> Optional[str]:
+    """'alembic' / 'django' when the module imports the migration framework, else None."""
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module:
+            names = [a.name for a in n.names]
+            if n.module.startswith("alembic") and ("op" in names or n.module.startswith("alembic.op")):
+                return "alembic"
+            if n.module == "django.db" and "migrations" in names or n.module.startswith("django.db.migrations"):
+                return "django"
+        elif isinstance(n, ast.Import) and any(a.name.startswith("alembic") for a in n.names):
+            return "alembic"
+    return None
+
+
+def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str, per_file: dict,
+             small_files: dict) -> RepoExtract:
+    """Merge per-file facts into the repository extract. The same function serves full and incremental extraction,
+    so an incremental result equals a full rescan by construction (AC-021).
+
+    per_file:    path -> partial RepoExtract for every .py file (parsed or failed)
+    small_files: path -> text for the files read in full anyway (contracts/*.json)
+    """
+    out = RepoExtract(repo=repo, service=service, commit=commit, extractor_version=EXTRACTOR_VERSION, service_map=smap)
+    for path in sorted(tree_paths):
+        if is_extractable(path):
+            part = per_file[path]
+            out.files_analysed += part.files_analysed
+            out.files_failed += part.files_failed
+            out.endpoints += part.endpoints
+            out.schemas += part.schemas
+            out.callsites += part.callsites
+            out.functions += part.functions
+            out.tests += part.tests
+            out.clients += part.clients
+            out.typed_calls += part.typed_calls
+            out.unsupported_clients += part.unsupported_clients
+            out.entities += part.entities
+            out.migrations += part.migrations
+            out.data_unknowns += part.data_unknowns
+            out.repositories += part.repositories
+            out.data_refs += part.data_refs
         elif path.startswith("contracts/") and path.endswith(".json"):
             try:
-                c = json.loads(files[path])
+                c = json.loads(small_files[path])
                 c["_file"] = path
                 out.contracts.append(c)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 out.files_failed.append({"file": path, "error": "invalid JSON contract"})
-        elif not path.endswith((".md", ".txt", ".yaml", ".yml", ".json", ".toml", ".cfg", ".gitignore")):
+        elif not path.endswith(TEXT_EXT + BINARY_EXT):
             out.non_python_files += 1
+    resolve_data(out, smap)                    # ORM mappings, repositories and migrations need facts from several files
+    resolve_clients(out, smap)                 # Java: Feign / shared-client calls need declarations from other files
+    keep_reachable_schemas(out)
     # keep only declared schemas as endpoint request schemas
     names = {s.name for s in out.schemas}
     for e in out.endpoints:
@@ -374,3 +562,12 @@ def extract_repo(repo: str, commit: str, files: dict[str, str], strip_prefixes: 
     out.functions.sort(key=lambda f: f.id)
     out.tests.sort(key=lambda t: t.id)
     return out
+
+
+def extract_repo(repo: str, commit: str, files: dict[str, str], strip_prefixes: tuple = ()) -> RepoExtract:
+    """Extract all entities for one repository at one revision (full rescan)."""
+    smap = read_service_map(files)
+    service = smap.get("service", repo)
+    per_file = {p: extract_source(repo, service, p, files[p], strip_prefixes) for p in files if is_extractable(p)}
+    return assemble(repo, commit, list(files), smap, service, per_file,
+                    {p: t for p, t in files.items() if p.startswith("contracts/") and p.endswith(".json")})
