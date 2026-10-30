@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TIA — Architecture Diagram</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #58a6ff;
+      --accent2:   #bc8cff;
+      --green:     #3fb950;
+      --orange:    #d29922;
+      --red:       #f85149;
+      --pink:      #f778ba;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ---- header ---- */
+    .header {
+      text-align: center;
+      padding: 3rem 1rem 1.5rem;
+      position: relative;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(88,166,255,.12) 0%, transparent 100%);
+      pointer-events: none;
+    }
+    .header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -.02em;
+    }
+    .header p {
+      color: var(--muted);
+      margin-top: .5rem;
+      font-size: .95rem;
+    }
+    .badge-row {
+      display: flex;
+      gap: .5rem;
+      justify-content: center;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      font-size: .75rem;
+      font-weight: 500;
+      padding: .3rem .7rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+    }
+    .badge .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+    }
+    .dot-blue   { background: var(--accent); }
+    .dot-purple { background: var(--accent2); }
+    .dot-green  { background: var(--green); }
+    .dot-orange { background: var(--orange); }
+    .dot-red    { background: var(--red); }
+    .dot-pink   { background: var(--pink); }
+
+    /* ---- tab bar ---- */
+    .tabs {
+      display: flex;
+      justify-content: center;
+      gap: .5rem;
+      margin: 1.5rem 1rem .5rem;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: inherit;
+      font-size: .82rem;
+      font-weight: 500;
+      padding: .5rem 1.1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .tab-btn:hover { border-color: var(--accent); color: var(--text); }
+    .tab-btn.active {
+      background: linear-gradient(135deg, rgba(88,166,255,.15), rgba(188,140,255,.10));
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ---- diagram container ---- */
+    .diagram-wrap {
+      max-width: 1300px;
+      margin: 1rem auto 3rem;
+      padding: 0 1rem;
+    }
+    .diagram-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem 1.5rem;
+      overflow-x: auto;
+      display: none;                 /* only the active one is visible */
+      animation: fadeUp .35s ease;
+    }
+    .diagram-card.active { display: block; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .diagram-card .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+    .diagram-card .mermaid svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* ---- caption ---- */
+    .caption {
+      text-align: center;
+      font-size: .8rem;
+      color: var(--muted);
+      margin-top: 1rem;
+    }
+
+    /* ---- footer ---- */
+    .footer {
+      text-align: center;
+      padding: 2rem 1rem;
+      font-size: .75rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======== HEADER ======== -->
+<header class="header">
+  <h1>TIA — Technical Impact Analysis</h1>
+  <p>System Architecture — Module Dependencies & Data Flow</p>
+  <div class="badge-row">
+    <span class="badge"><span class="dot dot-blue"></span>API / Entry Points</span>
+    <span class="badge"><span class="dot dot-purple"></span>Core Services</span>
+    <span class="badge"><span class="dot dot-green"></span>Extractors</span>
+    <span class="badge"><span class="dot dot-orange"></span>Storage</span>
+    <span class="badge"><span class="dot dot-red"></span>External Systems</span>
+    <span class="badge"><span class="dot dot-pink"></span>Graph Engine</span>
+  </div>
+</header>
+
+<!-- ======== TABS ======== -->
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="full">Full Architecture</button>
+  <button class="tab-btn" data-tab="data">Data Flow</button>
+  <button class="tab-btn" data-tab="layers">Layered View</button>
+  <button class="tab-btn" data-tab="deploy">Deployment View</button>
+</nav>
+
+<!-- ======== DIAGRAMS ======== -->
+<section class="diagram-wrap">
+
+  <!-- ─── 1. Full Architecture ──────────────────────────────────────── -->
+  <div class="diagram-card active" id="tab-full">
+    <pre class="mermaid">
+flowchart TB
+
+  subgraph ENTRY["🔵 Entry Points"]
+    direction LR
+    SERVER["server.py\n(Uvicorn ASGI)"]
+    CLI["cli.py\n(CLI Tool)"]
+    WORKER_PROC["worker.py\n(Background Worker)"]
+    MIGRATE["migrate.py\n(DB Migrations)"]
+  end
+
+  subgraph API_LAYER["🔵 HTTP API Layer"]
+    direction TB
+    API["api.py\nFastAPI Application\n— REST endpoints\n— Static file serving\n— Request validation"]
+    WEBHOOKS["webhooks.py\n— GitHub webhook receiver\n— Signature verification\n— PR event parsing"]
+    UPLOAD["upload.py\n— ZIP / folder uploads\n— Path validation\n— Session management"]
+  end
+
+  subgraph SERVICES["🟣 Core Services"]
+    direction TB
+    ANALYSIS_SVC["analysis_service.py\n— Resolve refs → commits\n— Execute analyses\n— Orchestrate landscape\n— Handle PR events"]
+    REPO_SVC["repos.py (RepoService)\n— Register / sync / remove\n— Clone & fetch from Git\n— Discover repos (GH/ADO)\n— Upload commit"]
+    IMPACT["impact.py\n— Change-impact engine\n— BFS graph traversal\n— Finding generation\n— Evidence snapshots"]
+    CONTRACTS["contracts.py\n— REST contract diffing\n— Breaking change detection"]
+    SEVERITY_MOD["severity.py\n— Severity rules\n— Materiality check"]
+    REPORT["report.py\n— Report rendering\n— Audience redaction\n— PR comment format"]
+  end
+
+  subgraph GRAPH_ENGINE["🩷 Dependency Graph"]
+    direction TB
+    GRAPH["graph.py (Graph)\n— In-memory typed graph\n— Node & edge management\n— Impact direction index"]
+    GRAPHVIEW["graphview.py\n— Service / endpoint / function views\n— Impact overlay for analyses\n— Search & focus filtering"]
+    GRAPHSTORE["graphstore.py\n— Content-addressed versions\n— Persistence & caching\n— Graph head tracking"]
+    RELATIONSHIPS["relationships.py\n— Cross-repo relationship history\n— Staleness detection\n— Reconciliation"]
+    RESOLVE_MOD["resolve.py\n— Consumer resolution (R1–R5)\n— Service map merging\n— Cross-repo edge creation"]
+  end
+
+  subgraph EXTRACTORS["🟢 Code Extractors"]
+    direction TB
+    EXTRACTION["extraction.py\n— Incremental per-file extraction\n— Blob-level caching"]
+    EXTRACT_PY["extract_python.py\n— AST-based Python parser\n— Endpoints, schemas, calls\n— Functions, tests, ORM refs"]
+    EXTRACT_JAVA["extract_java.py\n— Tree-sitter Java parser\n— Spring Boot / Web support\n— Feign, RestTemplate, WebClient"]
+    EXTRACT_DATA["extract_data.py\n— Migration parsers\n  (Flyway, Liquibase, Alembic, Django)\n— ORM resolution"]
+    EXTRACT_ORM["extract_orm.py\n— SQLAlchemy / Django models\n— Entity → table mapping\n— Data access patterns"]
+  end
+
+  subgraph STORAGE["🟠 Storage Layer"]
+    direction TB
+    DB["db.py (Database)\n— PostgreSQL pool\n— Tenant-bound transactions\n— Row-level security"]
+    STORE["store.py (Store)\n— Evidence cache\n— Analysis results\n— Repo registry\n— Audit chain (HMAC)"]
+    JOBS["jobs.py (JobQueue)\n— PostgreSQL job queue\n— Idempotent enqueue\n— Group superseding\n— Fair scheduling"]
+  end
+
+  subgraph DATA_MODEL["📐 Data Model"]
+    MODELS["models.py\n— Endpoint, Schema, CallSite\n— Function, TestCase, Entity\n— DataAccess, Migration, Edge\n— RepoExtract (assembly)"]
+  end
+
+  subgraph INFRA["🔧 Infrastructure"]
+    GITUTIL["gitutil.py\n— Read-only git commands\n— list_tree, read_blobs\n— changed_files, diff"]
+    GITHUB_MOD["github.py\n— PR comment upsert\n— GitHub REST API calls"]
+  end
+
+  subgraph EXTERNAL["🔴 External Systems"]
+    direction LR
+    PG[("PostgreSQL\n(RLS-enforced)")]
+    GIT[("Git Repositories\n(GitHub / ADO / any)")]
+    GH_API["GitHub API\n(Webhooks, PRs)"]
+    WEB_UI["Web UI\n(index.html)"]
+  end
+
+  %% ─── Entry → API ────
+  SERVER --> API
+  SERVER --> WEBHOOKS
+  SERVER --> UPLOAD
+  CLI --> IMPACT
+  WORKER_PROC --> JOBS
+  MIGRATE --> DB
+
+  %% ─── API → Services ────
+  API --> REPO_SVC
+  API --> ANALYSIS_SVC
+  API --> GRAPHVIEW
+  API --> GRAPHSTORE
+  API --> REPORT
+  WEBHOOKS --> ANALYSIS_SVC
+  UPLOAD --> REPO_SVC
+
+  %% ─── Services → Graph ────
+  ANALYSIS_SVC --> IMPACT
+  ANALYSIS_SVC --> EXTRACTION
+  ANALYSIS_SVC --> GRAPHSTORE
+  ANALYSIS_SVC --> RELATIONSHIPS
+  ANALYSIS_SVC --> REPORT
+  IMPACT --> GRAPH
+  IMPACT --> CONTRACTS
+  IMPACT --> SEVERITY_MOD
+  IMPACT --> EXTRACTION
+  IMPACT --> GRAPHSTORE
+  IMPACT --> RESOLVE_MOD
+  GRAPH --> RESOLVE_MOD
+  GRAPHVIEW --> GRAPH
+  GRAPHSTORE --> GRAPH
+
+  %% ─── Extraction chain ────
+  EXTRACTION --> EXTRACT_PY
+  EXTRACT_PY --> EXTRACT_JAVA
+  EXTRACT_PY --> EXTRACT_DATA
+  EXTRACT_PY --> EXTRACT_ORM
+  EXTRACTION --> GITUTIL
+  EXTRACTION --> MODELS
+
+  %% ─── Storage wiring ────
+  STORE --> DB
+  JOBS --> DB
+  ANALYSIS_SVC --> STORE
+  ANALYSIS_SVC --> JOBS
+  REPO_SVC --> STORE
+  IMPACT --> STORE
+  GRAPHSTORE --> STORE
+  EXTRACTION --> STORE
+  RELATIONSHIPS --> STORE
+
+  %% ─── External ────
+  DB --> PG
+  REPO_SVC --> GIT
+  GITUTIL --> GIT
+  WEBHOOKS --> GH_API
+  GITHUB_MOD --> GH_API
+  API --> WEB_UI
+
+  %% ─── Models used everywhere ────
+  MODELS -.->|used by all| EXTRACTION
+  MODELS -.->|used by all| GRAPH
+  MODELS -.->|used by all| IMPACT
+    </pre>
+    <p class="caption">Complete module-level architecture showing all dependencies between entry points, services, graph engine, extractors, storage, and external systems.</p>
+  </div>
+
+  <!-- ─── 2. Data Flow ──────────────────────────────────────────────── -->
+  <div class="diagram-card" id="tab-data">
+    <pre class="mermaid">
+flowchart LR
+
+  subgraph INPUT["📥 Ingestion"]
+    GIT_REPO["Git Repository\n(clone / fetch)"]
+    ZIP_UP["ZIP / Folder Upload"]
+    WEBHOOK["GitHub\nWebhook Event"]
+  end
+
+  subgraph EXTRACT["🔬 Extraction"]
+    INCREMENTAL["Incremental Extraction\n(blob-level cache)"]
+    PY_PARSE["Python AST\nParser"]
+    JAVA_PARSE["Java Tree-Sitter\nParser"]
+    DATA_PARSE["Migration / ORM\nParsers"]
+  end
+
+  subgraph ARTIFACTS["📦 Extracted Artifacts"]
+    ENDPOINTS["Endpoints"]
+    SCHEMAS["Schemas"]
+    CALLSITES["Call Sites"]
+    FUNCTIONS["Functions"]
+    TESTS["Tests"]
+    ENTITIES["ORM Entities"]
+    MIGRATIONS["Migrations"]
+  end
+
+  subgraph ASSEMBLY["🔧 Assembly & Resolution"]
+    REPO_EXTRACT["RepoExtract\n(per-repository)"]
+    CONSUMER_RES["Consumer Resolution\n(R1-R5 strategies)"]
+    DATA_RES["Data Access\nResolution"]
+  end
+
+  subgraph GRAPH_BUILD["🩷 Graph"]
+    DEP_GRAPH["Dependency Graph\n(nodes + edges)"]
+    GRAPH_VER["Versioned Graph\n(content-addressed)"]
+    REL_HIST["Relationship\nHistory"]
+  end
+
+  subgraph ANALYSIS["📊 Impact Analysis"]
+    DIFF["Git Diff\n(base..head)"]
+    SEED["Seed Identification\n(changed endpoints,\nschemas, functions)"]
+    BFS["BFS Traversal\n(max depth=8)"]
+    FINDINGS["Findings\n+ Severity"]
+    EVIDENCE["Evidence\nSnapshot"]
+  end
+
+  subgraph OUTPUT["📤 Output"]
+    REPORT_JSON["Analysis Report\n(JSON)"]
+    PR_COMMENT["PR Comment\n(Markdown)"]
+    GRAPH_VIEW["Graph Visualisation\n(3 levels)"]
+    AUDIT_LOG["Audit Log\n(hash-chained)"]
+  end
+
+  GIT_REPO --> INCREMENTAL
+  ZIP_UP --> INCREMENTAL
+  WEBHOOK -->|"trigger"| INCREMENTAL
+
+  INCREMENTAL --> PY_PARSE
+  INCREMENTAL --> JAVA_PARSE
+  INCREMENTAL --> DATA_PARSE
+
+  PY_PARSE --> ENDPOINTS
+  PY_PARSE --> SCHEMAS
+  PY_PARSE --> CALLSITES
+  PY_PARSE --> FUNCTIONS
+  PY_PARSE --> TESTS
+
+  JAVA_PARSE --> ENDPOINTS
+  JAVA_PARSE --> SCHEMAS
+  JAVA_PARSE --> CALLSITES
+  JAVA_PARSE --> FUNCTIONS
+  JAVA_PARSE --> TESTS
+
+  DATA_PARSE --> ENTITIES
+  DATA_PARSE --> MIGRATIONS
+
+  ENDPOINTS --> REPO_EXTRACT
+  SCHEMAS --> REPO_EXTRACT
+  CALLSITES --> REPO_EXTRACT
+  FUNCTIONS --> REPO_EXTRACT
+  TESTS --> REPO_EXTRACT
+  ENTITIES --> REPO_EXTRACT
+  MIGRATIONS --> REPO_EXTRACT
+
+  REPO_EXTRACT --> CONSUMER_RES
+  REPO_EXTRACT --> DATA_RES
+
+  CONSUMER_RES --> DEP_GRAPH
+  DATA_RES --> DEP_GRAPH
+  DEP_GRAPH --> GRAPH_VER
+  GRAPH_VER --> REL_HIST
+
+  DIFF --> SEED
+  DEP_GRAPH --> BFS
+  SEED --> BFS
+  BFS --> FINDINGS
+  FINDINGS --> EVIDENCE
+
+  FINDINGS --> REPORT_JSON
+  FINDINGS --> PR_COMMENT
+  GRAPH_VER --> GRAPH_VIEW
+  EVIDENCE --> AUDIT_LOG
+    </pre>
+    <p class="caption">Data flow from ingestion (git clone, uploads, webhooks) through extraction, graph building, impact analysis, to output (reports, PR comments, graphs).</p>
+  </div>
+
+  <!-- ─── 3. Layered View ───────────────────────────────────────────── -->
+  <div class="diagram-card" id="tab-layers">
+    <pre class="mermaid">
+flowchart TB
+
+  subgraph L1["🖥️ PRESENTATION LAYER"]
+    WEB["Web UI\n(index.html)"]
+    REST["REST API\n(FastAPI)"]
+    CLI_B["CLI Tool\n(argparse)"]
+    GHPR["GitHub\nPR Comments"]
+    WBHK["Webhook\nReceiver"]
+  end
+
+  subgraph L2["⚙️ APPLICATION SERVICES LAYER"]
+    ASVC["Analysis Service\n(analysis_service.py)"]
+    RSVC["Repository Service\n(repos.py)"]
+    JSVC["Job Queue & Worker\n(jobs.py, worker.py)"]
+    ISVC["Impact Engine\n(impact.py)"]
+    VSVC["Graph View\n(graphview.py)"]
+  end
+
+  subgraph L3["🧩 DOMAIN LOGIC LAYER"]
+    GRPH["Dependency Graph\n(graph.py)"]
+    RSLV["Consumer Resolution\n(resolve.py)"]
+    CONT["Contract Diff\n(contracts.py)"]
+    SEVR["Severity Rules\n(severity.py)"]
+    RELS["Relationship History\n(relationships.py)"]
+  end
+
+  subgraph L4["🔬 CODE EXTRACTION LAYER"]
+    INCR["Incremental Extractor\n(extraction.py)"]
+    PYE["Python Adapter\n(extract_python.py)"]
+    JVE["Java Adapter\n(extract_java.py)"]
+    DTE["Data & ORM Adapter\n(extract_data.py, extract_orm.py)"]
+    MDL["Domain Models\n(models.py)"]
+  end
+
+  subgraph L5["🗄️ INFRASTRUCTURE LAYER"]
+    DBS[("Database Engine\n(db.py / PostgreSQL)")]
+    STO["Tenant Store\n(store.py)"]
+    GU["Git Utilities\n(gitutil.py)"]
+    GHU["GitHub Client\n(github.py)"]
+    AUD["Audit Chain\n(HMAC log)"]
+  end
+
+  REST --> ASVC
+  REST --> RSVC
+  CLI_B --> ISVC
+  WBHK --> ASVC
+  GHPR --> GHU
+
+  ASVC --> ISVC
+  ASVC --> JSVC
+  RSVC --> STO
+  JSVC --> DBS
+  ISVC --> GRPH
+  VSVC --> GRPH
+
+  GRPH --> RSLV
+  ISVC --> CONT
+  ISVC --> SEVR
+  GRPH --> RELS
+
+  INCR --> PYE
+  INCR --> JVE
+  INCR --> DTE
+  PYE --> MDL
+  JVE --> MDL
+  DTE --> MDL
+
+  STO --> DBS
+  INCR --> GU
+  AUD --> STO
+    </pre>
+    <p class="caption">Five-layer architecture: Presentation → Application Services → Domain Logic → Extraction → Infrastructure.</p>
+  </div>
+
+  <!-- ─── 4. Deployment View ────────────────────────────────────────── -->
+  <div class="diagram-card" id="tab-deploy">
+    <pre class="mermaid">
+flowchart TB
+
+  subgraph CLIENT["👤 Clients"]
+    BROWSER["Browser\n(Web UI)"]
+    CI_CD["CI/CD Pipeline\n(CLI / API)"]
+    GH_WH["GitHub\nWebhook"]
+  end
+
+  subgraph SERVER_PROC["🖥️ API Server Process"]
+    UVICORN["Uvicorn ASGI Server"]
+    FASTAPI["FastAPI Application"]
+    STATIC["Static File Server\n(/web/index.html, /vendor)"]
+  end
+
+  subgraph WORKER_PROC_D["⚡ Worker Process"]
+    WLOOP["Worker Event Loop"]
+    HANDLERS["Job Handlers\n— impact_analysis\n— github_pull_request"]
+    HEARTBEAT["Lease / Heartbeat"]
+  end
+
+  subgraph DB_CLUSTER["🗄️ PostgreSQL Database"]
+    direction TB
+    PG_SERVER["PostgreSQL Service\n(Port 5432)"]
+    TENANTS[("tenants")]
+    REPOS[("repositories")]
+    EXTRACTIONS_TBL[("extractions\n+ file_extracts")]
+    ANALYSES[("analyses")]
+    GRAPHS_TBL[("graph_versions\n+ graph_heads")]
+    REL_TBL[("relationships")]
+    SNAPSHOTS[("evidence_snapshots")]
+    JOBS_TBL[("jobs")]
+    AUDIT[("audit_log")]
+    SCHEMA_MIG[("schema_migrations")]
+    RLS["Row-Level Security\n(tia.tenant_id)"]
+    PG_SERVER --> TENANTS & REPOS & EXTRACTIONS_TBL & ANALYSES & GRAPHS_TBL & REL_TBL & SNAPSHOTS & JOBS_TBL & AUDIT
+  end
+
+  subgraph DISK["📁 Local Filesystem"]
+    REPO_CLONES["Repo Clones\n(.tia-data/repos/)"]
+    UPLOAD_STAGE["Upload Staging\n(.tia-data/repos/.uploads/)"]
+  end
+
+  subgraph EXTERNAL_SYS["🌐 External"]
+    GH_API_D["GitHub API\n(api.github.com)"]
+    GIT_REMOTE["Git Remotes\n(GitHub / ADO / any)"]
+  end
+
+  BROWSER --> UVICORN
+  CI_CD --> UVICORN
+  GH_WH --> UVICORN
+
+  UVICORN --> FASTAPI
+  UVICORN --> STATIC
+
+  FASTAPI -->|"enqueue jobs"| JOBS_TBL
+  FASTAPI -->|"read/write"| PG_SERVER
+  FASTAPI -->|"clone/fetch"| GIT_REMOTE
+  FASTAPI -->|"clone/fetch"| REPO_CLONES
+  FASTAPI -->|"uploads"| UPLOAD_STAGE
+
+  WLOOP -->|"claim jobs"| JOBS_TBL
+  WLOOP --> HANDLERS
+  HANDLERS -->|"read/write"| PG_SERVER
+  HANDLERS -->|"read repos"| REPO_CLONES
+  HANDLERS -->|"post comments"| GH_API_D
+  HEARTBEAT -->|"renew leases"| JOBS_TBL
+
+  RLS -.->|"enforces"| TENANTS
+    </pre>
+    <p class="caption">Deployment topology: two process types (API server + worker), PostgreSQL with RLS, local filesystem for clones/uploads, external git & GitHub API.</p>
+  </div>
+
+</section>
+
+<!-- ======== FOOTER ======== -->
+<footer class="footer">
+  TIA Architecture Diagram — Auto-generated from source analysis &nbsp;·&nbsp; 30 modules &nbsp;·&nbsp; ~350 kB Python
+</footer>
+
+<!-- ======== SCRIPTS ======== -->
+<script>
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor:     '#1f2937',
+      primaryBorderColor: '#58a6ff',
+      primaryTextColor: '#e6edf3',
+      lineColor:        '#58a6ff',
+      secondaryColor:   '#21262d',
+      tertiaryColor:    '#161b22',
+      fontSize:         '13px',
+      fontFamily:       'Inter, sans-serif'
+    },
+    flowchart: { htmlLabels: true, curve: 'basis', padding: 16 },
+    securityLevel: 'loose'
+  });
+
+  const renderedTabs = new Set();
+
+  async function activateTab(tabId) {
+    // 1. Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === tabId);
+    });
+
+    // 2. Update cards
+    document.querySelectorAll('.diagram-card').forEach(c => {
+      c.classList.toggle('active', c.id === 'tab-' + tabId);
+    });
+
+    // 3. Render diagram if not yet rendered
+    const card = document.getElementById('tab-' + tabId);
+    if (card && !renderedTabs.has(tabId)) {
+      renderedTabs.add(tabId);
+      requestAnimationFrame(async () => {
+        try {
+          const elements = card.querySelectorAll('.mermaid:not([data-processed])');
+          if (elements.length > 0) {
+            await mermaid.run({ nodes: Array.from(elements) });
+          }
+        } catch (err) {
+          console.error("Mermaid error in tab " + tabId, err);
+        }
+      });
+    }
+  }
+
+  // Hook button clicks
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activateTab(btn.dataset.tab);
+    });
+  });
+
+  // Initial render of first active tab
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', () => activateTab('full'));
+  } else {
+    activateTab('full');
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TIA — Codebase Mind Map</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #58a6ff;
+      --accent2:   #bc8cff;
+      --green:     #3fb950;
+      --orange:    #d29922;
+      --red:       #f85149;
+      --pink:      #f778ba;
+      --teal:      #39d2c0;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ---- header ---- */
+    .header {
+      text-align: center;
+      padding: 3rem 1rem 1rem;
+      position: relative;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(188,140,255,.12) 0%, transparent 100%);
+      pointer-events: none;
+    }
+    .header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent2), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -.02em;
+    }
+    .header p {
+      color: var(--muted);
+      margin-top: .5rem;
+      font-size: .95rem;
+    }
+
+    /* ---- instructions ---- */
+    .instructions {
+      max-width: 860px;
+      margin: 1.5rem auto;
+      padding: 0 1rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: .75rem;
+    }
+    .instr-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      text-align: center;
+    }
+    .instr-card .emoji { font-size: 1.5rem; margin-bottom: .35rem; }
+    .instr-card h3 { font-size: .85rem; font-weight: 600; margin-bottom: .25rem; }
+    .instr-card p  { font-size: .72rem; color: var(--muted); line-height: 1.45; }
+
+    /* ---- tab bar ---- */
+    .tabs {
+      display: flex;
+      justify-content: center;
+      gap: .5rem;
+      margin: 1.5rem 1rem .5rem;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: inherit;
+      font-size: .82rem;
+      font-weight: 500;
+      padding: .5rem 1.1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .tab-btn:hover { border-color: var(--accent2); color: var(--text); }
+    .tab-btn.active {
+      background: linear-gradient(135deg, rgba(188,140,255,.15), rgba(247,120,186,.10));
+      border-color: var(--accent2);
+      color: var(--accent2);
+    }
+
+    /* ---- diagram container ---- */
+    .diagram-wrap {
+      max-width: 1400px;
+      margin: 1rem auto 3rem;
+      padding: 0 1rem;
+    }
+    .diagram-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem 1.5rem;
+      overflow-x: auto;
+      display: none;
+      animation: fadeUp .35s ease;
+    }
+    .diagram-card.active { display: block; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .diagram-card .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+    .diagram-card .mermaid svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* ---- module cards ---- */
+    .module-grid {
+      max-width: 1200px;
+      margin: 2rem auto 3rem;
+      padding: 0 1rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 1rem;
+    }
+    .mod-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.25rem;
+      transition: border-color .2s, transform .2s;
+    }
+    .mod-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .mod-card h3 {
+      font-size: .92rem;
+      font-weight: 600;
+      margin-bottom: .4rem;
+      display: flex;
+      align-items: center;
+      gap: .4rem;
+    }
+    .mod-card h3 .tag {
+      font-size: .65rem;
+      font-weight: 500;
+      padding: .15rem .45rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .tag-entry   { background: rgba(88,166,255,.15);  color: var(--accent); }
+    .tag-service { background: rgba(188,140,255,.15); color: var(--accent2); }
+    .tag-extract { background: rgba(63,185,80,.15);   color: var(--green); }
+    .tag-storage { background: rgba(210,153,34,.15);  color: var(--orange); }
+    .tag-graph   { background: rgba(247,120,186,.15); color: var(--pink); }
+    .tag-infra   { background: rgba(57,210,192,.15);  color: var(--teal); }
+    .mod-card .purpose {
+      font-size: .78rem;
+      color: var(--muted);
+      margin-bottom: .6rem;
+      line-height: 1.5;
+    }
+    .mod-card ul {
+      list-style: none;
+      padding: 0;
+    }
+    .mod-card ul li {
+      font-size: .76rem;
+      color: var(--text);
+      padding: .2rem 0;
+      padding-left: 1rem;
+      position: relative;
+      line-height: 1.45;
+    }
+    .mod-card ul li::before {
+      content: '→';
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+    }
+
+    .section-title {
+      max-width: 1200px;
+      margin: 2.5rem auto .5rem;
+      padding: 0 1rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .section-subtitle {
+      max-width: 1200px;
+      margin: 0 auto .75rem;
+      padding: 0 1rem;
+      font-size: .82rem;
+      color: var(--muted);
+    }
+
+    /* ---- footer ---- */
+    .footer {
+      text-align: center;
+      padding: 2rem 1rem;
+      font-size: .75rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+
+    .caption {
+      text-align: center;
+      font-size: .8rem;
+      color: var(--muted);
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======== HEADER ======== -->
+<header class="header">
+  <h1>🧠 TIA — Codebase Mind Map</h1>
+  <p>Interactive guide to learn what every module does and how they connect</p>
+</header>
+
+<!-- ======== LEARNING INSTRUCTIONS ======== -->
+<div class="instructions">
+  <div class="instr-card">
+    <div class="emoji">1️⃣</div>
+    <h3>Start with Entry Points</h3>
+    <p>Read <code>server.py</code>, <code>cli.py</code>, <code>worker.py</code> — they show how the system boots.</p>
+  </div>
+  <div class="instr-card">
+    <div class="emoji">2️⃣</div>
+    <h3>Follow the Data</h3>
+    <p>Trace a request: API → analysis_service → extraction → graph → impact → report.</p>
+  </div>
+  <div class="instr-card">
+    <div class="emoji">3️⃣</div>
+    <h3>Understand the Graph</h3>
+    <p>The dependency graph is the core: nodes = code entities, edges = relationships.</p>
+  </div>
+  <div class="instr-card">
+    <div class="emoji">4️⃣</div>
+    <h3>Explore Extractors</h3>
+    <p>Each language has its own parser (Python AST, Java tree-sitter). They emit the same model types.</p>
+  </div>
+</div>
+
+<!-- ======== TABS ======== -->
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="overview">Overview Mind Map</button>
+  <button class="tab-btn" data-tab="concepts">Key Concepts</button>
+  <button class="tab-btn" data-tab="request">Request Flow</button>
+  <button class="tab-btn" data-tab="models">Data Model</button>
+</nav>
+
+<!-- ======== DIAGRAMS ======== -->
+<section class="diagram-wrap">
+
+  <!-- ─── 1. Overview Mind Map ──────────────────────────────────────── -->
+  <div class="diagram-card active" id="tab-overview">
+    <pre class="mermaid">
+mindmap
+  root((TIA\nTechnical Impact\nAnalysis))
+    **Entry Points**
+      server.py
+        Uvicorn ASGI server
+        Binds host:port
+        Loads env config
+      cli.py
+        argparse CLI
+        tia analyze command
+        Output: JSON / comment
+        GitHub PR posting
+      worker.py
+        Background job loop
+        Polls PostgreSQL queue
+        Handles impact_analysis
+        Handles github_pull_request
+      migrate.py
+        DB schema migrations
+        Role creation
+        Tenant management
+    **HTTP API — api.py**
+      Repository Management
+        POST /repositories
+        GET /repositories
+        POST /discover
+        POST /sync
+        DELETE /repositories
+      Upload Flow
+        POST /uploads
+        POST /uploads/files
+        PUT /uploads/archive
+        POST /uploads/commit
+      Impact Analyses
+        POST /impact-analyses
+        GET /impact-analyses/id
+        GET /evidence
+        POST /reproduce
+      Code Graph
+        GET /graph
+        GET /graph/versions
+        GET /graph/relationships
+        GET /graph/stats
+        POST /graph/rescan
+      SCM Webhooks
+        POST /webhooks/github
+      Jobs & Audit
+        GET /jobs/id
+        GET /audit
+        GET /audit/verify
+    **Core Services**
+      analysis_service.py
+        resolve: refs to commits
+        execute: run analysis
+        landscape management
+        PR event handling
+        make_handlers for worker
+      repos.py — RepoService
+        register from URL/path
+        clone and fetch
+        sync to latest
+        discover from GitHub/ADO
+        commit_upload
+        SSRF protection
+      impact.py — Engine
+        AnalysisRequest dataclass
+        Seed identification
+        BFS graph traversal
+        Finding generation
+        Evidence snapshots
+        Time-budgeted
+      contracts.py
+        Endpoint diff
+        Schema field diff
+        Breaking change detection
+      severity.py
+        SEV-BREAKING-CRITICAL
+        SEV-BREAKING-CONFIRMED
+        SEV-NONBREAKING rules
+        Inferred/stale cap
+      report.py
+        JSON report
+        Markdown PR comment
+        Audience redaction
+        Evidence view
+    **Dependency Graph**
+      graph.py — Graph class
+        Typed nodes
+        Typed edges
+        Impact direction index
+        Serialization
+      graphview.py — Views
+        Service level
+        Endpoint level
+        Function level
+        Impact overlay
+        Search and focus
+      graphstore.py
+        Content-addressed versions
+        graph_id from SHA-256
+        Persistence via Store
+        Head tracking
+      resolve.py — Strategies
+        R1: Generated/shared client
+        R2: Fully resolved HTTP call
+        R3: Declared contract
+        R4: Service map
+        R5: Unique path match
+      relationships.py
+        Cross-repo tracking
+        Staleness detection
+        Reconciliation
+        Unverifiable vs removed
+    **Code Extractors**
+      extraction.py — Orchestrator
+        Incremental per-file
+        Blob-level caching
+        Cache key: blob SHA
+      extract_python.py
+        AST parsing
+        FastAPI/Flask endpoints
+        Pydantic schemas
+        requests/httpx calls
+        pytest/unittest tests
+        Service map YAML
+      extract_java.py
+        tree-sitter parsing
+        Spring Boot controllers
+        OpenFeign clients
+        RestTemplate/WebClient
+        JPA entities
+        JUnit tests
+      extract_data.py
+        Flyway SQL migrations
+        Liquibase XML/YAML
+        Alembic migrations
+        Django migrations
+        ORM resolution
+      extract_orm.py
+        SQLAlchemy models
+        Django models
+        Entity-table mapping
+        Data access patterns
+    **Storage Layer**
+      db.py — Database
+        psycopg connection pool
+        Tenant-bound transactions
+        Row-level security
+        tia_app / tia_worker roles
+      store.py — Store
+        Evidence cache
+        File extract cache
+        Graph versions
+        Repo registry
+        Analysis results
+        Audit chain — HMAC
+      jobs.py — JobQueue
+        PostgreSQL-based queue
+        Idempotent enqueue
+        Group superseding
+        Fair scheduling
+        Lease-based reliability
+    **Infrastructure**
+      gitutil.py
+        Read-only git commands
+        list_tree / read_blobs
+        changed_files / diff
+        resolve_rev
+      github.py
+        PR comment upsert
+        GitHub REST API
+        Marker-based update
+      webhooks.py
+        HMAC signature verify
+        PR event parsing
+        Repository matching
+        ScmConfig
+      upload.py
+        ZIP extraction
+        Path validation
+        Session management
+        Size/count limits
+    **Data Model — models.py**
+      Endpoint
+      Schema
+      CallSite
+      Function
+      TestCase
+      Entity
+      DataAccess
+      Migration
+      Edge
+      RepoExtract
+    </pre>
+    <p class="caption">Complete mind map of the TIA codebase — every module, its purpose, and key functions/concepts.</p>
+  </div>
+
+  <!-- ─── 2. Key Concepts ───────────────────────────────────────────── -->
+  <div class="diagram-card" id="tab-concepts">
+    <pre class="mermaid">
+mindmap
+  root((Key Concepts\nto Learn))
+    **Multi-Tenancy**
+      Every table has tenant_id
+      Row-Level Security enforced
+      tia_app role has no BYPASSRLS
+      set_config per transaction
+      Tenant registry via TenantAdmin
+    **Evidence Statuses**
+      source_confirmed
+        Direct code evidence
+      contract_confirmed
+        Pact-like contract
+      runtime_observed
+        Future: runtime traces
+      corroborated
+        Multiple signals agree
+      inferred
+        Pattern-based guess
+      stale
+        Evidence is outdated
+    **Resolution Strategies**
+      R1: Generated/shared client
+        Package matches service map
+      R2: Fully resolved HTTP call
+        Host + path both known
+      R3: Declared contract
+        Pact JSON files
+      R4: Service map
+        tia-services.yaml
+      R5: Unique path match
+        Only one endpoint with that path
+    **Severity Rules**
+      Critical: breaking + critical service
+      High: breaking + confirmed
+      Medium: non-breaking + confirmed
+      Low: same-repo change
+      Cap at Medium for inferred/stale
+    **Incremental Extraction**
+      Git blob SHA as cache key
+      Per-file facts cached
+      Assembly combines all files
+      Incremental equals full rescan
+      Force flag for full rescan
+    **Graph Versioning**
+      Content-addressed: SHA-256
+      Same inputs = same version ID
+      Immutable once persisted
+      Head pointer for landscape
+      Old versions stay readable
+    **Audit Chain**
+      Append-only log
+      Hash-chained per tenant
+      Optional HMAC key
+      seq + prev_hash linkage
+      Verifiable integrity
+    **Job Queue Properties**
+      Idempotent: same key = same job
+      Group superseding: newest wins
+      Fair: round-robin across tenants
+      Reliable: lease-based at-least-once
+      Exponential backoff retry
+    </pre>
+    <p class="caption">Core architectural concepts you need to understand — multi-tenancy, evidence model, resolution, severity, and more.</p>
+  </div>
+
+  <!-- ─── 3. Request Flow ───────────────────────────────────────────── -->
+  <div class="diagram-card" id="tab-request">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant User
+    participant API as api.py<br/>(FastAPI)
+    participant Svc as analysis_service.py
+    participant Repo as repos.py<br/>(RepoService)
+    participant Ext as extraction.py
+    participant Git as gitutil.py
+    participant Graph as graph.py
+    participant GS as graphstore.py
+    participant Impact as impact.py
+    participant Store as store.py
+    participant DB as PostgreSQL
+
+    Note over User,DB: === POST /api/v1/impact-analyses ===
+
+    User->>API: POST /impact-analyses {target, head, base}
+    API->>Svc: resolve(svc, params)
+    Svc->>Repo: get(target), resolve(head), merge_base()
+    Repo->>Git: rev-parse, merge-base
+    Git-->>Repo: commit SHAs
+    Repo-->>Svc: concrete request
+
+    API->>Svc: execute(svc, store, concrete)
+    Svc->>Impact: analyze(request, store)
+
+    Note over Impact,Git: Extract all repos in scope
+
+    loop For each repo in scope
+        Impact->>Ext: extract_commit(repo, path, rev)
+        Ext->>Git: list_tree, read_blobs
+        Git-->>Ext: file tree + content
+        Ext->>Store: get_file_extracts (cache check)
+        Store->>DB: SELECT from file_extracts
+        DB-->>Store: cached facts
+        Note over Ext: Parse only changed files
+        Ext-->>Impact: RepoExtract
+    end
+
+    Note over Impact,Graph: Build dependency graph
+
+    Impact->>GS: get_or_build(store, extracts)
+    GS->>Store: get_graph (cache check)
+    Store->>DB: SELECT from graph_versions
+    alt Cache miss
+        GS->>Graph: build_graph(extracts)
+        Graph-->>GS: Graph with nodes + edges
+        GS->>Store: put_graph(id, data)
+        Store->>DB: INSERT into graph_versions
+    end
+    GS-->>Impact: Graph
+
+    Note over Impact: Identify seeds from git diff
+    Impact->>Git: changed_files(base, head)
+    Git-->>Impact: changed file list
+
+    Note over Impact: BFS traversal + finding generation
+
+    Impact->>Store: put_snapshot(evidence)
+    Store->>DB: INSERT into evidence_snapshots
+
+    Impact->>Store: put_analysis(report)
+    Store->>DB: INSERT into analyses
+
+    Impact->>Store: audit("analysis_completed")
+    Store->>DB: INSERT into audit_log
+
+    Impact-->>Svc: report dict
+    Svc-->>API: report
+    API-->>User: {analysis_id, status, report}
+    </pre>
+    <p class="caption">Full request lifecycle: an impact analysis request from HTTP to database, showing every module involved.</p>
+  </div>
+
+  <!-- ─── 4. Data Model ─────────────────────────────────────────────── -->
+  <div class="diagram-card" id="tab-models">
+    <pre class="mermaid">
+classDiagram
+    class RepoExtract {
+        +str repo
+        +str service
+        +str commit
+        +str extractor_version
+        +int files_analysed
+        +list endpoints
+        +list schemas
+        +list callsites
+        +list functions
+        +list tests
+        +list entities
+        +list data_access
+        +list migrations
+        +dict service_map
+        +to_dict()
+        +from_dict()
+    }
+
+    class Endpoint {
+        +str id
+        +str service
+        +str repo
+        +str method
+        +str path
+        +str norm_path
+        +str handler
+        +str handler_id
+        +str file
+        +int line
+    }
+
+    class Schema {
+        +str id
+        +str service
+        +str repo
+        +str name
+        +dict fields
+        +str file
+        +int line
+    }
+
+    class CallSite {
+        +str id
+        +str repo
+        +str service
+        +str file
+        +int line
+        +str function_id
+        +str method
+        +str norm_path
+        +str base_kind
+        +str base_value
+    }
+
+    class Function {
+        +str id
+        +str repo
+        +str file
+        +str qualname
+        +int line
+        +str hash
+        +list calls
+    }
+
+    class TestCase {
+        +str id
+        +str repo
+        +str file
+        +str name
+        +int line
+        +list imports
+        +list called
+        +list http_calls
+    }
+
+    class Entity {
+        +str id
+        +str service
+        +str repo
+        +str name
+        +str table
+        +str table_source
+        +dict columns
+        +str kind
+    }
+
+    class Edge {
+        +str src
+        +str rel
+        +str dst
+        +str status
+        +str strategy
+        +str rule
+        +dict evidence
+    }
+
+    class Graph {
+        +dict nodes
+        +list~Edge~ edges
+        +dict _impact
+        +list unresolved
+        +add_node()
+        +add_edge()
+        +impacted_by()
+        +to_dict()
+        +from_dict()
+    }
+
+    class Store {
+        +Database db
+        +str tenant_id
+        +get_extract()
+        +put_extract()
+        +get_graph()
+        +put_graph()
+        +put_analysis()
+        +audit()
+        +verify_audit()
+    }
+
+    class Repo {
+        +str name
+        +str url
+        +str provider
+        +str kind
+        +str path
+        +str default_branch
+        +str scan_status
+    }
+
+    RepoExtract *-- Endpoint
+    RepoExtract *-- Schema
+    RepoExtract *-- CallSite
+    RepoExtract *-- Function
+    RepoExtract *-- TestCase
+    RepoExtract *-- Entity
+
+    Graph *-- Edge
+    Store --> RepoExtract : caches
+    Store --> Graph : persists
+    Store --> Repo : registers
+    </pre>
+    <p class="caption">Core data model: RepoExtract is the assembly of all extracted artifacts; Graph is the dependency graph; Store persists everything.</p>
+  </div>
+
+</section>
+
+<!-- ======== MODULE REFERENCE CARDS ======== -->
+<h2 class="section-title">📖 Module Quick Reference</h2>
+<p class="section-subtitle">Hover on any card for a highlight. Each card explains what a module does and its key responsibilities.</p>
+
+<div class="module-grid">
+
+  <div class="mod-card">
+    <h3>server.py <span class="tag tag-entry">ENTRY</span></h3>
+    <div class="purpose">Boots the ASGI server. Reads environment variables, creates the Database, Store, and RepoService, then hands them to the FastAPI app.</div>
+    <ul>
+      <li>Uvicorn binds to <code>TIA_HOST:TIA_PORT</code></li>
+      <li>Reads 13+ environment variables</li>
+      <li>Single-tenant until SSO (PL-001)</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>api.py <span class="tag tag-entry">ENTRY</span></h3>
+    <div class="purpose">FastAPI application with all REST endpoints. The entire API surface is defined here: repositories, uploads, analyses, graph, webhooks, audit, and jobs.</div>
+    <ul>
+      <li><code>create_app()</code> is the main factory function</li>
+      <li>Endpoints return dicts (auto-serialized as JSON)</li>
+      <li><code>X-TIA-Readable-Repos</code> header for audience filtering</li>
+      <li>Async upload handlers for streaming</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>cli.py <span class="tag tag-entry">ENTRY</span></h3>
+    <div class="purpose">Command-line interface for running analyses without a server. Supports JSON and Markdown output, and can post PR comments directly.</div>
+    <ul>
+      <li><code>tia analyze --target X --base B --head H</code></li>
+      <li>Optional DB persistence via <code>--db-url</code></li>
+      <li>Directly calls <code>impact.analyze()</code></li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>worker.py <span class="tag tag-entry">ENTRY</span></h3>
+    <div class="purpose">Background job processor. Polls the PostgreSQL job queue, claims work, runs handlers, retries on failure with exponential backoff.</div>
+    <ul>
+      <li>Lease-based: heartbeat keeps the job alive</li>
+      <li><code>PermanentError</code> = no retry</li>
+      <li>Two job kinds: <code>impact_analysis</code>, <code>github_pull_request</code></li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>analysis_service.py <span class="tag tag-service">SERVICE</span></h3>
+    <div class="purpose">Orchestrator between the API and the impact engine. Resolves symbolic refs to exact commits, executes analyses, manages the landscape graph, and handles PR events.</div>
+    <ul>
+      <li><code>resolve()</code>: branch/PR → commit SHAs</li>
+      <li><code>execute()</code>: runs the full analysis pipeline</li>
+      <li><code>refresh_landscape()</code>: re-extracts all repos</li>
+      <li><code>make_handlers()</code>: creates worker job handlers</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>repos.py <span class="tag tag-service">SERVICE</span></h3>
+    <div class="purpose">Repository lifecycle: register, clone, fetch, sync, and remove. Supports GitHub, Azure DevOps, generic git URLs, local paths, and uploaded code.</div>
+    <ul>
+      <li>Tokens via env vars (never on CLI or disk)</li>
+      <li>SSRF protection via <code>allowed_hosts</code></li>
+      <li>Auto-discovery of org repos</li>
+      <li><code>commit_upload()</code>: turns uploads into git repos</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>impact.py <span class="tag tag-service">SERVICE</span></h3>
+    <div class="purpose">The change-impact engine. Takes a base/head diff, seeds the graph with changed nodes, does BFS traversal to find affected components, and generates severity-scored findings.</div>
+    <ul>
+      <li>BFS with configurable max depth (default 8)</li>
+      <li>Time-budgeted (60s default)</li>
+      <li>Produces an evidence snapshot for reproducibility</li>
+      <li>Contract diff for breaking changes</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>graph.py <span class="tag tag-graph">GRAPH</span></h3>
+    <div class="purpose">In-memory typed dependency graph. Nodes are code entities (endpoints, functions, schemas, tests); edges encode relationships (HANDLES, CALLS, CONSUMES_API, TESTS, etc.).</div>
+    <ul>
+      <li><code>impacted_by(nid)</code>: reverse traversal index</li>
+      <li>Edge types: HANDLES, CALLS, CONSUMES_API, USES_SCHEMA, ISSUES, TESTS, EXPOSES</li>
+      <li>Built from <code>RepoExtract</code> + consumer resolution</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>graphview.py <span class="tag tag-graph">GRAPH</span></h3>
+    <div class="purpose">Read-only views of the dependency graph at three levels (service, endpoint, function). Supports search, focus+depth, and impact overlays for analyses.</div>
+    <ul>
+      <li>Service: one node per microservice</li>
+      <li>Endpoint: services + endpoints + schemas</li>
+      <li>Function: everything extracted</li>
+      <li>Impact overlay: highlight affected nodes</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>resolve.py <span class="tag tag-graph">GRAPH</span></h3>
+    <div class="purpose">Consumer resolution: the only place cross-repository edges are created. Five enumerated strategies (R1–R5) ensure relationships are evidence-backed.</div>
+    <ul>
+      <li>R1: Generated/shared client (package match)</li>
+      <li>R2: Fully resolved HTTP call (host+path)</li>
+      <li>R3: Declared contract (pact-like JSON)</li>
+      <li>R5: Unique path match (inferred)</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>relationships.py <span class="tag tag-graph">GRAPH</span></h3>
+    <div class="purpose">Tracks cross-repo relationships over time. Detects when evidence goes stale (scan failure, parse failure, evidence removed) and reconciles against the latest graph.</div>
+    <ul>
+      <li>States: <code>current</code> or <code>stale</code></li>
+      <li>Stale reasons: scan_failed, parse_failed, evidence_removed</li>
+      <li>Reconciliation on every landscape refresh</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>extraction.py <span class="tag tag-extract">EXTRACT</span></h3>
+    <div class="purpose">Incremental extraction orchestrator. Uses git blob IDs as cache keys so only changed files are re-parsed. Assembles per-file facts into a <code>RepoExtract</code>.</div>
+    <ul>
+      <li>Cache key: <code>repo|service|strip|version|blob|path</code></li>
+      <li><code>force=True</code> for full rescan</li>
+      <li>Guarantees: incremental result == full rescan</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>extract_python.py <span class="tag tag-extract">EXTRACT</span></h3>
+    <div class="purpose">Python source adapter using stdlib <code>ast</code>. Extracts endpoints (FastAPI/Flask), schemas (Pydantic), outbound HTTP calls, functions, tests, and service configuration.</div>
+    <ul>
+      <li>Decorators: <code>@app.get</code>, <code>@router.post</code>, etc.</li>
+      <li>Clients: requests, httpx session calls</li>
+      <li>Tests: pytest, unittest with HTTP call matching</li>
+      <li>Service map: <code>tia-services.yaml</code></li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>extract_java.py <span class="tag tag-extract">EXTRACT</span></h3>
+    <div class="purpose">Java source adapter using tree-sitter. Full Spring Boot/Web support: controllers, DTOs, OpenFeign clients, RestTemplate, WebClient, JPA entities, JUnit tests.</div>
+    <ul>
+      <li>Annotations: <code>@RestController</code>, <code>@RequestMapping</code></li>
+      <li>Feign: <code>@FeignClient</code> interface resolution</li>
+      <li>Schema reachability: only endpoint-linked DTOs</li>
+      <li>Modern Java: records, var, text blocks</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>extract_data.py <span class="tag tag-extract">EXTRACT</span></h3>
+    <div class="purpose">Data-layer adapter for schema migrations. Parses Flyway, Liquibase, Alembic, and Django migration files. Also resolves ORM entity mappings at assembly time.</div>
+    <ul>
+      <li>SQL: CREATE/ALTER/DROP TABLE parsing</li>
+      <li>Liquibase: XML/YAML/JSON changelogs</li>
+      <li>Alembic: <code>op.create_table</code>, <code>op.add_column</code></li>
+      <li>Django: <code>CreateModel</code>, <code>AddField</code>, etc.</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>extract_orm.py <span class="tag tag-extract">EXTRACT</span></h3>
+    <div class="purpose">Python ORM adapter for SQLAlchemy, SQLModel, and Django models. Maps model classes to database tables and tracks data access patterns in functions.</div>
+    <ul>
+      <li>Declarative + Mapped/mapped_column styles</li>
+      <li>Django model field detection</li>
+      <li>Read vs write operation classification</li>
+      <li>Raw SQL usage detection & reporting</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>db.py <span class="tag tag-storage">STORAGE</span></h3>
+    <div class="purpose">PostgreSQL access layer. Connection pool with tenant-bound transactions. Every tx sets <code>tia.tenant_id</code> for row-level security. Separate admin path for migrations.</div>
+    <ul>
+      <li><code>Database</code>: runtime (tia_app role)</li>
+      <li><code>TenantAdmin</code>: admin-only tenant registry</li>
+      <li><code>migrate()</code>: applies SQL from <code>migrations/</code></li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>store.py <span class="tag tag-storage">STORAGE</span></h3>
+    <div class="purpose">Tenant-scoped persistence facade. Wraps all database operations: evidence cache, file extract cache, graph versions, repo registry, analysis results, and HMAC-chained audit log.</div>
+    <ul>
+      <li>All methods run inside <code>db.tx(tenant_id)</code></li>
+      <li>Audit chain: <code>prev_hash | seq | ts | event</code></li>
+      <li>Optional HMAC key (external to DB)</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>jobs.py <span class="tag tag-storage">STORAGE</span></h3>
+    <div class="purpose">PostgreSQL-backed job queue. Producer side (enqueue/get/cancel) is tenant-bound; consumer side (claim/heartbeat/succeed/fail) uses the worker role across tenants.</div>
+    <ul>
+      <li>Idempotent: same <code>(tenant, key)</code> = one job</li>
+      <li>Group superseding: newest wins in a group</li>
+      <li>Fair scheduling: fewest-running tenant first</li>
+      <li>Lease-based with <code>reap_expired()</code></li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>models.py <span class="tag tag-infra">MODEL</span></h3>
+    <div class="purpose">Canonical data structures shared across the codebase. Dataclasses for every code entity: Endpoint, Schema, CallSite, Function, TestCase, Entity, DataAccess, Migration, Edge, RepoExtract.</div>
+    <ul>
+      <li>Evidence statuses: source_confirmed → stale</li>
+      <li>Analysis statuses: running → complete/failed</li>
+      <li>Path normalization: <code>normalize_path()</code></li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>webhooks.py <span class="tag tag-infra">INFRA</span></h3>
+    <div class="purpose">SCM webhook receiving. Verifies GitHub HMAC signatures, parses pull_request events, matches incoming repos to registered ones, and provides ScmConfig.</div>
+    <ul>
+      <li>Constant-time HMAC comparison</li>
+      <li>Actions: opened, reopened, synchronize, ready_for_review</li>
+      <li>URL-based repo matching (case-insensitive)</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>upload.py <span class="tag tag-infra">INFRA</span></h3>
+    <div class="purpose">Code upload handling. Accepts ZIP archives or folder batches, validates paths (no traversal, no device names), enforces size limits, and commits to a TIA-owned bare git repo.</div>
+    <ul>
+      <li>Path sanitization: no <code>..</code>, absolute, device names</li>
+      <li>2 GiB / 200k file limits (configurable)</li>
+      <li>Session-based: start → upload chunks → commit</li>
+      <li>Deduplication: identical content = same commit</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>gitutil.py <span class="tag tag-infra">INFRA</span></h3>
+    <div class="purpose">Read-only git access. Wraps git CLI commands for tree listing, blob reading, diff, and rev-parse. Never executes repository code. Used by extractors and impact engine.</div>
+    <ul>
+      <li><code>list_tree()</code>: path → blob SHA mapping</li>
+      <li><code>read_blobs()</code>: batch content read via cat-file</li>
+      <li><code>changed_files()</code>: name-status diff</li>
+    </ul>
+  </div>
+
+  <div class="mod-card">
+    <h3>github.py <span class="tag tag-infra">INFRA</span></h3>
+    <div class="purpose">GitHub PR comment publisher. Finds existing TIA comments by a hidden marker, updates in place or creates new. Uses urllib (no requests dependency).</div>
+    <ul>
+      <li>Marker: <code>&lt;!-- tia-analysis --&gt;</code></li>
+      <li>Upsert: create or update one comment per PR</li>
+      <li>Paginates through existing comments</li>
+    </ul>
+  </div>
+
+</div>
+
+<!-- ======== FOOTER ======== -->
+<footer class="footer">
+  TIA Codebase Mind Map — 30 Python modules · ~350 kB · Python 3.10+ · FastAPI · PostgreSQL · tree-sitter
+</footer>
+
+<!-- ======== SCRIPTS ======== -->
+<script>
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor:     '#1f2937',
+      primaryBorderColor: '#bc8cff',
+      primaryTextColor: '#e6edf3',
+      lineColor:        '#bc8cff',
+      secondaryColor:   '#21262d',
+      tertiaryColor:    '#161b22',
+      fontSize:         '13px',
+      fontFamily:       'Inter, sans-serif'
+    },
+    flowchart: { htmlLabels: true, curve: 'basis', padding: 16 },
+    mindmap: { padding: 20 },
+    sequence: { mirrorActors: false, messageMargin: 40 },
+    securityLevel: 'loose'
+  });
+
+  const renderedTabs = new Set();
+
+  async function activateTab(tabId) {
+    // 1. Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === tabId);
+    });
+
+    // 2. Update cards
+    document.querySelectorAll('.diagram-card').forEach(c => {
+      c.classList.toggle('active', c.id === 'tab-' + tabId);
+    });
+
+    // 3. Render diagram if not yet rendered
+    const card = document.getElementById('tab-' + tabId);
+    if (card && !renderedTabs.has(tabId)) {
+      renderedTabs.add(tabId);
+      requestAnimationFrame(async () => {
+        try {
+          const elements = card.querySelectorAll('.mermaid:not([data-processed])');
+          if (elements.length > 0) {
+            await mermaid.run({ nodes: Array.from(elements) });
+          }
+        } catch (err) {
+          console.error("Mermaid error in tab " + tabId, err);
+        }
+      });
+    }
+  }
+
+  // Hook button clicks
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activateTab(btn.dataset.tab);
+    });
+  });
+
+  // Initial render of first active tab
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', () => activateTab('overview'));
+  } else {
+    activateTab('overview');
+  }
+</script>
+
+</body>
+</html>
