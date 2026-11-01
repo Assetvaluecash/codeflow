@@ -19,10 +19,15 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="tia.migrate")
     ap.add_argument("--tenant", help="ensure a tenant with this name exists")
     a = ap.parse_args(argv)
-    admin, pw = os.environ.get("TIA_ADMIN_DATABASE_URL"), os.environ.get("TIA_APP_PASSWORD")
-    if not admin or not pw:
-        sys.exit("TIA_ADMIN_DATABASE_URL and TIA_APP_PASSWORD are required")
-    done = migrate(admin, pw, os.environ.get("TIA_WORKER_PASSWORD"))
+    from .credentials import SecretError, env_secret
+    from .transport import check_db_tls
+    try:
+        admin, pw = env_secret("TIA_ADMIN_DATABASE_URL"), env_secret("TIA_APP_PASSWORD")
+        if not admin or not pw:
+            sys.exit("TIA_ADMIN_DATABASE_URL and TIA_APP_PASSWORD are required")
+        done = migrate(check_db_tls(admin), pw, env_secret("TIA_WORKER_PASSWORD"))
+    except SecretError as e:
+        sys.exit(f"configuration error: {e}")
     print(f"applied: {', '.join(done) if done else 'nothing (up to date)'}; runtime roles: {APP_ROLE}, {WORKER_ROLE}")
     if a.tenant:
         print(f"tenant {a.tenant}: {TenantAdmin(admin).ensure(a.tenant)}")

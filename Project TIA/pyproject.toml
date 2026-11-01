@@ -1,0 +1,23 @@
+[project]
+name = "tia"
+version = "0.1.0"
+description = "TIA - Technical Impact Analysis (Phase 1: cross-repository REST impact)"
+requires-python = ">=3.10"
+dependencies = ["pyyaml>=6", "psycopg[binary]>=3.1", "psycopg-pool>=3.2", "tree-sitter>=0.23", "tree-sitter-java>=0.23",
+                "cryptography>=42"]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.100", "httpx", "uvicorn", "python-multipart", "signxml>=4", "lxml>=5"]
+dev = ["pytest", "pgserver"]
+
+[project.scripts]
+tia = "tia.cli:main"
+
+[tool.setuptools]
+packages = ["tia"]
+
+[tool.setuptools.package-data]
+tia = ["web/*.html", "web/vendor/*", "migrations/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,30 @@
+# Python build and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual envs
+.venv/
+env/
+venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs and temp files
+*.log
+*.err
+demo-data/
+.tia/

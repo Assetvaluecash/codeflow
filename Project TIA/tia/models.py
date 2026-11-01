@@ -174,6 +174,8 @@ class RepoExtract:
     data_unknowns: list = field(default_factory=list)      # data access that is declared but not analysed [{file, line, kind, reason}]
     repositories: list = field(default_factory=list)       # Java: Spring Data repository declarations (assembly input)
     data_refs: list = field(default_factory=list)          # Python: model references in functions (assembly input)
+    secrets_withheld: int = 0                              # secret-like values found in source and kept out of these records
+    strip_prefixes: list = field(default_factory=list)     # gateway prefixes the paths were normalised with: part of the cache identity
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -197,7 +199,8 @@ class RepoExtract:
             data_access=[DataAccess(**a) for a in d.get("data_access", [])],
             migrations=[Migration(**m) for m in d.get("migrations", [])],
             data_unknowns=d.get("data_unknowns", []), repositories=d.get("repositories", []),
-            data_refs=d.get("data_refs", []))
+            data_refs=d.get("data_refs", []), secrets_withheld=d.get("secrets_withheld", 0),
+            strip_prefixes=d.get("strip_prefixes", []))
 
 
 def normalize_path(path: str, strip_prefixes: tuple = ()) -> str:

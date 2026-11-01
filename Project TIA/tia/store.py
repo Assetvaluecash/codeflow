@@ -13,8 +13,11 @@ from typing import Optional
 
 from psycopg.types.json import Jsonb
 
+from . import tenantconfig
 from .db import Database
+from .identity import current_principal
 from .models import RepoExtract
+from .scrub import scrub_json
 
 GENESIS = "GENESIS"
 
@@ -33,19 +36,37 @@ class Store:
 
     # ---- evidence cache (incremental analysis: unchanged revisions are not re-parsed) -----------------
     @staticmethod
-    def _key(repo: str, commit: str, version: str) -> str:
-        return f"{repo}@{commit}#{version}"
+    def _key(repo: str, commit: str, version: str, strip: tuple = ()) -> str:
+        """An extract depends on the gateway prefixes it was normalised with: a different configuration is a different cache entry."""
+        return f"{repo}@{commit}#{version}" + (f"|strip={','.join(strip)}" if strip else "")
 
-    def get_extract(self, repo: str, commit: str, version: str) -> Optional[RepoExtract]:
+    def get_extract(self, repo: str, commit: str, version: str, strip: tuple = ()) -> Optional[RepoExtract]:
         with self.db.tx(self.tenant_id) as c:
-            r = c.execute("select data from extractions where key = %s", (self._key(repo, commit, version),)).fetchone()
+            r = c.execute("select data from extractions where key = %s", (self._key(repo, commit, version, tuple(strip)),)).fetchone()
         return RepoExtract.from_dict(r[0]) if r else None
 
     def put_extract(self, ex: RepoExtract):
         with self.db.tx(self.tenant_id) as c:
             c.execute("insert into extractions (tenant_id, key, data) values (%s, %s, %s) "
                       "on conflict (tenant_id, key) do update set data = excluded.data",
-                      (self.tenant_id, self._key(ex.repo, ex.commit, ex.extractor_version), Jsonb(ex.to_dict())))
+                      (self.tenant_id, self._key(ex.repo, ex.commit, ex.extractor_version, tuple(ex.strip_prefixes)), Jsonb(ex.to_dict())))
+
+    # ---- tenant configuration (versioned, insert-only) -------------------------------------------------------------
+    def effective_config(self):
+        with self.db.tx(self.tenant_id) as c:
+            return tenantconfig.latest(c, self.tenant_id)
+
+    def put_config(self, raw: dict, comment=None, actor=None) -> dict:
+        with self.db.tx(self.tenant_id) as c:
+            return tenantconfig.put_version(c, self.tenant_id, raw, comment, actor)
+
+    def get_config_version(self, version: int):
+        with self.db.tx(self.tenant_id) as c:
+            return tenantconfig.get_version(c, self.tenant_id, version)
+
+    def list_config_versions(self, limit: int = 50) -> list:
+        with self.db.tx(self.tenant_id) as c:
+            return tenantconfig.list_versions(c, self.tenant_id, limit)
 
     def get_file_extracts(self, keys: list) -> dict:
         """Per-file facts already extracted for these (blob-identified) keys."""
@@ -168,9 +189,15 @@ class Store:
     def delete_repo(self, name: str):
         with self.db.tx(self.tenant_id) as c:
             c.execute("delete from repositories where name = %s", (name,))
+            for t in ("repo_access", "repo_grants", "scm_permissions", "scm_sync_status"):
+                c.execute(f"delete from {t} where tenant_id = %s and repo = %s", (self.tenant_id, name))
 
     # ---- audit: append-only, hash-chained per tenant ----------------------------------------------------------
     def audit(self, event: str, **fields):
+        who = current_principal.get()
+        if who is not None and who.kind != "system" and "actor" not in fields:
+            fields["actor"] = who.actor                                    # who did it: the authenticated principal of the request
+        fields, _ = scrub_json(fields, generic_everywhere=True)         # an audit record never carries a secret
         payload = json.dumps(fields, sort_keys=True, separators=(",", ":"), default=str)
         ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         with self.db.tx(self.tenant_id) as c:

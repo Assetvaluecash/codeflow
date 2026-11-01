@@ -20,6 +20,7 @@ from .extract_data import (alembic_migration, django_migration, extract_file as 
                            resolve_data)
 from .extract_java import extract_file as extract_java_file, keep_reachable_schemas, module_fqn, resolve_clients
 from .extract_orm import function_refs, model_entity
+from .scrub import scrub_extract
 from .models import (CallSite, Endpoint, Function, RepoExtract, Schema, TestCase,
                      normalize_path)
 
@@ -465,10 +466,13 @@ def is_extractable(path: str) -> bool:
 def extract_source(repo: str, service: str, path: str, text: str, strip_prefixes: tuple = ()) -> RepoExtract:
     """Facts from one source or migration file in any supported language."""
     if path.endswith(".java"):
-        return extract_java_file(repo, service, path, text, strip_prefixes)
-    if path.endswith(".py"):
-        return extract_file(repo, service, path, text, strip_prefixes)
-    return extract_data_file(repo, service, path, text)
+        part = extract_java_file(repo, service, path, text, strip_prefixes)
+    elif path.endswith(".py"):
+        part = extract_file(repo, service, path, text, strip_prefixes)
+    else:
+        part = extract_data_file(repo, service, path, text)
+    part.secrets_withheld = scrub_extract(part)          # secrets in source never reach the cache, the graph or a report
+    return part
 
 
 def extract_file(repo: str, service: str, path: str, text: str, strip_prefixes: tuple = ()) -> RepoExtract:
@@ -506,14 +510,15 @@ def migration_tool(tree: ast.Module) -> Optional[str]:
 
 
 def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str, per_file: dict,
-             small_files: dict) -> RepoExtract:
+             small_files: dict, strip: tuple = ()) -> RepoExtract:
     """Merge per-file facts into the repository extract. The same function serves full and incremental extraction,
     so an incremental result equals a full rescan by construction (AC-021).
 
     per_file:    path -> partial RepoExtract for every .py file (parsed or failed)
     small_files: path -> text for the files read in full anyway (contracts/*.json)
     """
-    out = RepoExtract(repo=repo, service=service, commit=commit, extractor_version=EXTRACTOR_VERSION, service_map=smap)
+    out = RepoExtract(repo=repo, service=service, commit=commit, extractor_version=EXTRACTOR_VERSION, service_map=smap,
+                      strip_prefixes=list(strip))
     for path in sorted(tree_paths):
         if is_extractable(path):
             part = per_file[path]
@@ -532,6 +537,7 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
             out.data_unknowns += part.data_unknowns
             out.repositories += part.repositories
             out.data_refs += part.data_refs
+            out.secrets_withheld += part.secrets_withheld
         elif path.startswith("contracts/") and path.endswith(".json"):
             try:
                 c = json.loads(small_files[path])
@@ -570,4 +576,4 @@ def extract_repo(repo: str, commit: str, files: dict[str, str], strip_prefixes: 
     service = smap.get("service", repo)
     per_file = {p: extract_source(repo, service, p, files[p], strip_prefixes) for p in files if is_extractable(p)}
     return assemble(repo, commit, list(files), smap, service, per_file,
-                    {p: t for p, t in files.items() if p.startswith("contracts/") and p.endswith(".json")})
+                    {p: t for p, t in files.items() if p.startswith("contracts/") and p.endswith(".json")}, strip_prefixes)

@@ -132,6 +132,8 @@ class _JavaVisitor:
         self.consts: dict[str, tuple[str, str]] = {}      # name -> (literal | config_key, value)
         self.types: dict[str, str] = {}                   # variable name -> simple type name
         self.bases: dict[str, tuple[str, str]] = {}       # http client variable -> (base_kind, base_value)
+        self.method_returns: dict[str, Optional[Node]] = {}   # no-argument method -> the expression it returns (None when ambiguous)
+        self._resolving: set = set()
         self.used_ids: dict[str, int] = {}
         self.type_names_used: set[str] = set()
 
@@ -154,6 +156,7 @@ class _JavaVisitor:
                                if imp == prefix or imp.startswith(prefix + ".")}):
                 self.out.data_unknowns.append({"file": self.path, "line": 0, "kind": "data_access_library",
                                                "reason": f"{lib} is used here; the data it reads or writes is not analysed (FR-041)"})
+        local_vals: dict[str, list] = {}
         for n in _walk(self.root):
             if n.type == "field_declaration":
                 self._declare(n)
@@ -164,8 +167,26 @@ class _JavaVisitor:
                 for d in n.children:
                     if d.type == "variable_declarator":
                         self._var_type(d.child_by_field_name("name"), tn, d.child_by_field_name("value"))
+                        v = d.child_by_field_name("value")
+                        if v is not None:
+                            local_vals.setdefault(_t(d.child_by_field_name("name")), []).append(v)
+            elif n.type == "method_declaration":
+                params = n.child_by_field_name("parameters")
+                body = n.child_by_field_name("body")
+                if body is not None and not (params is not None and params.named_children):
+                    rets = [r for r in _walk(body) if r.type == "return_statement" and r.named_children]
+                    nm = _t(n.child_by_field_name("name"))
+                    self.method_returns[nm] = rets[0].named_children[0] if len(rets) == 1 and nm not in self.method_returns else None
             elif n.type == "type_identifier":
                 self.type_names_used.add(_t(n))
+        # a local variable holding a URL or path ("String host = \"http://vets-service/\"") is a constant for the calls that use it, provided
+        # every assignment of that name in the file agrees (the same name holding two different URLs in two methods stays unresolved)
+        for nm, vals in local_vals.items():
+            strings = {self._const_str(v) for v in vals}
+            if len(strings) == 1 and None not in strings and nm not in self.consts:
+                sv = next(iter(strings))
+                if sv.startswith(("http://", "https://", "/")):
+                    self.consts[nm] = ("literal", sv)
         for n in _walk(self.root):                         # http client bases: baseUrl(...), WebClient.create(...), rootUri(...)
             if n.type == "variable_declarator":
                 self._bind_base(n.child_by_field_name("name"), n.child_by_field_name("value"))
@@ -317,7 +338,30 @@ class _JavaVisitor:
             if first and ((nm == "getProperty" and obj.rsplit(".", 1)[-1].lower() in ("environment", "env")) or
                           (nm == "getenv" and obj == "System")):
                 return ("config_key", first)
+            if not obj and nm in self.method_returns and self.method_returns[nm] is not None and not (args is not None and args.named_children):
+                return self._returned_base(nm)
         return None
+
+    def _returned_base(self, name: str) -> Optional[tuple]:
+        """The base a no-argument method in this file returns: a constant or config key, or the instance of a service that service discovery
+        looks up BY NAME (discoveryClient.getInstances("customers-service").get(0).getUri()), which is that service's host."""
+        if name in self._resolving:
+            return None
+        self._resolving.add(name)
+        try:
+            expr = self.method_returns[name]
+            base = self._base_of(expr)
+            if base:
+                return base
+            for inv in _walk(expr):
+                if inv.type == "method_invocation" and _t(inv.child_by_field_name("name")) in ("getInstances", "choose", "getInstance"):
+                    args = inv.child_by_field_name("arguments")
+                    svc = _string(args.named_children[0]) if args is not None and args.named_children else None
+                    if svc and re.fullmatch(r"[A-Za-z0-9._-]+", svc):
+                        return ("literal", f"http://{svc}")
+            return None
+        finally:
+            self._resolving.discard(name)
 
     def parse_url(self, n: Optional[Node]):
         """-> (path_template | None, base_kind, base_value, reason)"""

@@ -17,6 +17,12 @@ import psycopg.conninfo
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
+# Tenant-owned tables the runtime role may read (the tenant registry tables are admin-only). tests/test_tenants.py checks this list
+# against the catalog, so a migration that adds a tenant table cannot be forgotten here.
+RUNTIME_TABLES = ("analyses", "audit_log", "auth_login_states", "auth_sessions", "evidence_snapshots", "extractions", "file_extracts",
+                  "graph_heads", "graph_versions", "jobs", "relationships", "repo_access", "repo_grants", "repositories", "saml_assertions_seen",
+                  "scm_permissions", "scm_sync_status", "service_tokens", "tenant_config_versions", "tenant_idps", "tenant_keys", "tenant_secrets",
+                  "tenant_users")
 APP_ROLE = "tia_app"
 WORKER_ROLE = "tia_worker"
 MIGRATIONS = Path(__file__).parent / "migrations"
@@ -34,6 +40,15 @@ class Database:
         with self.pool.connection() as conn:
             with conn.transaction():
                 conn.execute("select set_config('tia.tenant_id', %s, true)", (str(uuid.UUID(str(tenant_id))),))
+                yield conn
+
+    @contextmanager
+    def plain(self):
+        """A transaction bound to NO tenant: it sees no rows. Only for the narrow SECURITY DEFINER lookup functions that find the
+        tenant a caller belongs to (identity-provider routing, sign-in options)."""
+        with self.pool.connection() as conn:
+            with conn.transaction():
+                conn.execute("select set_config('tia.tenant_id', '', true)")
                 yield conn
 
     def close(self):
@@ -71,7 +86,9 @@ class TenantAdmin:
     def ensure(self, name: str) -> str:
         with psycopg.connect(self.dsn, autocommit=True) as c:
             r = c.execute("insert into tenants (name) values (%s) on conflict (name) do update set name = excluded.name "
-                          "returning id", (name,)).fetchone()
+                          "returning id, status", (name,)).fetchone()
+        if r[1] in ("offboarding", "offboarded"):
+            raise ValueError(f"tenant '{name}' is {r[1]}; names of offboarded tenants are never reused")
         return str(r[0])
 
     def get(self, name: str):

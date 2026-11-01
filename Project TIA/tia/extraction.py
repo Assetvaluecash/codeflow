@@ -3,9 +3,10 @@ file re-extracts only that file. The repository extract is assembled from per-fi
 rescan uses, so the incremental result equals a full rescan."""
 from __future__ import annotations
 
+import time
 from typing import Optional
 
-from . import EXTRACTOR_VERSION, gitutil
+from . import EXTRACTOR_VERSION, gitutil, telemetry, tracing
 from .extract_python import assemble, extract_source, is_extractable, is_service_config, read_service_map
 from .models import RepoExtract
 from .store import Store
@@ -18,6 +19,15 @@ def _file_key(repo: str, service: str, strip: tuple, blob: str, path: str) -> st
 def extract_commit(repo: str, path: str, commit: str, store: Optional[Store], strip: tuple = (), force: bool = False):
     """Returns (RepoExtract, stats). Without a store nothing is cached and every file is parsed.
     force=True is the full-rescan path: the cache is ignored and every file fact is re-derived and stored again."""
+    t0 = time.perf_counter()
+    with tracing.span("extraction.run", repo=repo, force=force) as sp:
+        ex, stats = _extract_commit(repo, path, commit, store, strip, force)
+        sp.set(files=stats["files"], parsed=stats["parsed"], reused=stats["reused"], failed=len(ex.files_failed))
+    telemetry.record_extraction(stats, len(ex.files_failed), time.perf_counter() - t0)
+    return ex, stats
+
+
+def _extract_commit(repo: str, path: str, commit: str, store: Optional[Store], strip: tuple, force: bool):
     tree = gitutil.list_tree(path, commit)
     wanted = [p for p in tree if p in ("tia-services.yaml", "tia-services.yml") or is_service_config(p)
               or (p.startswith("contracts/") and p.endswith(".json"))]
@@ -43,5 +53,5 @@ def extract_commit(repo: str, path: str, commit: str, store: Optional[Store], st
     if store:
         store.put_file_extracts(fresh, overwrite=force)
     per_file = {p: have.get(keys[p]) or fresh[keys[p]] for p in py}
-    ex = assemble(repo, commit, list(tree), smap, service, per_file, small)
+    ex = assemble(repo, commit, list(tree), smap, service, per_file, small, strip)
     return ex, {"files": len(py), "reused": len(py) - len(missing), "parsed": len(missing)}

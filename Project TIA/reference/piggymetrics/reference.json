@@ -1,0 +1,255 @@
+{
+  "name": "piggymetrics",
+  "description": "PiggyMetrics: Spring Boot + Spring Cloud (Feign, Zuul, Config Server) microservices. Ground truth curated by reading the source and the shared configuration, not by running TIA.",
+  "independent": true,
+  "curated_by": "reading the code at the pinned commit (2026-10-30); every dependency names the line that proves it",
+  "source": {
+    "type": "modules",
+    "url": "https://github.com/sqshq/piggymetrics",
+    "commit": "6bb2cf9ddbca980b664d3edbb6ff775d75369278",
+    "license": "MIT",
+    "how_to_get_it": "git clone https://github.com/sqshq/piggymetrics <dir>  (then: git -C <dir> checkout <commit>). It is only copied and parsed, never built or run."
+  },
+  "config": {
+    "strip_prefixes": [
+      "/uaa",
+      "/accounts",
+      "/statistics",
+      "/notifications"
+    ],
+    "why": "Each service's servlet context path is set in config/src/main/resources/shared/<service>.yml (server.servlet.context-path), outside the service's own code. Feign clients call '/uaa/users' while the controller maps '/users'; an operator states the context paths once in the tenant configuration (paths.strip_prefixes)."
+  },
+  "services": {
+    "account-service": "account-service",
+    "auth-service": "auth-service",
+    "notification-service": "notification-service",
+    "statistics-service": "statistics-service",
+    "gateway": "gateway",
+    "registry": "registry",
+    "turbine-stream-service": "turbine-stream-service",
+    "config": "config"
+  },
+  "dependencies": [
+    {
+      "id": "P1",
+      "consumer": "account-service",
+      "provider": "auth-service",
+      "method": "POST",
+      "path": "/users",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "Feign client, context path from external config",
+      "critical": true,
+      "evidence": "account-service/.../client/AuthServiceClient.java:12 (@FeignClient(name = \"auth-service\"), POST /uaa/users); provider auth-service/.../UserController.java (@RequestMapping(\"/users\") POST), context path /uaa in config/.../shared/auth-service.yml:12"
+    },
+    {
+      "id": "P2",
+      "consumer": "account-service",
+      "provider": "statistics-service",
+      "method": "PUT",
+      "path": "/{accountName}",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "Feign client, context path from external config",
+      "critical": true,
+      "evidence": "account-service/.../client/StatisticsServiceClient.java:13 (PUT /statistics/{accountName}); provider StatisticsController.java (PUT /{accountName}), context path /statistics in shared/statistics-service.yml:21"
+    },
+    {
+      "id": "P3",
+      "consumer": "notification-service",
+      "provider": "account-service",
+      "method": "GET",
+      "path": "/{name}",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "Feign client, context path from external config",
+      "critical": true,
+      "evidence": "notification-service/.../client/AccountServiceClient.java:12 (GET /accounts/{accountName}); provider AccountController.java (GET /{name}), context path /accounts in shared/account-service.yml:21"
+    }
+  ],
+  "acceptable_extra_edges": [],
+  "unresolvable": [
+    {
+      "consumer": "statistics-service",
+      "file": "ExchangeRatesClient.java",
+      "line": 13,
+      "why": "@FeignClient(url = \"${rates.url}\") calls an EXTERNAL exchange-rates API; no service in the landscape provides GET /latest, so any edge here would be false"
+    }
+  ],
+  "out_of_scope": [
+    {
+      "what": "the gateway's Zuul routes (config/.../shared/gateway.yml: /uaa/**, /accounts/**, ...)",
+      "why": "route configuration, not an HTTP call site in code"
+    }
+  ],
+  "endpoints": [
+    {
+      "service": "account-service",
+      "method": "GET",
+      "path": "/{name}"
+    },
+    {
+      "service": "account-service",
+      "method": "GET",
+      "path": "/current"
+    },
+    {
+      "service": "account-service",
+      "method": "PUT",
+      "path": "/current"
+    },
+    {
+      "service": "account-service",
+      "method": "POST",
+      "path": "/"
+    },
+    {
+      "service": "auth-service",
+      "method": "GET",
+      "path": "/users/current"
+    },
+    {
+      "service": "auth-service",
+      "method": "POST",
+      "path": "/users"
+    },
+    {
+      "service": "notification-service",
+      "method": "GET",
+      "path": "/recipients/current"
+    },
+    {
+      "service": "notification-service",
+      "method": "PUT",
+      "path": "/recipients/current"
+    },
+    {
+      "service": "statistics-service",
+      "method": "GET",
+      "path": "/current"
+    },
+    {
+      "service": "statistics-service",
+      "method": "GET",
+      "path": "/{accountName}"
+    },
+    {
+      "service": "statistics-service",
+      "method": "PUT",
+      "path": "/{accountName}"
+    }
+  ],
+  "changes": [
+    {
+      "id": "P1",
+      "description": "statistics-service renames PUT /{accountName} to /{accountName}/update",
+      "target": "statistics-service",
+      "patch": [
+        {
+          "file": "src/main/java/com/piggymetrics/statistics/controller/StatisticsController.java",
+          "find": "@RequestMapping(value = \"/{accountName}\", method = RequestMethod.PUT)",
+          "replace": "@RequestMapping(value = \"/{accountName}/update\", method = RequestMethod.PUT)"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "account-service",
+          "why": "P2 calls PUT /statistics/{accountName}"
+        }
+      ]
+    },
+    {
+      "id": "P2",
+      "description": "account-service renames GET /{name} to /{name}/summary",
+      "target": "account-service",
+      "patch": [
+        {
+          "file": "src/main/java/com/piggymetrics/account/controller/AccountController.java",
+          "find": "@RequestMapping(path = \"/{name}\", method = RequestMethod.GET)",
+          "replace": "@RequestMapping(path = \"/{name}/summary\", method = RequestMethod.GET)"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "notification-service",
+          "why": "P3 calls GET /accounts/{accountName}"
+        }
+      ]
+    },
+    {
+      "id": "P3",
+      "description": "auth-service moves POST /users to /users/register",
+      "target": "auth-service",
+      "patch": [
+        {
+          "file": "src/main/java/com/piggymetrics/auth/controller/UserController.java",
+          "find": "@RequestMapping(method = RequestMethod.POST)",
+          "replace": "@RequestMapping(value = \"/register\", method = RequestMethod.POST)"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "account-service",
+          "why": "P1 calls POST /uaa/users"
+        }
+      ]
+    },
+    {
+      "id": "P4",
+      "description": "statistics-service renames GET /current (only browsers call it, through the gateway)",
+      "target": "statistics-service",
+      "patch": [
+        {
+          "file": "src/main/java/com/piggymetrics/statistics/controller/StatisticsController.java",
+          "find": "@RequestMapping(value = \"/current\", method = RequestMethod.GET)",
+          "replace": "@RequestMapping(value = \"/mine\", method = RequestMethod.GET)"
+        }
+      ],
+      "expected_material": []
+    },
+    {
+      "id": "P5",
+      "description": "notification-service: comment added inside a method (no contract change)",
+      "target": "notification-service",
+      "patch": [
+        {
+          "file": "src/main/java/com/piggymetrics/notification/controller/RecipientController.java",
+          "find": "return recipientService.findByAccountName(principal.getName());",
+          "replace": "return recipientService.findByAccountName(principal.getName()); // settings of the signed-in user"
+        }
+      ],
+      "expected_material": []
+    },
+    {
+      "id": "P6",
+      "description": "account-service: a file that no longer parses",
+      "target": "account-service",
+      "patch": [
+        {
+          "file": "src/main/java/com/piggymetrics/account/controller/AccountController.java",
+          "append": "\n}}} this is not java {{{\n"
+        }
+      ],
+      "expected_material": [],
+      "expect_gaps": "an unparseable source file must be reported as incomplete input, never as a plain complete analysis"
+    },
+    {
+      "id": "P7",
+      "description": "account-service changes the body of the handler behind GET /{name} (no contract change)",
+      "target": "account-service",
+      "patch": [
+        {
+          "file": "src/main/java/com/piggymetrics/account/controller/AccountController.java",
+          "find": "return accountService.findByName(name);",
+          "replace": "return accountService.findByName(name.trim());"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "notification-service",
+          "why": "P3 consumes the endpoint whose behaviour changed"
+        }
+      ]
+    }
+  ]
+}

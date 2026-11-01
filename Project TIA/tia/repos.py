@@ -25,7 +25,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from . import gitutil
+from . import gitutil, metrics, tracing
+from .credentials import is_loopback
 
 
 class IngestError(Exception):
@@ -84,6 +85,12 @@ def _auth_env(provider: str, token: Optional[str]) -> dict:
             "GIT_CONFIG_VALUE_0": f"Authorization: Basic {b64}"}
 
 
+def _require_tls_for_token(url: Optional[str], token: Optional[str]) -> None:
+    """A token must never travel over plain http (it would be readable on the network); loopback is exempt for development."""
+    if token and url and urlsplit(url).scheme == "http" and not is_loopback(urlsplit(url).hostname):
+        raise IngestError("refusing to send a token over plain http; use an https URL")
+
+
 def _redact(text: str, token: Optional[str]) -> str:
     if not token:
         return text
@@ -97,12 +104,22 @@ def _redact(text: str, token: Optional[str]) -> str:
 def _git(args: list, cwd: Optional[str] = None, provider: str = "git", token: Optional[str] = None,
          timeout: int = 900) -> str:
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", **_auth_env(provider, token)}
-    try:
-        r = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise IngestError(f"git {args[0]} timed out after {timeout}s")
-    except FileNotFoundError:
-        raise IngestError("git is not installed on the server")
+    op = args[0] if args[0] in ("clone", "fetch", "ls-remote") else "other"
+    t0, outcome = time.perf_counter(), "success"
+    with tracing.span(f"git.{op}", "client", provider=provider) as sp:
+        try:
+            r = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, timeout=timeout)
+            outcome = "success" if r.returncode == 0 else "error"
+        except subprocess.TimeoutExpired:
+            outcome = "timeout"
+            raise IngestError(f"git {args[0]} timed out after {timeout}s")
+        except FileNotFoundError:
+            outcome = "error"
+            raise IngestError("git is not installed on the server")
+        finally:
+            sp.set(outcome=outcome)
+            metrics.CONNECTOR.labels(provider=provider, operation=op, outcome=outcome).inc()
+            metrics.CONNECTOR_DURATION.labels(provider=provider, operation=op).observe(time.perf_counter() - t0)
     if r.returncode != 0:
         raise IngestError(_friendly(_redact(r.stderr.decode("utf-8", "replace").strip(), token), bool(token), args[0]))
     return r.stdout.decode("utf-8", "replace")
@@ -197,9 +214,12 @@ class RepoService:
         if u.username or u.password:
             if u.scheme != "ssh":
                 raise IngestError("do not embed credentials in the URL; use the token field")
+        _require_tls_for_token(url, token)
         host = (u.hostname or "").lower()
         if self.allowed_hosts and u.scheme != "file" and host not in self.allowed_hosts:
             raise IngestError(f"host '{host}' is not in the server's allowed git hosts")
+        if u.scheme != "file":
+            self._public_host(host, u.port)
         provider = detect_provider(url)
         rname = _clean(name or derive_name(url))
         if self.store.get_repo(rname):
@@ -218,10 +238,12 @@ class RepoService:
         return self._refresh_meta(repo, branch)
     # ---- sync / refs ----------------------------------------------------------------------------------
     def _fetch_heads(self, repo: Repo, token: Optional[str]):
+        _require_tls_for_token(repo.url, token)
         _git(["fetch", "--prune", "--no-tags", "origin", "+refs/heads/*:refs/heads/*"], cwd=repo.path,
              provider=repo.provider, token=token)
 
     def _follow_remote_default(self, repo: Repo, token: Optional[str]):
+        _require_tls_for_token(repo.url, token)
         """Point the bare clone's HEAD at the remote's current default branch (it can change after registration)."""
         out = _git(["ls-remote", "--symref", "origin", "HEAD"], cwd=repo.path, provider=repo.provider, token=token)
         for line in out.splitlines():
@@ -285,6 +307,7 @@ class RepoService:
         return repo
 
     def fetch_pull_request(self, name: str, number: int, token: Optional[str] = None) -> str:
+        _require_tls_for_token(self.get(name).url, token)
         """Fetch a pull request head into refs/tia/pr/<n>; returns the commit sha."""
         repo = self.get(name)
         if repo.kind != "remote":
@@ -350,8 +373,25 @@ class RepoService:
         self.store.audit("repository_removed", name=name, kind=r.kind)
 
     # ---- discovery (ingest a whole ADO project / GitHub org or user) -------------------------------------
+    def _public_host(self, host: str, port=None):
+        """A server that clones or lists on a tenant's behalf must not be aimed at this platform's own network: unless local access is enabled
+        (development), the host must resolve only to public addresses."""
+        if self.allow_local:
+            return
+        from . import netsafe
+        try:
+            netsafe.resolve(host, port or 443, False)
+        except netsafe.FetchError as e:
+            raise IngestError(str(e).replace("identity-provider endpoints", "repository hosts"))
+
     def discover(self, provider: str, org: str, project: Optional[str], token: str,
                  api_base: Optional[str] = None) -> list[dict]:
+        if api_base:
+            ub = urlsplit(api_base)
+            if ub.scheme not in ("https", "http") or not ub.hostname:
+                raise IngestError("api_base must be an http(s) URL")
+            self._public_host(ub.hostname, ub.port)
+        _require_tls_for_token(api_base, token)                # the token goes to this API: never over plain http
         if provider == "ado":
             base = (api_base or "https://dev.azure.com").rstrip("/")
             if not project:

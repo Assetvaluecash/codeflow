@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import time
 from collections import deque
+import dataclasses
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -22,7 +24,10 @@ from .graphstore import get_or_build
 from .models import (CONFIRMED, COMPLETE, COMPLETE_WITH_GAPS, CONTRACT_CONFIRMED, CORROBORATED, FAILED,
                      INFERRED, PARTIAL, SEVERITY_ORDER, SOURCE_CONFIRMED, STALE, RepoExtract)
 from .resolve import merged_service_map
-from .severity import compute, compute_data, is_material
+from .severity import apply_override, compute, compute_data, is_material
+from . import telemetry, tracing
+from .scrub import scrub_json
+from .tenantconfig import DEFAULT, TenantConfig, diff as config_diff
 from .store import Store
 
 
@@ -41,6 +46,7 @@ class AnalysisRequest:
     test_naming: bool = True
     strip_prefixes: tuple = ()
     freshness: dict = field(default_factory=dict)             # repo -> scan state at analysis time (FR-005)
+    config: Optional[TenantConfig] = None                     # the tenant's configuration the analysis runs under (None = defaults)
     stale_relationships: list = field(default_factory=list)   # unverifiable stale relationships (relationships.UNVERIFIABLE)
 
 
@@ -49,9 +55,13 @@ def _now() -> str:
 
 
 def _extract(repo: str, path: str, rev: str, store: Optional[Store], strip: tuple) -> RepoExtract:
+    if store and len(rev) == 40 and all(c in "0123456789abcdef" for c in rev):
+        cached = store.get_extract(repo, rev, EXTRACTOR_VERSION, strip)         # an extract exists only for a commit git already confirmed
+        if cached:
+            return cached
     commit = gitutil.resolve_rev(path, rev)
     if store:
-        cached = store.get_extract(repo, commit, EXTRACTOR_VERSION)
+        cached = store.get_extract(repo, commit, EXTRACTOR_VERSION, strip)
         if cached:
             return cached
     ex, _ = extract_commit(repo, path, commit, store, strip)
@@ -87,10 +97,34 @@ def _failed(req: AnalysisRequest, reason: str, store) -> dict:
     return rep
 
 
+def _without_files(ex: RepoExtract, files: set) -> RepoExtract:
+    """The extract with every declaration that lives in one of `files` left out (used where the file could not be read at the other revision)."""
+    if not files:
+        return ex
+    keep = lambda xs: [x for x in xs if getattr(x, "file", None) not in files]
+    # a schema is "used" through the endpoints that return or accept it; when those endpoints are unreadable, whether the schema is still
+    # used (and so whether a change to it is breaking) cannot be told either
+    gone = [e for e in ex.endpoints if e.file in files]
+    unreadable_use = {e.response_schema for e in gone if e.response_schema} | {n for e in gone for n in e.request_schemas}
+    return dataclasses.replace(ex, endpoints=keep(ex.endpoints), schemas=[x for x in keep(ex.schemas) if x.name not in unreadable_use],
+                               functions=keep(ex.functions), tests=keep(ex.tests), entities=keep(ex.entities), migrations=keep(ex.migrations))
+
+
 def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool = True) -> dict:
+    """Run an analysis inside a trace span and record what it produced (status, findings, unknowns, resolution) as metrics."""
+    t0 = time.monotonic()
+    with tracing.span("analysis.run", target=req.target, repos=len(req.repos)) as sp:
+        report = _analyze(req, store, persist)
+        sp.set(status=report["status"], findings=len(report.get("findings", [])), analysis_id=report["analysis_id"])
+    telemetry.record_analysis(report, time.monotonic() - t0)
+    return report
+
+
+def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool = True) -> dict:
     """persist=False runs the analysis (still using the store's caches) without recording it: used to reproduce a result."""
     t0 = time.monotonic()
     rec = store if persist else None
+    cfg = req.config or DEFAULT
     if rec:
         rec.audit("analysis_requested", target=req.target, base=req.base, head=req.head,
                     repos=sorted(req.repos), pull_request=req.pull_request)
@@ -110,18 +144,38 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
 
     extracts: dict[str, RepoExtract] = {req.target: base_ex}
     repo_failures = []
-    for name, path in sorted(req.repos.items()):
-        if name == req.target:
-            continue
+    others = [(n, p) for n, p in sorted(req.repos.items()) if n != req.target]
+
+    def one(item):
+        name, path = item
         try:
-            extracts[name] = _extract(name, path, req.revisions.get(name, "HEAD"), store, req.strip_prefixes)
+            return name, _extract(name, path, req.revisions.get(name, "HEAD"), store, req.strip_prefixes), None
         except gitutil.GitError as e:
-            repo_failures.append({"repo": name, "error": str(e)})
+            return name, None, str(e)
+    # every repository costs a git process to resolve its revision (tens of milliseconds each, mostly process start-up): do them side by side.
+    # Results are consumed in the sorted order, so the report is exactly what the sequential loop produced.
+    if len(others) > 4:
+        with ThreadPoolExecutor(max_workers=min(16, len(others))) as pool:
+            results = list(pool.map(one, others))
+    else:
+        results = [one(i) for i in others]
+    for name, ex, err in results:
+        if err is None:
+            extracts[name] = ex
+        else:
+            repo_failures.append({"repo": name, "error": err})
 
     # ---- 2. change detection --------------------------------------------------------------------------
-    contract_changes = diff_contracts(base_ex, head_ex)
-    data_changes, changed_migrations = diff_data(base_ex, head_ex)
-    base_fn = {f.id: f for f in base_ex.functions}
+    # A file that parses at base but not at the proposed revision has not had its endpoints, schemas or functions REMOVED: they are
+    # unreadable. Comparing them would report every one as deleted (and every consumer as broken), so they are left out of the
+    # comparison and reported as an unknown instead.
+    unparsed = {ff["file"] for ff in head_ex.files_failed}
+    cmp_base = _without_files(base_ex, unparsed)
+    unevaluated = {k: len(getattr(base_ex, k)) - len(getattr(cmp_base, k)) for k in ("endpoints", "schemas", "functions", "entities", "migrations")}
+    unevaluated = {k: v for k, v in unevaluated.items() if v}
+    contract_changes = diff_contracts(cmp_base, head_ex)
+    data_changes, changed_migrations = diff_data(cmp_base, head_ex)
+    base_fn = {f.id: f for f in cmp_base.functions}
     head_fn = {f.id: f for f in head_ex.functions}
     fn_changes = [(fid, "removed" if fid not in head_fn else "modified")
                   for fid, f in sorted(base_fn.items()) if fid not in head_fn or head_fn[fid].hash != f.hash]
@@ -129,8 +183,8 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
 
     covered_files = {base_fn[i].file for i, _ in fn_changes} | {c["file"] for c in contract_changes}
     covered_files |= {head_fn[i].file for i in added_fns}
-    covered_files |= {m.file for m in base_ex.migrations + head_ex.migrations}      # migrations are analysed as data changes
-    test_files = {t.file for t in base_ex.tests} | {t.file for t in head_ex.tests}
+    covered_files |= {m.file for m in cmp_base.migrations + head_ex.migrations}      # migrations are analysed as data changes
+    test_files = {t.file for t in cmp_base.tests} | {t.file for t in head_ex.tests}
     changed_components, seeds = [], []     # seeds: dict(node, kind, breaking, label)
     only_tests = True
     for status, path in changed_files:
@@ -187,7 +241,9 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
 
     # ---- 3. graph + evidence snapshot ---------------------------------------------------------------------
     g, graph_version, _ = get_or_build(store, extracts, req.strip_prefixes, req.test_naming)
+    telemetry.record_graph(g)
     smap = merged_service_map(extracts)
+    smap["criticality"] = {**smap["criticality"], **cfg.criticality}      # the tenant's registry wins over a service's own file
     stale_by_key = {r["key"]: r for r in req.stale_relationships}
 
     def edge_key(e):
@@ -201,7 +257,7 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
     snap_src += [("graph", graph_version),
                  ("stale", sorted((r["key"], r["stale_reason"], r.get("stale_since")) for r in req.stale_relationships)),
                  ("freshness", sorted((r, sorted(f.items())) for r, f in req.freshness.items() if r in extracts))]
-    snapshot_id = "snap-" + hashlib.sha256(repr((snap_src, CONFIG_VERSION)).encode()).hexdigest()[:12]
+    snapshot_id = "snap-" + hashlib.sha256(repr((snap_src, cfg.ident(CONFIG_VERSION))).encode()).hexdigest()[:12]
     seeds = [s for s in seeds if s["node"] in g.nodes]
 
     # ---- 4. bounded traversal (confirmed edges first, then inferred) -----------------------------------------
@@ -304,7 +360,7 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
         structural = any((s.get("data") or {}).get("kind") in ("table_dropped", "table_renamed", "column_dropped", "column_renamed")
                          for s in sds)
         crit = smap["criticality"].get(nd["service"])
-        sev, rule = compute_data(kind, status, same_repo, fixed, structural, crit)
+        sev, rule = compute_data(kind, status, same_repo, fixed, structural, crit, cfg)
         ex = extracts[nd["repo"]]
         db, dsrc = nd["database"], (ex.service_map or {}).get("database_source")
         what = sorted({(f"column {d['table']}.{d['column']}" if d.get("column") and d["kind"] != "column_added_required"
@@ -379,7 +435,7 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
         status = _path_status(r["edges"], is_stale)
         comp_service = nd["service"]
         crit = smap["criticality"].get(comp_service)
-        sev, rule = compute(kind, status, cross, crit)
+        sev, rule = compute(kind, status, cross, crit, cfg)
         cons = next((e for e in r["edges"] if e.rel == "CONSUMES_API"), None)
         tests = tests_for(node)
         limitations = []
@@ -445,7 +501,7 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
         sds = [seeds[i] for i in reached[ep]["seeds"]] if ep in reached else [s for s in seeds if s["node"] == ep]
         kinds = {s["kind"] for s in sds}
         kind = "breaking" if "breaking" in kinds else "nonbreaking" if "nonbreaking" in kinds else "unclassified"
-        sev, rule = compute(kind, STALE, True, smap["criticality"].get(srec["consumer_service"]))
+        sev, rule = compute(kind, STALE, True, smap["criticality"].get(srec["consumer_service"]), cfg)
         label = "; ".join(sorted({s["label"] for s in sds}))
         where = f"{srec['consumer_repo']}:{srec['consumer_file']}:{srec['consumer_line']}"
         findings.append({
@@ -468,6 +524,14 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
             "required_verification": [f"Re-scan {srec['consumer_repo']} and confirm whether it still calls "
                                       f"{srec['method']} {srec['path']}",
                                       "Verify compatibility with the deployed consumer version"]})
+    # the tenant's policy, applied once to the finished findings: severity overrides (each records the default it replaced) and the
+    # materiality thresholds. Under the default policy this changes nothing.
+    for f in findings:
+        sev, ov = apply_override(f["severity"], f["severity_rule"], cfg)
+        if ov:
+            f["severity"], f["severity_override"] = sev, ov
+            f["limitations"] = list(f.get("limitations", [])) + [f"Severity set by tenant configuration {cfg.id} ({ov['default']} under the default rules)"]
+        f["material"] = is_material(f["severity"], f["change_nature"] == "breaking" and f["severity_rule"] != "SEV-DATA-UPDATED", cfg)
     findings.sort(key=lambda f: (-SEVERITY_ORDER.index(f["severity"]), f["depth"], f["component"], f["node"]))
     for i, f in enumerate(findings, 1):
         f["id"] = f"F{i}"
@@ -535,6 +599,15 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
         unknowns.append({"area": "unparsed_migration_statements", "affects_confidence": True, "count": len(bad_mig),
                          "reason": f"{len(bad_mig)} statement(s) in the changed migrations could not be analysed, so their "
                                    "effect on the schema is unknown.", "items": bad_mig})
+    overridden = [f for f in findings if f.get("severity_override")]
+    if overridden:
+        by_rule: dict = {}
+        for f in overridden:
+            by_rule[f["severity_override"]["rule"]] = by_rule.get(f["severity_override"]["rule"], 0) + 1
+        unknowns.append({"area": "severity_overridden", "affects_confidence": False, "count": len(overridden),
+                         "reason": f"{len(overridden)} finding(s) have a severity set by this tenant's configuration ({cfg.id}) instead of the "
+                                   "default rules; each records the default it replaced.",
+                         "items": [{"rule": r, "count": n} for r, n in sorted(by_rule.items())]})
     if file_level:
         unknowns.append({"area": "file_level_analysis", "affects_confidence": True,
                          "reason": "Symbol-level comparison unavailable for: " + ", ".join(file_level) + " (file-level analysis)."})
@@ -557,6 +630,12 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
     if parse_failures:
         unknowns.append({"area": "parse_failures", "affects_confidence": True,
                          "reason": f"{len(parse_failures)} file(s) failed to parse.", "items": parse_failures})
+    if unevaluated:
+        unknowns.append({"area": "changes_not_evaluated", "affects_confidence": True,
+                         "reason": "Declarations in file(s) that do not parse at the proposed revision could not be compared with the base ("
+                                   + ", ".join(f"{n} {k}" for k, n in sorted(unevaluated.items())) + "): they are NOT reported as removed, "
+                                   "and whether they changed is unknown.",
+                         "items": [{"repo": req.target, "file": f} for f in sorted(unparsed)]})
     if truncated:
         unknowns.append({"area": "truncated_traversal", "affects_confidence": True, "reason": trunc_reason})
     stale_scans = [{"repo": r, **req.freshness[r]} for r in sorted(extracts)
@@ -614,16 +693,31 @@ def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool =
             "repositories_inaccessible": repo_failures,
             **g.resolution_stats,
             **({"data": ds} if (ds := data_summary(extracts)) else {}),
-            "traversal": {"max_depth": req.max_depth, "max_results": req.max_results, "truncated": truncated},
+            "traversal": {"max_depth": req.max_depth, "max_results": req.max_results, "truncated": truncated, "reached": len(reached)},
+            **({"configuration": {"id": cfg.id, "version": cfg.version,
+                                  "settings_changed": [d["path"] for d in config_diff(DEFAULT.to_dict(), cfg.to_dict())][:50]}}
+               if not cfg.is_default else {}),
             "criticality_configured": bool(smap["criticality"])},
         "findings": findings, "unknowns": unknowns, "policy_results": [],
-        "generated_at": _now(), "configuration_version": CONFIG_VERSION,
+        "generated_at": _now(), "configuration_version": cfg.ident(CONFIG_VERSION),
         "extractor_versions": dict(EXTRACTOR_VERSIONS)}
+    # PL-011: nothing that looks like a credential may leave in a report, whatever the source code contained
+    report, in_report = scrub_json(report)
+    in_source = {r: e.secrets_withheld for r, e in sorted(extracts.items()) if e.secrets_withheld}
+    if head_ex.secrets_withheld and head_ex.secrets_withheld > in_source.get(req.target, 0):
+        in_source[req.target] = head_ex.secrets_withheld
+    if in_report or in_source:
+        report["unknowns"].append({
+            "area": "secrets_withheld", "affects_confidence": False, "count": in_report + sum(in_source.values()),
+            "reason": f"{in_report + sum(in_source.values())} secret-like value(s) found in the analysed source or evidence were withheld "
+                      "from TIA's records and this report. Treat them as exposed and rotate them.",
+            "items": [{"repo": r, "count": c} for r, c in in_source.items()]})
     if rec:
         rec.put_snapshot(snapshot_id, {
             "id": snapshot_id, "target": req.target, "target_base": base_sha, "target_head": head_sha,
             "revisions": {r: e.commit for r, e in sorted(extracts.items())},
             "extractor_versions": dict(EXTRACTOR_VERSIONS), "config_version": CONFIG_VERSION, "graph_id": graph_version,
+            "tenant_config": {"version": cfg.version, "digest": cfg.digest, "settings": cfg.to_dict()},
             "strip_prefixes": list(req.strip_prefixes), "test_naming": req.test_naming,
             "max_depth": req.max_depth, "max_results": req.max_results,
             "freshness": {r: f for r, f in sorted(req.freshness.items()) if r in extracts},

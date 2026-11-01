@@ -1,7 +1,12 @@
 """Read-only git access. Never executes repository code."""
 from __future__ import annotations
 
+import re
 import subprocess
+from pathlib import Path
+from typing import Optional
+
+_HEX40 = re.compile(r"[0-9a-f]{40}")
 
 
 class GitError(Exception):
@@ -18,7 +23,46 @@ def _git(repo_path: str, *args: str, text: bool = True):
     return r.stdout.decode("utf-8", "replace") if text else r.stdout
 
 
+def _git_dir(repo_path: str) -> Optional[Path]:
+    p = Path(repo_path)
+    if (p / ".git").is_dir():
+        return p / ".git"
+    if (p / "HEAD").is_file() and (p / "objects").is_dir():          # a bare repository
+        return p
+    return None                                                      # a worktree/gitfile or something unusual: ask git
+
+
+def _read_ref(gd: Path, ref: str, depth: int = 0) -> Optional[str]:
+    """The commit a branch or HEAD points at, read straight from the repository's files (no process); None when it cannot be told this way."""
+    if depth > 5 or ".." in ref:
+        return None
+    f = gd / ref
+    try:
+        if f.is_file():
+            v = f.read_text(encoding="ascii").strip()
+            if v.startswith("ref: "):
+                return _read_ref(gd, v[5:].strip(), depth + 1)
+            return v if _HEX40.fullmatch(v) else None
+        packed = gd / "packed-refs"
+        if ref.startswith("refs/") and packed.is_file():
+            for line in packed.read_text(encoding="ascii", errors="replace").splitlines():
+                if line and line[0] not in "#^" and line.endswith(" " + ref):
+                    sha = line.split(" ", 1)[0]
+                    return sha if _HEX40.fullmatch(sha) else None
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
+
+
 def resolve_rev(repo_path: str, rev: str) -> str:
+    """The commit a revision names. HEAD and plain branch names are read from the repository's own files (a git process costs tens of
+    milliseconds, which adds up across hundreds of repositories per analysis); everything else - tags, shas, expressions - goes through git."""
+    if rev == "HEAD" or (rev and re.fullmatch(r"[A-Za-z0-9._/-]+", rev) and not _HEX40.fullmatch(rev)):
+        gd = _git_dir(repo_path)
+        if gd is not None:
+            sha = _read_ref(gd, "HEAD") if rev == "HEAD" else (_read_ref(gd, "refs/heads/" + rev) if not rev.startswith("refs/") else _read_ref(gd, rev))
+            if sha:
+                return sha
     return _git(repo_path, "rev-parse", "--verify", f"{rev}^{{commit}}").strip()
 
 

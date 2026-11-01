@@ -8,11 +8,14 @@ Requires a token with pull-request write (comment) and checks write (App) permis
 from __future__ import annotations
 
 import json
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
+from . import metrics, tracing
 from .report import MARKER, render_comment
 
 CHECK_NAME = "TIA impact analysis"
@@ -24,12 +27,54 @@ def find_marker_comment(comments: list[dict]) -> Optional[dict]:
     return next((c for c in comments if MARKER in (c.get("body") or "")), None)
 
 
+def _operation(url: str) -> str:
+    return "check_run" if "check-runs" in url else "comment" if "/issues/" in url else "api"
+
+
 def _call(method: str, url: str, token: str, payload: Optional[dict] = None):
-    req = urllib.request.Request(url, method=method, data=json.dumps(payload).encode() if payload else None,
-                                 headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                                          "Content-Type": "application/json", "User-Agent": "tia"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read() or b"null")
+    op, t0, outcome = _operation(url), time.perf_counter(), "success"
+    try:
+        with tracing.span(f"github.{op}", "client", method=method) as sp:
+            req = urllib.request.Request(url, method=method, data=json.dumps(payload).encode() if payload else None,
+                                         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                                                  "Content-Type": "application/json", "User-Agent": "tia",
+                                                  **tracing.propagation_headers()})
+            try:
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    return json.loads(r.read() or b"null")
+            except urllib.error.HTTPError as e:
+                outcome = f"http_{e.code // 100}xx"
+                sp.set(status=e.code)
+                raise
+            except OSError:
+                outcome = "unreachable"
+                raise
+    finally:
+        metrics.CONNECTOR.labels(provider="github", operation=op, outcome=outcome).inc()
+        metrics.CONNECTOR_DURATION.labels(provider="github", operation=op).observe(time.perf_counter() - t0)
+
+
+ROLE_ORDER = ("pull", "triage", "push", "maintain", "admin")
+_ROLE_NAMES = {"read": "pull", "write": "push"}
+
+
+def list_collaborators(full_repo: str, token: str, api_url: str = "https://api.github.com") -> list[tuple[str, str]]:
+    """(login, permission) of everyone with access to the repository, teams and organisation members included (affiliation=all).
+    GitHub only answers this for a token with push access to the repository."""
+    out, page = [], 1
+    while True:
+        batch = _call("GET", f"{api_url}/repos/{full_repo}/collaborators?affiliation=all&per_page=100&page={page}", token) or []
+        for c in batch:
+            login = (c.get("login") or "").lower()
+            perms = c.get("permissions") or {}
+            role = _ROLE_NAMES.get(c.get("role_name"), c.get("role_name"))
+            if role not in ROLE_ORDER:
+                role = next((r for r in reversed(ROLE_ORDER) if perms.get(r)), None)
+            if login and role:
+                out.append((login, role))
+        if len(batch) < 100:
+            return out
+        page += 1
 
 
 def upsert_comment(full_repo: str, pr_number: int, body: str, token: str,

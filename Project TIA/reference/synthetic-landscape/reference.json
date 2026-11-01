@@ -1,0 +1,187 @@
+{
+  "name": "synthetic-landscape",
+  "description": "The six-repository Python landscape built by fixtures/build_fixture.py (FastAPI + requests + a generated client + a declared contract). It was written by the product's author together with its expected results, so it checks regressions and the harness itself; it is NOT independent evidence of accuracy on real code.",
+  "independent": false,
+  "curated_by": "the product's author, from the fixture's own comments (fixtures/build_fixture.py)",
+  "source": {
+    "type": "fixture"
+  },
+  "services": {
+    "payments-service": "",
+    "reconciliation-service": "",
+    "ledger-sync": "",
+    "mobile-bff": "",
+    "audit-reporting": "",
+    "notifications": ""
+  },
+  "dependencies": [
+    {
+      "id": "S1",
+      "consumer": "reconciliation-service",
+      "provider": "payments-service",
+      "method": "GET",
+      "path": "/payments/{id}/status",
+      "language": "python",
+      "relationship": "rest",
+      "difficulty": "config key mapped to a service (R2)",
+      "critical": true,
+      "evidence": "reconciliation-service/client.py:8"
+    },
+    {
+      "id": "S2",
+      "consumer": "mobile-bff",
+      "provider": "payments-service",
+      "method": "GET",
+      "path": "/payments/{id}/status",
+      "language": "python",
+      "relationship": "rest",
+      "difficulty": "shared generated client (R1)",
+      "critical": false,
+      "evidence": "mobile-bff/bff.py:7 via payments_client.PaymentsClient.get_status"
+    },
+    {
+      "id": "S3",
+      "consumer": "audit-reporting",
+      "provider": "payments-service",
+      "method": "GET",
+      "path": "/payments/{id}/status",
+      "language": "python",
+      "relationship": "contract",
+      "difficulty": "declared consumer contract (R3)",
+      "critical": false,
+      "evidence": "audit-reporting/contracts/payments.json"
+    },
+    {
+      "id": "S4",
+      "consumer": "ledger-sync",
+      "provider": "payments-service",
+      "method": "GET",
+      "path": "/payments/{id}/status",
+      "language": "python",
+      "relationship": "rest",
+      "difficulty": "unresolved base URL, unique path (inferred, R5)",
+      "critical": false,
+      "evidence": "ledger-sync/sync.py:6"
+    }
+  ],
+  "acceptable_extra_edges": [],
+  "unresolvable": [
+    {
+      "consumer": "notifications",
+      "file": "notify.py",
+      "line": 10,
+      "why": "the URL is built from a variable the code never defines statically"
+    }
+  ],
+  "endpoints": [
+    {
+      "service": "payments-service",
+      "method": "GET",
+      "path": "/payments/{id}/status"
+    },
+    {
+      "service": "payments-service",
+      "method": "POST",
+      "path": "/payments"
+    },
+    {
+      "service": "reconciliation-service",
+      "method": "GET",
+      "path": "/reconciliations/{id}"
+    }
+  ],
+  "changes": [
+    {
+      "id": "breaking",
+      "description": "payments-service changes the PaymentStatus contract",
+      "target": "payments-service",
+      "base": "base",
+      "head": "breaking",
+      "expected_material": [
+        {
+          "component": "reconciliation-service"
+        },
+        {
+          "component": "mobile-bff"
+        },
+        {
+          "component": "audit-reporting"
+        },
+        {
+          "component": "ledger-sync"
+        }
+      ]
+    },
+    {
+      "id": "impl",
+      "description": "payments-service changes the implementation behind the consumed endpoint (no contract change)",
+      "target": "payments-service",
+      "base": "base",
+      "head": "impl",
+      "expected_material": [
+        {
+          "component": "reconciliation-service",
+          "why": "a consumer of the endpoint whose behaviour changed"
+        },
+        {
+          "component": "mobile-bff",
+          "why": "a consumer of the endpoint whose behaviour changed"
+        },
+        {
+          "component": "audit-reporting",
+          "why": "a consumer of the endpoint whose behaviour changed"
+        },
+        {
+          "component": "ledger-sync",
+          "why": "a consumer of the endpoint whose behaviour changed"
+        }
+      ]
+    },
+    {
+      "id": "tests_only",
+      "description": "payments-service test-only change",
+      "target": "payments-service",
+      "base": "base",
+      "head": "tests_only",
+      "expected_material": []
+    },
+    {
+      "id": "docs_only",
+      "description": "payments-service documentation-only change",
+      "target": "payments-service",
+      "base": "base",
+      "head": "docs_only",
+      "expected_material": []
+    },
+    {
+      "id": "syntax_error",
+      "description": "payments-service file that no longer parses",
+      "target": "payments-service",
+      "base": "base",
+      "head": "syntax_error",
+      "expected_material": [],
+      "expect_gaps": "an unparseable source file must be reported as incomplete input, never as a plain complete analysis"
+    },
+    {
+      "id": "removed_endpoint",
+      "description": "payments-service removes GET /payments/{id}/status",
+      "target": "payments-service",
+      "base": "base",
+      "head": "removed_endpoint",
+      "expected_material": [
+        {
+          "component": "reconciliation-service"
+        },
+        {
+          "component": "mobile-bff"
+        },
+        {
+          "component": "audit-reporting"
+        },
+        {
+          "component": "ledger-sync"
+        }
+      ]
+    }
+  ]
+}

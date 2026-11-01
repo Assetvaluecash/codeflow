@@ -21,6 +21,7 @@ from typing import Optional
 from psycopg.types.json import Jsonb
 
 from .db import Database
+from .scrub import scrub_text
 
 COLS = "tenant_id, id, kind, key, group_key, group_seq, payload, attempts, max_attempts, cancel_requested"
 
@@ -73,15 +74,18 @@ class JobQueue:
                           "where group_key=%s and status='running' and id<>%s", (group_key, jid))
             return {"job_id": str(jid), "deduplicated": False, "status": "queued"}
 
-    def get(self, tenant_id: str, job_id: str) -> Optional[dict]:
+    def get(self, tenant_id: str, job_id: str, with_payload: bool = False) -> Optional[dict]:
         with self.db.tx(tenant_id) as c:
             r = c.execute("select id, kind, status, attempts, max_attempts, error, result, group_key, cancel_requested, "
-                          "created_at, updated_at, run_after from jobs where id = %s", (job_id,)).fetchone()
+                          "created_at, updated_at, run_after, payload from jobs where id = %s", (job_id,)).fetchone()
         if not r:
             return None
-        return {"id": str(r[0]), "kind": r[1], "status": r[2], "attempts": r[3], "max_attempts": r[4], "error": r[5],
-                "result": r[6], "group_key": r[7], "cancel_requested": r[8], "created_at": r[9].isoformat(),
-                "updated_at": r[10].isoformat(), "run_after": r[11].isoformat()}
+        out = {"id": str(r[0]), "kind": r[1], "status": r[2], "attempts": r[3], "max_attempts": r[4], "error": r[5],
+               "result": r[6], "group_key": r[7], "cancel_requested": r[8], "created_at": r[9].isoformat(),
+               "updated_at": r[10].isoformat(), "run_after": r[11].isoformat()}
+        if with_payload:
+            out["payload"] = r[12]
+        return out
 
     def cancel(self, tenant_id: str, job_id: str) -> Optional[str]:
         """Queued -> cancelled immediately; running -> cancel_requested. Returns the resulting state."""
@@ -106,6 +110,12 @@ class JobQueue:
                               (r[0], r[1])).fetchone()
         return newer is None
 
+    def beat(self, worker_id: str, info: Optional[dict] = None) -> None:
+        """A worker says it is alive (readiness reports whether anything is consuming the queue)."""
+        with self.db.pool.connection() as conn, conn.transaction():
+            conn.execute("insert into worker_heartbeats (worker_id, info) values (%s, %s) on conflict (worker_id) do update "
+                         "set last_seen = now(), info = excluded.info", (worker_id, Jsonb(info or {})))
+
     # ---- consumer (tia_worker role) --------------------------------------------------------------------
     def claim(self, worker_id: str, lease_s: float = 300, per_tenant_cap: int = 4,
               kinds: Optional[list] = None) -> Optional[Job]:
@@ -116,13 +126,16 @@ class JobQueue:
                 "         row_number() over (partition by j.tenant_id order by j.created_at) as rn "
                 "  from jobs j left join (select tenant_id, count(*) n from jobs where status='running' group by 1) r "
                 "       using (tenant_id) "
-                "  where j.status='queued' and j.run_after <= now() and (%s::text[] is null or j.kind = any(%s))"
+                "  where j.status='queued' and j.run_after <= now() and (%s::text[] is null or j.kind = any(%s)) "
+                "        and tia_tenant_active(j.tenant_id)"
                 ") x order by running, rn, created_at limit 30", (kinds, kinds)).fetchall()
             for tid, jid in cands:
                 # serialise claims per tenant so the concurrency cap is exact
                 if not conn.execute("select pg_try_advisory_xact_lock(hashtextextended(%s, 1))", (str(tid),)).fetchone()[0]:
                     continue
-                if conn.execute("select count(*) from jobs where tenant_id=%s and status='running'", (tid,)).fetchone()[0] >= per_tenant_cap:
+                tenant_cap = conn.execute("select tia_tenant_job_cap(%s)", (tid,)).fetchone()[0]   # the tenant's own limit (configuration)
+                cap = min(per_tenant_cap, tenant_cap) if tenant_cap else per_tenant_cap            # may lower the deployment's cap, never raise it
+                if conn.execute("select count(*) from jobs where tenant_id=%s and status='running'", (tid,)).fetchone()[0] >= cap:
                     continue
                 row = conn.execute(
                     "with c as (select tenant_id, id from jobs where tenant_id=%s and id=%s and status='queued' "
@@ -150,6 +163,7 @@ class JobQueue:
                          (Jsonb(result), job.tenant_id, job.id, job.worker_id))
 
     def fail(self, job: Job, error: str, permanent: bool = False, base_delay_s: float = 5):
+        error = scrub_text(error, generic=True)[0]       # a failure message must not carry a secret into the queue
         with self.db.pool.connection() as conn, conn.transaction():
             conn.execute(
                 "update jobs set status = case when %s or attempts >= max_attempts then 'failed' else 'queued' end, "

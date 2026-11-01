@@ -1,0 +1,334 @@
+{
+  "name": "spring-petclinic-microservices",
+  "description": "Spring PetClinic split into microservices (Java 17, Spring Boot, Spring Cloud). Ground truth curated by reading the source, not by running TIA.",
+  "independent": true,
+  "curated_by": "reading the code at the pinned commit (2026-10-30); every dependency names the line that proves it",
+  "source": {
+    "type": "modules",
+    "url": "https://github.com/spring-petclinic/spring-petclinic-microservices",
+    "commit": "e8b747ab522721076cacb5cf688eb8a54ba8c5c9",
+    "license": "Apache-2.0",
+    "how_to_get_it": "git clone https://github.com/spring-petclinic/spring-petclinic-microservices <dir>  (then: git -C <dir> checkout <commit>); on Windows use a short path and core.longpaths=true. It is only copied and parsed, never built or run."
+  },
+  "services": {
+    "api-gateway": "spring-petclinic-api-gateway",
+    "customers-service": "spring-petclinic-customers-service",
+    "visits-service": "spring-petclinic-visits-service",
+    "vets-service": "spring-petclinic-vets-service",
+    "genai-service": "spring-petclinic-genai-service",
+    "admin-server": "spring-petclinic-admin-server",
+    "config-server": "spring-petclinic-config-server",
+    "discovery-server": "spring-petclinic-discovery-server"
+  },
+  "dependencies": [
+    {
+      "id": "D1",
+      "consumer": "api-gateway",
+      "provider": "customers-service",
+      "method": "GET",
+      "path": "/owners/{ownerId}",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "plain",
+      "critical": true,
+      "evidence": "spring-petclinic-api-gateway/.../application/CustomersServiceClient.java:37 (WebClient .uri(\"http://customers-service/owners/{ownerId}\"))"
+    },
+    {
+      "id": "D2",
+      "consumer": "api-gateway",
+      "provider": "visits-service",
+      "method": "GET",
+      "path": "/pets/visits",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "field constant + literal",
+      "critical": true,
+      "evidence": "spring-petclinic-api-gateway/.../application/VisitsServiceClient.java:45 (hostname field \"http://visits-service/\" + \"pets/visits?petId={petId}\")"
+    },
+    {
+      "id": "D3",
+      "consumer": "genai-service",
+      "provider": "vets-service",
+      "method": "GET",
+      "path": "/vets",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "local variable + literal",
+      "critical": false,
+      "evidence": "spring-petclinic-genai-service/.../VectorStoreController.java:66-69 (vetsHostname \"http://vets-service/\" + \"vets\")"
+    },
+    {
+      "id": "D4",
+      "consumer": "genai-service",
+      "provider": "customers-service",
+      "method": "GET",
+      "path": "/owners",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "RestClient + service discovery by name",
+      "critical": false,
+      "evidence": "spring-petclinic-genai-service/.../AIDataProvider.java:45 (restClient.get().uri(getCustomerServiceUri() + \"/owners\"); the host comes from discoveryClient.getInstances(\"customers-service\"))"
+    },
+    {
+      "id": "D5",
+      "consumer": "genai-service",
+      "provider": "customers-service",
+      "method": "POST",
+      "path": "/owners",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "RestClient + service discovery by name",
+      "critical": false,
+      "evidence": "spring-petclinic-genai-service/.../AIDataProvider.java:82 (same host mechanism, POST with a body)"
+    },
+    {
+      "id": "D6",
+      "consumer": "genai-service",
+      "provider": "customers-service",
+      "method": "POST",
+      "path": "/owners/{ownerId}/pets",
+      "language": "java",
+      "relationship": "rest",
+      "difficulty": "RestClient + service discovery by name + path variable",
+      "critical": false,
+      "evidence": "spring-petclinic-genai-service/.../AIDataProvider.java:73 (restClient.post().uri(getCustomerServiceUri() + \"/owners/\" + ownerId + \"/pets\")). The first version of this file called it GET and 'not exposed by customers-service'; the harness disagreed and re-reading lines 70-77 showed that was a curation error"
+    }
+  ],
+  "acceptable_extra_edges": [],
+  "unresolvable": [],
+  "out_of_scope": [
+    {
+      "what": "api-gateway routes to lb://vets-service, lb://visits-service, lb://customers-service, lb://genai-service",
+      "why": "Spring Cloud Gateway route configuration in application.yml, not an HTTP call site in code (gateway route prefixes are a separate, configured feature)"
+    }
+  ],
+  "endpoints": [
+    {
+      "service": "customers-service",
+      "method": "POST",
+      "path": "/owners"
+    },
+    {
+      "service": "customers-service",
+      "method": "GET",
+      "path": "/owners/{ownerId}"
+    },
+    {
+      "service": "customers-service",
+      "method": "GET",
+      "path": "/owners"
+    },
+    {
+      "service": "customers-service",
+      "method": "PUT",
+      "path": "/owners/{ownerId}"
+    },
+    {
+      "service": "customers-service",
+      "method": "GET",
+      "path": "/petTypes"
+    },
+    {
+      "service": "customers-service",
+      "method": "POST",
+      "path": "/owners/{ownerId}/pets"
+    },
+    {
+      "service": "customers-service",
+      "method": "PUT",
+      "path": "/owners/*/pets/{petId}"
+    },
+    {
+      "service": "customers-service",
+      "method": "GET",
+      "path": "/owners/*/pets/{petId}"
+    },
+    {
+      "service": "visits-service",
+      "method": "POST",
+      "path": "/owners/*/pets/{petId}/visits"
+    },
+    {
+      "service": "visits-service",
+      "method": "GET",
+      "path": "/owners/*/pets/{petId}/visits"
+    },
+    {
+      "service": "visits-service",
+      "method": "GET",
+      "path": "/pets/visits"
+    },
+    {
+      "service": "vets-service",
+      "method": "GET",
+      "path": "/vets"
+    },
+    {
+      "service": "api-gateway",
+      "method": "GET",
+      "path": "/api/gateway/owners/{ownerId}"
+    },
+    {
+      "service": "genai-service",
+      "method": "POST",
+      "path": "/chatclient"
+    }
+  ],
+  "changes": [
+    {
+      "id": "C1",
+      "description": "customers-service renames GET /owners/{ownerId} to /owners/{ownerId}/profile",
+      "target": "customers-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/customers/web/OwnerResource.java",
+          "find": "@GetMapping(value = \"/{ownerId}\")",
+          "replace": "@GetMapping(value = \"/{ownerId}/profile\")"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "api-gateway",
+          "why": "D1 calls the renamed endpoint"
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "description": "customers-service moves GET /owners to /owners/all",
+      "target": "customers-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/customers/web/OwnerResource.java",
+          "find": "    @GetMapping\n    public List<Owner> findAll()",
+          "replace": "    @GetMapping(\"/all\")\n    public List<Owner> findAll()"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "genai-service",
+          "why": "D4 calls GET /owners"
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "description": "vets-service moves GET /vets to /vets/list",
+      "target": "vets-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/vets/web/VetResource.java",
+          "find": "    @GetMapping\n    @Cacheable(\"vets\")",
+          "replace": "    @GetMapping(\"/list\")\n    @Cacheable(\"vets\")"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "genai-service",
+          "why": "D3 calls GET /vets"
+        }
+      ]
+    },
+    {
+      "id": "C4",
+      "description": "visits-service moves GET /pets/visits to /pets/visits/all",
+      "target": "visits-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/visits/web/VisitResource.java",
+          "find": "@GetMapping(\"pets/visits\")",
+          "replace": "@GetMapping(\"pets/visits/all\")"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "api-gateway",
+          "why": "D2 calls GET /pets/visits"
+        }
+      ]
+    },
+    {
+      "id": "C5",
+      "description": "visits-service adds a new endpoint (compatible)",
+      "target": "visits-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/visits/web/VisitResource.java",
+          "find": "    record Visits(",
+          "replace": "    @GetMapping(\"visits/count\")\n    public long count() {\n        return visitRepository.count();\n    }\n\n    record Visits("
+        }
+      ],
+      "expected_material": []
+    },
+    {
+      "id": "C6",
+      "description": "customers-service: comment-only change",
+      "target": "customers-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/customers/web/OwnerResource.java",
+          "find": "     * Read single Owner",
+          "replace": "     * Read a single Owner (documentation change only)"
+        }
+      ],
+      "expected_material": []
+    },
+    {
+      "id": "C7",
+      "description": "customers-service: change a log message inside an implementation (no contract change)",
+      "target": "customers-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/customers/web/OwnerResource.java",
+          "find": "log.info(\"Saving owner {}\", ownerModel);",
+          "replace": "log.info(\"Persisting owner {}\", ownerModel);"
+        }
+      ],
+      "expected_material": []
+    },
+    {
+      "id": "C8",
+      "description": "api-gateway renames its own GET /api/gateway/owners/{ownerId} (no consumer in the landscape)",
+      "target": "api-gateway",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/api/boundary/web/ApiGatewayController.java",
+          "find": "@GetMapping(value = \"owners/{ownerId}\")",
+          "replace": "@GetMapping(value = \"owners/{ownerId}/details\")"
+        }
+      ],
+      "expected_material": []
+    },
+    {
+      "id": "C9",
+      "description": "customers-service: a file that no longer parses",
+      "target": "customers-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/customers/web/OwnerResource.java",
+          "append": "\n}}} this is not java {{{\n"
+        }
+      ],
+      "expected_material": [],
+      "expect_gaps": "an unparseable source file must be reported as incomplete input, never as a plain complete analysis"
+    },
+    {
+      "id": "C10",
+      "description": "customers-service changes the body of the handler behind GET /owners/{ownerId} (no contract change)",
+      "target": "customers-service",
+      "patch": [
+        {
+          "file": "src/main/java/org/springframework/samples/petclinic/customers/web/OwnerResource.java",
+          "find": "return ownerRepository.findById(ownerId);",
+          "replace": "return ownerRepository.findById(ownerId).filter(o -> o.getId() != null);"
+        }
+      ],
+      "expected_material": [
+        {
+          "component": "api-gateway",
+          "why": "D1 consumes the endpoint whose behaviour changed"
+        }
+      ]
+    }
+  ]
+}

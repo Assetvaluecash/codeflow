@@ -35,11 +35,23 @@
   #gside dt{color:var(--mut);margin-top:6px} #gside dd{margin:0;word-break:break-all}
   .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--mut);margin-top:6px} .legend i{display:inline-block;width:18px;height:0;border-top:3px solid;vertical-align:middle;margin-right:4px}
   .ctl{display:flex;gap:10px;flex-wrap:wrap;align-items:end} .ctl>div{min-width:130px}
+  main.locked>section:not(#signin){display:none} #who{margin-left:auto} header button{padding:3px 10px}
+  .roles label{display:inline-block;margin:0 10px 0 0;color:var(--fg)} .roles input{width:auto}
+  textarea.json{width:100%;height:200px;font:12px ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px}
 </style>
 </head>
 <body>
-<header><h1>TIA</h1><small>Technical Impact Analysis</small><small id="cfg" class="mut"></small></header>
-<main>
+<header><h1>TIA</h1><small>Technical Impact Analysis</small><small id="cfg" class="mut"></small>
+  <span id="who" class="mut"></span><button class="sec hidden" id="signout">Sign out</button></header>
+<main class="locked">
+
+<section id="signin" class="hidden">
+  <h2>Sign in</h2>
+  <p class="mut">Enter your organisation's name, then choose how to sign in.</p>
+  <div class="row"><div><label>Organisation</label><input id="org" autocomplete="organization" placeholder="your organisation's TIA name"></div></div>
+  <p><button id="orgnext">Continue</button> <span id="signmsg"></span></p>
+  <div id="signopts"></div>
+</section>
 
 <section>
   <h2>1. Ingest repositories</h2>
@@ -140,18 +152,99 @@
   <p><button class="sec" id="toimpact" disabled>Show on graph</button> <button class="sec" id="copy">Copy comment</button> <button class="sec" id="json">Show full JSON</button> <a id="permalink" class="mut"></a></p>
   <pre id="raw" class="hidden"></pre>
 </section>
+<section id="cfgsec">
+  <h2>5. Configuration <span id="cfgid" class="pill"></span></h2>
+  <p class="mut" id="cfgmeta">Per-tenant limits, severity rules, criticality and path prefixes. Every save is a new immutable version.</p>
+  <textarea id="cfgtext" spellcheck="false" style="width:100%;height:260px;font:12px ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px"></textarea>
+  <ul id="cfgproblems" class="err"></ul>
+  <div class="row"><div><label>Comment for this version</label><input id="cfgcomment" maxlength="500" placeholder="why this change"></div></div>
+  <p><button class="sec" id="cfgvalidate">Validate</button> <button id="cfgsave">Save as new version</button> <button class="sec" id="cfgreload">Reload</button> <span id="cfgmsg"></span></p>
+  <table id="cfghist"><thead><tr><th>Version</th><th>Saved by</th><th>Comment</th><th>When</th><th></th></tr></thead><tbody></tbody></table>
+</section>
+<section id="adminsec" class="hidden">
+  <h2>6. Administration</h2>
+  <h3 style="font-size:13px">People</h3>
+  <table id="adusers"><thead><tr><th>Person</th><th>Roles</th><th>Source-host login</th><th>Last sign-in</th><th></th></tr></thead><tbody></tbody></table>
+  <h3 style="font-size:13px">Repository access</h3>
+  <p class="mut">Hosted repositories are readable only by the people the source-code host lists (mirrored; a mirror older than <span id="adage"></span> grants nothing).
+    <button class="sec" id="adsync">Sync permissions from GitHub</button> <span id="adsyncmsg"></span></p>
+  <table id="adrepos"><thead><tr><th>Repository</th><th>Governed by</th><th>Mirror</th></tr></thead><tbody></tbody></table>
+  <h3 style="font-size:13px">Service-account tokens</h3>
+  <div class="row"><div><label>Name</label><input id="tkname"></div><div><label>Repositories ("*" or comma-separated)</label><input id="tkrepos" value="*"></div>
+    <div><label>Expires in days</label><input id="tkdays" type="number" min="1" value="90"></div></div>
+  <div class="roles" id="tkroles"></div>
+  <p><button id="tkmake">Create token</button> <span id="tkmsg"></span></p>
+  <pre id="tkshow" class="hidden"></pre>
+  <table id="adtokens"><thead><tr><th>Name</th><th>Roles</th><th>Repositories</th><th>Expires</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
+  <h3 style="font-size:13px">Identity providers</h3>
+  <table id="adidps"><thead><tr><th>Name</th><th>Type</th><th>Enabled</th><th></th></tr></thead><tbody></tbody></table>
+  <p class="mut">Add or change one (JSON: name, protocol, config, enabled, and optionally client_secret, which is stored encrypted and never shown again):</p>
+  <textarea id="idptext" class="json" spellcheck="false"></textarea>
+  <ul id="idpproblems" class="err"></ul>
+  <p><button id="idpsave">Save identity provider</button> <span id="idpmsg"></span></p>
+</section>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let CSRF = null, PERMS = null, ME = null;
+const UNSAFE = ["POST", "PUT", "PATCH", "DELETE"];
+async function tfetch(path, init) {
+  init = init || {};
+  const h = {...(init.headers || {})};
+  if (CSRF && UNSAFE.includes((init.method || "GET").toUpperCase())) h["X-TIA-CSRF"] = CSRF;
+  const r = await fetch(path, {...init, headers: h, credentials: "same-origin"});
+  if (r.status === 401 && ME && ME.auth === "required") showSignIn("Your session has ended. Sign in again.");
+  return r;
+}
+const can = p => PERMS === null || PERMS.includes(p);
 async function api(path, opts) {
-  const r = await fetch(path, opts && {method: opts.method, headers: {"Content-Type":"application/json"}, body: opts.body && JSON.stringify(opts.body)});
+  const r = await tfetch(path, opts && {method: opts.method, headers: {"Content-Type":"application/json"}, body: opts.body && JSON.stringify(opts.body)});
   const t = await r.text(); let j; try { j = JSON.parse(t) } catch { j = t }
   if (!r.ok) throw new Error((j && j.detail) || t || r.statusText);
   return j;
 }
 function busy(btn, on) { btn.disabled = on; }
+// ---- configuration (own fetch: a refusal carries a list of problems, not a message)
+async function cfgCall(path, method, body) {
+  const r = await tfetch(path, method ? {method, headers: {"Content-Type":"application/json", "X-TIA-Actor":"ui"}, body: JSON.stringify(body)} : undefined);
+  let j = {}; try { j = await r.json() } catch {}
+  return {ok: r.ok, status: r.status, j};
+}
+function cfgProblems(list) { $("cfgproblems").innerHTML = (list || []).map(p => `<li>${esc(p)}</li>`).join(""); }
+function cfgParse() {
+  try { return JSON.parse($("cfgtext").value) } catch (e) { cfgProblems(["The text is not valid JSON: " + e.message]); return null; }
+}
+async function cfgLoad() {
+  const {ok, j} = await cfgCall("/api/v1/tenant/config");
+  if (!ok) { $("cfgmeta").textContent = String(j.detail || "Configuration is not available."); return; }
+  $("cfgtext").value = JSON.stringify(j.config, null, 2); $("cfgid").textContent = j.id; cfgProblems([]);
+  $("cfgmeta").textContent = j.is_default ? "Built-in defaults: nothing has been saved yet." : `Version ${j.version} saved by ${j.actor || "?"}${j.comment ? " - " + j.comment : ""}`;
+  const h = (await cfgCall("/api/v1/tenant/config/versions")).j;
+  $("cfghist").querySelector("tbody").innerHTML = (Array.isArray(h) ? h : []).map(v =>
+    `<tr><td>${esc(v.version)} <span class="mut">${esc(v.id)}</span></td><td>${esc(v.actor || "")}</td><td>${esc(v.comment || "")}</td><td class="mut">${esc(v.created_at)}</td>` +
+    `<td><button class="sec" data-restore="${esc(v.version)}">Restore as new version</button></td></tr>`).join("");
+  document.querySelectorAll("[data-restore]").forEach(b => b.onclick = async () => {
+    const r = await cfgCall(`/api/v1/tenant/config/versions/${b.dataset.restore}/restore`, "POST", {});
+    msg("cfgmsg", r.ok ? (r.j.created ? `Restored as version ${r.j.version}` : "Already the current configuration") : "Restore failed", r.ok ? "ok" : "err");
+    cfgLoad();
+  });
+}
+$("cfgvalidate").onclick = async () => {
+  const cfg = cfgParse(); if (!cfg) return;
+  const {j} = await cfgCall("/api/v1/tenant/config/validate", "POST", {config: cfg});
+  cfgProblems(j.valid ? [] : j.problems);
+  msg("cfgmsg", j.valid ? `Valid. ${(j.changes || []).length} setting(s) would change.` : "Not valid", j.valid ? "ok" : "err");
+};
+$("cfgsave").onclick = async () => {
+  const cfg = cfgParse(); if (!cfg) return;
+  const r = await cfgCall("/api/v1/tenant/config", "PUT", {config: cfg, comment: $("cfgcomment").value || null});
+  if (r.ok) { cfgProblems([]); msg("cfgmsg", r.j.created ? `Saved as version ${r.j.version}` : "No change: identical to the current version", "ok"); $("cfgcomment").value = ""; cfgLoad(); }
+  else { const d = r.j.detail; cfgProblems(d && d.problems ? d.problems : [typeof d === "string" ? d : "Save failed"]); msg("cfgmsg", "Not saved", "err"); }
+};
+$("cfgreload").onclick = cfgLoad;
+
 function msg(id, text, cls) { $(id).className = cls || "mut"; $(id).textContent = text; }
 
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
@@ -184,8 +277,9 @@ $("add").onclick = async () => {
 // ---- upload from the user's drive: a zip (streamed as one body) or a folder (sent in batches) ----------------------------
 function xhr(method, url, body, onprogress, headers) {
   return new Promise((res, rej) => {
-    const x = new XMLHttpRequest(); x.open(method, url);
+    const x = new XMLHttpRequest(); x.open(method, url); x.withCredentials = true;
     Object.entries(headers || {}).forEach(([k, v]) => x.setRequestHeader(k, v));
+    if (CSRF && UNSAFE.includes(method.toUpperCase())) x.setRequestHeader("X-TIA-CSRF", CSRF);
     if (onprogress) x.upload.onprogress = e => e.lengthComputable && onprogress(e.loaded);
     x.onload = () => { let j; try { j = JSON.parse(x.responseText) } catch { j = x.responseText }
                        x.status < 300 ? res(j) : rej(new Error((j && j.detail) || x.statusText || ("HTTP " + x.status))) };
@@ -282,13 +376,13 @@ function show(rep, comment) {
   $("status").textContent = rep.status;
   $("warn").innerHTML = rep.status === "complete" ? "" : `<div class="banner">${rep.status === "failed" ? "The analysis failed: " + esc(rep.failure_reason) : "This is not a clean impact assessment: see the unknowns below."}</div>`;
   const s = rep.summary || {};
-  $("summary").textContent = rep.status === "failed" ? "" : `${rep.change.repository} ${rep.change.base_revision.slice(0,7)} -> ${rep.change.proposed_revision.slice(0,7)}  |  change type: ${rep.change.change_type}  |  ${s.findings} finding(s), ${s.material_findings} material` + (rep.coverage && rep.coverage.outbound_call_sites ? `  |  ${rep.coverage.outbound_call_sites_resolved}/${rep.coverage.outbound_call_sites} outbound calls resolved` : "") + (s.message ? "  |  " + s.message : "");
+  $("summary").textContent = rep.status === "failed" ? "" : `${rep.change.repository} ${rep.change.base_revision.slice(0,7)} -> ${rep.change.proposed_revision.slice(0,7)}  |  change type: ${rep.change.change_type}  |  ${s.findings} finding(s), ${s.material_findings} material` + (rep.coverage && rep.coverage.outbound_call_sites ? `  |  ${rep.coverage.outbound_call_sites_resolved}/${rep.coverage.outbound_call_sites} outbound calls resolved` : "") + (s.message ? "  |  " + s.message : "") + (rep.redacted && rep.redacted.note ? "  |  " + rep.redacted.note : "");
   $("findings").querySelector("tbody").innerHTML = (rep.findings||[]).map(f => `<tr><td><span class="pill ${f.severity}">${f.severity}</span></td><td>${esc(f.component)}<br><span class="mut">${esc(f.repository)}</span></td>
     <td>${esc(f.evidence_status)}${f.resolution_strategy ? `<br><span class="mut">${esc(f.resolution_strategy)}</span>`:""}</td><td>${esc(f.reason)}${(f.limitations||[]).map(l=>`<br><span class="mut">- ${esc(l)}</span>`).join("")}</td>
     <td>${(f.tests||[]).map(t=>esc(t.name)+` <span class="mut">(${esc(t.association)})</span>`).join("<br>") || '<span class="mut">none found</span>'}</td></tr>`).join("") || `<tr><td colspan="5" class="mut">No findings.</td></tr>`;
-  $("unknowns").innerHTML = (rep.unknowns||[]).map(u => `<li>${esc(u.reason)}${u.items ? "<ul>" + u.items.slice(0,15).map(i=>`<li class="mut">${esc(i.repo||"")} ${esc(i.file||"")}${i.line?":"+i.line:""} - ${esc(i.reason||i.error||"")}</li>`).join("") + (u.items.length>15?`<li class="mut">... ${u.items.length-15} more in JSON</li>`:"") + "</ul>" : ""}</li>`).join("");
+  $("unknowns").innerHTML = (rep.unknowns||[]).map(u => `<li>${esc(u.reason)}${u.items ? "<ul>" + u.items.slice(0,15).map(i=>`<li class="mut">${i.rule ? esc(i.rule) + " x" + esc(i.count) : `${esc(i.repo||"")} ${esc(i.file||"")}${i.line?":"+i.line:""}${i.service ? " " + esc(i.service) : ""}${i.count && !i.reason ? " x" + esc(i.count) : ""} - ${esc(i.reason||i.error||"")}`}</li>`).join("") + (u.items.length>15?`<li class="mut">... ${u.items.length-15} more in JSON</li>`:"") + "</ul>" : ""}</li>`).join("");
   $("comment").textContent = comment; $("raw").textContent = JSON.stringify(rep, null, 2);
-  $("permalink").textContent = rep.analysis_id; $("permalink").href = `/api/v1/impact-analyses/${rep.analysis_id}`;
+  $("permalink").textContent = rep.analysis_id; $("permalink").href = `/analyses/${encodeURIComponent(rep.analysis_id)}`; $("permalink").target = "_blank";
   $("result").scrollIntoView({behavior:"smooth"});
 }
 $("copy").onclick = () => navigator.clipboard.writeText($("comment").textContent);
@@ -393,9 +487,111 @@ $("gfit").onclick = () => cy && cy.fit(undefined, 30);
 $("glevel").onchange = () => gload(); $("glayout").onchange = () => cy && (gmode === "impact" ? gimpact() : gload());
 $("gq").onkeydown = e => { if (e.key === "Enter") gload(); };
 
-api("/api/v1/config").then(c => { $("cfg").textContent = c.allow_local_paths ? "development mode - local paths enabled, no authentication" : "no authentication configured";
-  if (!c.allow_local_paths) document.querySelector('[data-tab="path"]').classList.add("hidden"); });
-loadRepos().then(() => gload());
+// ---- sign-in, identity and permissions
+const ROLES = ["viewer", "engineer", "release_manager", "auditor", "administrator"];
+function showSignIn(message) {
+  document.querySelector("main").classList.add("locked"); $("signin").classList.remove("hidden");
+  $("who").textContent = ""; $("signout").classList.add("hidden");
+  if (message) msg("signmsg", message, "err");
+  const q = new URLSearchParams(location.search), saved = (() => { try { return localStorage.getItem("tia.org") } catch { return "" } })();
+  if (!$("org").value) $("org").value = q.get("org") || saved || "";
+}
+async function signOptions() {
+  const org = $("org").value.trim(); msg("signmsg", ""); $("signopts").innerHTML = "";
+  if (!org) return msg("signmsg", "Enter your organisation's name.", "err");
+  const j = await (await fetch("/auth/options?org=" + encodeURIComponent(org))).json();
+  if (!j.providers.length) return msg("signmsg", "No sign-in method is available for that organisation.", "err");
+  try { localStorage.setItem("tia.org", org) } catch {}
+  const back = new URLSearchParams(location.search).get("return_to") || "/";
+  $("signopts").innerHTML = j.providers.map(p => `<p><button type="button" data-login="/auth/login?org=${encodeURIComponent(org)}&idp=${encodeURIComponent(p.name)}&return_to=${encodeURIComponent(back)}">Sign in with ${esc(p.name)} (${esc(p.protocol.toUpperCase())})</button></p>`).join("");
+}
+$("orgnext").onclick = signOptions; $("org").onkeydown = e => { if (e.key === "Enter") signOptions(); };
+$("signout").onclick = async () => { await tfetch("/auth/logout", {method: "POST"}); location.href = "/"; };
+function applyPermissions() {
+  const lock = (ids, ok, why) => ids.forEach(i => { const e = $(i); if (e) { e.disabled = !ok; e.title = ok ? "" : why; } });
+  lock(["add", "disc", "addlocal", "upzip", "upfolder"], can("repo_write"), "needs the engineer role");
+  lock(["run"], can("analyze"), "needs the engineer role");
+  lock(["cfgsave"], can("config_write"), "needs the release manager or administrator role");
+  $("adminsec").classList.toggle("hidden", !can("admin"));
+}
+async function boot() {
+  const c = await (await fetch("/api/v1/config")).json();
+  $("cfg").textContent = c.auth === "required" ? "" : (c.allow_local_paths ? "development mode - local paths enabled, no authentication" : "no authentication configured");
+  if (!c.allow_local_paths) document.querySelector('[data-tab="path"]').classList.add("hidden");
+  const r = await fetch("/auth/me", {credentials: "same-origin"}); ME = await r.json();
+  if (!ME.authenticated) return showSignIn(r.status === 503 ? "Sign-in is temporarily unavailable." : "");
+  CSRF = ME.csrf; PERMS = ME.auth === "required" ? ME.permissions : null;
+  if (ME.auth === "required") {
+    const p = ME.principal; $("who").textContent = `${p.name || p.email || p.subject} (${p.roles.join(", ")})`; $("signout").classList.remove("hidden");
+  }
+  $("signin").classList.add("hidden"); document.querySelector("main").classList.remove("locked");
+  applyPermissions();
+  cfgLoad();
+  if (can("admin")) adminLoad();
+  loadRepos().then(() => gload());
+}
+// ---- administration (people, repository access, tokens, identity providers)
+const when = d => d ? new Date(d).toLocaleString() : "never";
+async function adminLoad() {
+  $("tkroles").innerHTML = ROLES.filter(r => r !== "administrator").map(r => `<label><input type="checkbox" value="${r}" ${r === "viewer" ? "checked" : ""}> ${r}</label>`).join("");
+  const [users, access, tokens, idps] = await Promise.all(["users", "repo-access", "tokens", "idps"].map(k => api("/api/v1/admin/" + k)));
+  $("adusers").querySelector("tbody").innerHTML = users.map(u => `<tr><td>${esc(u.name || u.email || u.subject)}<br><span class="mut">${esc(u.email)}</span>${u.disabled ? ' <span class="pill err">disabled</span>' : ""}</td>
+    <td class="roles">${ROLES.map(r => `<label><input type="checkbox" data-u="${u.id}" value="${r}" ${(u.roles || []).includes(r) ? "checked" : ""}> ${r}</label>`).join("")}
+      <br><span class="mut">${u.roles === null ? "following the identity provider's groups" : "assigned by an administrator"}</span></td>
+    <td><input data-gh="${u.id}" value="${esc((u.scm_logins || {}).github || "")}" placeholder="GitHub login" style="width:150px"></td><td class="mut">${esc(when(u.last_login))}</td>
+    <td><button class="sec" data-saveu="${u.id}">Save</button> <button class="sec" data-reset="${u.id}">Use group mapping</button> <button class="sec" data-dis="${u.id}" data-to="${!u.disabled}">${u.disabled ? "Enable" : "Disable"}</button></td></tr>`).join("") || '<tr><td colspan="5" class="mut">Nobody has signed in yet.</td></tr>';
+  $("adage").textContent = Math.round(access.freshness_limit_seconds / 60) + " minutes";
+  $("adrepos").querySelector("tbody").innerHTML = access.repositories.map(r => `<tr><td><b>${esc(r.name)}</b></td>
+    <td><select data-mode="${esc(r.name)}">${["scm", "tenant", "restricted"].map(m => `<option ${m === r.mode ? "selected" : ""}>${m}</option>`).join("")}</select>${r.explicit ? "" : ' <span class="mut">(default)</span>'}</td>
+    <td class="mut">${r.mirror ? (r.mirror.ok ? `${r.mirror.collaborators} readers, ${r.mirror.fresh ? "fresh" : "<b>stale</b>"} (${esc(when(r.mirror.synced_at))})` : `<span class="err">${esc(r.mirror.error)}</span>`) : "not synchronised"}</td></tr>`).join("");
+  $("adtokens").querySelector("tbody").innerHTML = tokens.map(t => `<tr><td>${esc(t.name)}</td><td>${esc(t.roles.join(", "))}</td><td>${esc(t.repos === "*" ? "all" : t.repos.join(", "))}</td>
+    <td class="mut">${t.revoked_at ? "revoked" : esc(t.expires_at ? when(t.expires_at) : "never")}</td><td class="mut">${esc(when(t.last_used_at))}</td>
+    <td>${t.revoked_at ? "" : `<button class="sec" data-revoke="${t.id}">Revoke</button>`}</td></tr>`).join("") || '<tr><td colspan="6" class="mut">No tokens.</td></tr>';
+  $("adidps").querySelector("tbody").innerHTML = idps.map(i => `<tr><td>${esc(i.name)}</td><td>${esc(i.protocol.toUpperCase())}</td><td>${i.enabled ? "yes" : "no"}</td>
+    <td><button class="sec" data-editidp="${esc(JSON.stringify({id: i.id, name: i.name, protocol: i.protocol, enabled: i.enabled, config: i.config, client_secret_ref: i.client_secret_ref}))}">Edit</button>
+    <button class="sec" data-delidp="${i.id}">Delete</button></td></tr>`).join("") || '<tr><td colspan="4" class="mut">No identity provider yet: nobody can sign in.</td></tr>';
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  try {
+    if (b.dataset.login) { location.href = b.dataset.login;
+    } else if (b.dataset.saveu) {
+      const id = b.dataset.saveu, roles = [...document.querySelectorAll(`input[data-u="${id}"]:checked`)].map(x => x.value), gh = document.querySelector(`input[data-gh="${id}"]`).value.trim();
+      if (!roles.length) return alert("Pick at least one role, or choose 'Use group mapping' to follow the identity provider's groups.");
+      await api("/api/v1/admin/users/" + id, {method: "PUT", body: {roles, ...(gh ? {scm_logins: {github: gh}} : {})}}); adminLoad();
+    } else if (b.dataset.reset) { await api("/api/v1/admin/users/" + b.dataset.reset, {method: "PUT", body: {roles: null}}); adminLoad();
+    } else if (b.dataset.dis) { await api("/api/v1/admin/users/" + b.dataset.dis, {method: "PUT", body: {disabled: b.dataset.to === "true"}}); adminLoad();
+    } else if (b.dataset.revoke) { await api("/api/v1/admin/tokens/" + b.dataset.revoke, {method: "DELETE"}); adminLoad();
+    } else if (b.dataset.delidp) { if (confirm("Delete this identity provider? Its sessions end now.")) { await api("/api/v1/admin/idps/" + b.dataset.delidp, {method: "DELETE"}); adminLoad(); }
+    } else if (b.dataset.editidp) { const i = JSON.parse(b.dataset.editidp); $("idptext").value = JSON.stringify({name: i.name, protocol: i.protocol, enabled: i.enabled, config: i.config}, null, 2); $("idptext").dataset.id = i.id;
+    }
+  } catch (err) { alert(err.message); }
+});
+document.addEventListener("change", async e => {
+  const sel = e.target.closest("select[data-mode]"); if (!sel) return;
+  try { await api("/api/v1/admin/repo-access/" + sel.dataset.mode, {method: "PUT", body: {mode: sel.value}}); adminLoad(); } catch (err) { alert(err.message); adminLoad(); }
+});
+$("adsync").onclick = async () => {
+  busy($("adsync"), true); msg("adsyncmsg", "Synchronising...");
+  try { const r = await api("/api/v1/admin/repo-access/sync", {method: "POST"}); const bad = r.results.filter(x => !x.ok);
+    msg("adsyncmsg", `${r.results.length - bad.length} synchronised` + (bad.length ? `, ${bad.length} failed (${bad.map(x => x.repo).join(", ")})` : ""), bad.length ? "err" : "ok"); adminLoad(); }
+  catch (err) { msg("adsyncmsg", err.message, "err"); }
+  busy($("adsync"), false);
+};
+$("tkmake").onclick = async () => {
+  const roles = [...document.querySelectorAll("#tkroles input:checked")].map(x => x.value), r = $("tkrepos").value.trim();
+  try { const t = await api("/api/v1/admin/tokens", {method: "POST", body: {name: $("tkname").value.trim(), roles, repos: r === "*" ? "*" : r.split(",").map(x => x.trim()).filter(Boolean), expires_in_days: Number($("tkdays").value) || null}});
+    $("tkshow").textContent = "Copy this token now; it is shown once and cannot be recovered:\n\n" + t.token; $("tkshow").classList.remove("hidden"); msg("tkmsg", "Created.", "ok"); adminLoad(); }
+  catch (err) { msg("tkmsg", err.message, "err"); }
+};
+$("idpsave").onclick = async () => {
+  $("idpproblems").innerHTML = ""; let body; try { body = JSON.parse($("idptext").value) } catch { return msg("idpmsg", "That is not valid JSON.", "err"); }
+  const id = $("idptext").dataset.id, r = await tfetch("/api/v1/admin/idps" + (id ? "/" + id : ""), {method: id ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("idpproblems").innerHTML = ((j.detail && j.detail.problems) || [j.detail || r.statusText]).map(p => `<li>${esc(p)}</li>`).join(""); return msg("idpmsg", "Not saved.", "err"); }
+  msg("idpmsg", "Saved.", "ok"); delete $("idptext").dataset.id; adminLoad();
+};
+boot();
 </script>
 </body>
 </html>
