@@ -176,6 +176,8 @@ class RepoExtract:
     data_refs: list = field(default_factory=list)          # Python: model references in functions (assembly input)
     secrets_withheld: int = 0                              # secret-like values found in source and kept out of these records
     strip_prefixes: list = field(default_factory=list)     # gateway prefixes the paths were normalised with: part of the cache identity
+    context_path: Optional[str] = None                     # Spring server.servlet.context-path of this service (already applied to its endpoints)
+    external_context_paths: dict = field(default_factory=dict)   # service -> context path, from a configuration repository (shared/<service>.yml)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -200,7 +202,8 @@ class RepoExtract:
             migrations=[Migration(**m) for m in d.get("migrations", [])],
             data_unknowns=d.get("data_unknowns", []), repositories=d.get("repositories", []),
             data_refs=d.get("data_refs", []), secrets_withheld=d.get("secrets_withheld", 0),
-            strip_prefixes=d.get("strip_prefixes", []))
+            strip_prefixes=d.get("strip_prefixes", []), context_path=d.get("context_path"),
+            external_context_paths=d.get("external_context_paths", {}))
 
 
 def normalize_path(path: str, strip_prefixes: tuple = ()) -> str:

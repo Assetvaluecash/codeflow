@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import authapi
+from . import authapi, kfadapter
 from .identity import current_principal
 from .graphview import LEVELS, build_view, impact_overlay, landscape_stats, restrict
 from .analysis_service import (execute, group_key, job_key, landscape_extracts, pr_event_group_key, pr_event_job_key,
@@ -47,6 +47,8 @@ from .report import evidence_view, redact, redact_snapshot, render_comment
 from .db import Database
 from .access import AccessStore, MODES as ACCESS_MODES
 from .githubapp import AppError, TokenSource, installation_tenant, my_installations
+from .ado import AdoConfig, AdoError
+from . import ado as ado_mod
 from .secretstore import SecretStore
 from .store import Store
 
@@ -119,7 +121,7 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
                allowed_hosts: Optional[list] = None, audit_key: Optional[bytes] = None,
                scm: Optional[ScmConfig] = None, uploads: Optional[UploadConfig] = None, gate_ttl: float = 5.0,
                default_quota: Optional[int] = None, secrets=None, hsts: bool = False,
-               auth: Optional[authapi.AuthSettings] = None, auth_http: Optional[dict] = None) -> FastAPI:
+               auth: Optional[authapi.AuthSettings] = None, auth_http: Optional[dict] = None, ado_cfg: Optional[AdoConfig] = None) -> FastAPI:
     auth = auth or authapi.AuthSettings()
     # With authentication on, interactive docs would be an unauthenticated map of the API.
     app = FastAPI(title="TIA - Technical Impact Analysis", **({"docs_url": None, "redoc_url": None, "openapi_url": None} if auth.required else {}))
@@ -128,6 +130,7 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
     upload_root = Path(workspace) / ".uploads"
     jobs = JobQueue(db)
     tokens = TokenSource(scm, db)
+    ado_cfg = ado_cfg or AdoConfig()
 
     # One deployment serves many tenants: the authenticated principal names the tenant, and the services below are that tenant's own
     # (its store, its repository workspace, its quota gate, its secret store). Without authentication the one configured tenant is used.
@@ -817,6 +820,29 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
         return {"analysis_id": rep["analysis_id"], "status": rep["status"],
                 "report": redact(rep, audience(x_tia_readable_repos))}
 
+    # ---- Knowledge Fabric V2.5 door (TIA_KF_V2_INTEGRATION.docx, option B: a sibling of KF's /query) ----------------------------
+    @app.post("/query/tia", response_model=kfadapter.QueryResponse)
+    def kf_query(body: kfadapter.QueryRequest, x_tia_readable_repos: Optional[str] = Header(None)):
+        """A finished Change Impact Report in Knowledge Fabric's QueryResponse shape. The analysis is named (analysis_id, or repository plus
+        pull_request/revision for the newest such report); the question text is never parsed and no analysis is started here."""
+        t0 = time.perf_counter()
+        if body.intent != kfadapter.INTENT:
+            return kfadapter.empty(body, [f"intent '{body.intent}' is not served by TIA; use intent '{kfadapter.INTENT}'"], t0)
+        rep = None
+        if body.analysis_id:
+            rep = store.get_analysis(body.analysis_id)
+        elif body.repository:
+            if not visible(body.repository):
+                return kfadapter.empty(body, ["no analysis found for that selection"], t0)
+            found = store.find_analyses(body.repository, body.pull_request, body.revision.lower() if body.revision else None)
+            rep = found[0] if found else None
+        else:
+            return kfadapter.empty(body, ["name the analysis: analysis_id, or repository with pull_request or revision "
+                                          "(TIA does not infer a repository or a change from the question text)"], t0)
+        if rep is None or not visible(rep["change"]["repository"]):
+            return kfadapter.empty(body, ["no analysis found for that selection"], t0)
+        return kfadapter.to_query_response(redact(rep, audience(x_tia_readable_repos)), body, t0)
+
     # ---- SCM webhooks (authenticated by signature, not by session) ------------------------------------------------
     @app.post("/api/v1/webhooks/github")
     async def github_webhook(request: Request, response: Response, x_hub_signature_256: Optional[str] = Header(None),
@@ -866,6 +892,46 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
                            pr_event_job_key(payload, store.effective_config()), pr_event_group_key(payload))
         store.audit("webhook_accepted", provider="github", delivery=x_github_delivery, repo=ev["full_name"], pr=ev["pr"],
                     action=ev["action"], head=ev["head_sha"], job=job["job_id"], deduplicated=job["deduplicated"])
+        response.status_code = 202
+        return {**job, "repository": repo.name, "pr": ev["pr"]}
+
+    @app.post("/api/v1/webhooks/ado")
+    async def ado_webhook(request: Request, response: Response):
+        """Azure DevOps service hooks (pull request created / updated). Answers at once; the analysis is queued."""
+        if not ado_cfg.receiving:
+            raise HTTPException(503, "Azure DevOps receiver is not configured (TIA_ADO_HOOK_USERNAME / TIA_ADO_HOOK_PASSWORD)")
+        try:
+            raw = await authapi.read_capped(request, 5 * 1024 * 1024)
+        except authapi.AuthError:
+            raise HTTPException(413, "service-hook payload too large")
+        if not ado_mod.verify_basic(ado_cfg, request.headers.get("authorization")):
+            raise HTTPException(401, "invalid service-hook credentials")        # not audited: unauthenticated callers must not fill the log
+        try:
+            ev = ado_mod.parse_pull_request_event(json.loads(raw))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if ev is None:
+            response.status_code = 202
+            return {"ignored": "event needs no analysis"}
+        if not ado_mod.allowed_host(ado_cfg, ev["base_url"]):
+            raise HTTPException(400, "the event's organisation is not on an Azure DevOps host this server will call")
+        if ev.get("collection_id"):
+            owner = await run_in_threadpool(installation_tenant, db, ev["collection_id"], "ado")
+            if owner:
+                authapi.current_tenant.set(owner)                               # the organisation is mapped to a tenant: its events go there
+        await run_in_threadpool(room)
+        repo = match_repo(svc.list(), ev["remote_url"])
+        if repo is None:
+            store.audit("webhook_ignored", provider="ado", repo=f"{ev['project']}/{ev['repository']}", reason="repository not registered")
+            response.status_code = 202
+            return {"ignored": f"repository '{ev['repository']}' is not registered in TIA"}
+        payload = {"provider": "ado", "repo": repo.name, "pr": ev["pr"], "head_sha": ev["head_sha"], "base_ref": ev["base_ref"]}
+        ado_meta = {k: ev[k] for k in ("base_url", "project", "repository_id", "repository")}
+        tp = tracing.current_traceparent()
+        job = jobs.enqueue(tid(), "ado_pull_request", {**payload, "ado": ado_meta, **({"_traceparent": tp} if tp else {})},
+                           pr_event_job_key(payload, store.effective_config()), pr_event_group_key(payload))
+        store.audit("webhook_accepted", provider="ado", repo=f"{ev['project']}/{ev['repository']}", pr=ev["pr"], action=ev["event"], head=ev["head_sha"],
+                    job=job["job_id"], deduplicated=job["deduplicated"])
         response.status_code = 202
         return {**job, "repository": repo.name, "pr": ev["pr"]}
 
@@ -939,9 +1005,12 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
         repo = next((r for r in svc.list() if r.name == body.repository and visible(r.name)), None)
         if repo is None:
             raise HTTPException(404, f"repository '{body.repository}' is not registered")
+        remote = ado_mod.parse_remote(repo.url) if repo.provider == "ado" else None
+        if remote is not None:
+            return publish_ado(rep, aid, repo, remote, body)
         full_name = github_full_name(repo.url)
         if not full_name:
-            raise HTTPException(400, f"repository '{repo.name}' has no GitHub remote to publish to")
+            raise HTTPException(400, f"repository '{repo.name}' has no GitHub or Azure DevOps remote to publish to")
         if rep["change"]["repository"] != repo.name:
             raise HTTPException(400, f"analysis {aid} is of '{rep['change']['repository']}', not '{repo.name}'")
         head = body.head_sha or rep["change"]["proposed_revision"]
@@ -957,6 +1026,24 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
             raise HTTPException(503 if "TIA_GITHUB_TOKEN" in str(e) else 502, str(e))
         audit_publication(store, provider="github", full_name=full_name, pr=body.pr, analysis_id=aid, result=res)
         return {"analysis_id": aid, "repository": repo.name, "pr": body.pr, "head_sha": head, **res}
+
+    def publish_ado(rep, aid, repo, remote, body):
+        token = ado_cfg.token or (ctx_for(tid()).secrets.get_text("ado/token") if ctx_for(tid()).secrets else None)
+        if not token:
+            raise HTTPException(503, "no Azure DevOps token is configured (TIA_ADO_TOKEN, or the tenant's stored ado/token)")
+        if not ado_mod.allowed_host(ado_cfg, remote["base_url"]):
+            raise HTTPException(400, "the repository is not on an Azure DevOps host this server will call")
+        scm_t = with_tenant_config(scm_now(), store.effective_config())
+        from .publish import audience_view
+        view = audience_view(rep, repo.name, scm_t, [repo.name] if auth.required else None)     # no Azure DevOps permission mirror: the target only
+        try:
+            res = ado_mod.publish(ado_cfg, token, rep, view, {**remote, "repository_id": remote["repository"], "pr": body.pr}, scm_t.public_url)
+        except AdoError as e:
+            raise HTTPException(502, str(e))
+        from .publish import audit_publication
+        audit_publication(store, provider="ado", full_name=f"{remote['project']}/{remote['repository']}", pr=body.pr, analysis_id=aid,
+                          result={"comment": res["comment"], "check_run": res["status"]})
+        return {"analysis_id": aid, "repository": repo.name, "pr": body.pr, **res}
 
     @app.post("/api/v1/impact-analyses/{aid}/reproduce")
     def reproduce_analysis(aid: str, x_tia_readable_repos: Optional[str] = Header(None)):

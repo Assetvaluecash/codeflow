@@ -26,11 +26,13 @@ ROUTES = {
     ("GET", "/"): PUBLIC, ("GET", "/healthz"): PUBLIC, ("GET", "/readyz"): PUBLIC, ("GET", "/api/v1/health"): PUBLIC,
     ("GET", "/metrics"): PUBLIC,                                           # has its own token / loopback rule
     ("POST", "/api/v1/webhooks/github"): PUBLIC,                           # authenticated by HMAC signature
+    ("POST", "/api/v1/webhooks/ado"): PUBLIC,                              # authenticated by the service hook's basic-auth credentials
     ("GET", "/auth/options"): PUBLIC, ("GET", "/auth/login"): PUBLIC, ("GET", "/auth/callback"): PUBLIC,
     ("POST", "/auth/saml/acs"): PUBLIC, ("GET", "/auth/saml/metadata"): PUBLIC,
     ("GET", "/auth/me"): PUBLIC,                                           # answers {authenticated: false} instead of 401, for the UI shell
     ("POST", "/auth/logout"): AUTHENTICATED,
     ("GET", "/api/v1/me"): AUTHENTICATED,
+    ("POST", "/query/tia"): "read",                                        # Knowledge Fabric V2 agents: a finished report as a QueryResponse
     ("GET", "/api/v1/config"): PUBLIC,
     ("GET", "/api/v1/tenant"): "read",
     # tenant configuration

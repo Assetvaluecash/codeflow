@@ -11,6 +11,9 @@ Environment
   TIA_SESSION_TTL_S / TIA_SESSION_IDLE_S   browser session lifetime / idle timeout (default 28800 / 1800)
   TIA_ALLOW_PRIVATE_IDP_HOSTS  "true" lets identity-provider endpoints be http / on private addresses (development and tests only)
   TIA_IDP_CA_FILE         CA bundle for identity providers behind a private certificate authority
+  TIA_ADO_HOOK_USERNAME / TIA_ADO_HOOK_PASSWORD   basic-auth credentials of the Azure DevOps service-hook subscription (receiver off without them);
+  TIA_ADO_TOKEN           Azure DevOps personal access token for fetching pull requests and posting the thread and status (or a tenant's stored ado/token);
+  TIA_ADO_API_URL         Azure DevOps Server base URL (on-premises); the cloud hosts dev.azure.com and *.visualstudio.com are always allowed
   TIA_ACCESS_MAX_AGE_S    how long a mirror of the source-code host's permissions grants access without a refresh (default 3600)
   TIA_WORKSPACE           where remote repositories are cloned (default ./.tia-data/repos)
   TIA_HOST / TIA_PORT     bind address (default 127.0.0.1:8080)
@@ -58,6 +61,7 @@ from .credentials import SecretError, env_secret, is_loopback, keywrapper_from_e
 from .db import Database
 from .secretstore import SecretStore
 from .transport import check_db_tls, tls_options
+from .ado import AdoConfig
 from .authapi import AuthSettings
 from .upload import UploadConfig
 from .webhooks import ScmConfig
@@ -77,7 +81,7 @@ def build():
                       audit_key=audit_key.encode() if audit_key else None,
                       secrets=SecretStore(db, tenant, wrapper) if wrapper else None,
                       hsts=bool(tls_options()) or os.environ.get("TIA_HSTS", "").lower() in ("1", "true", "yes"),
-                      scm=ScmConfig.from_env(), uploads=UploadConfig.from_env(), auth=AuthSettings.from_env(),
+                      scm=ScmConfig.from_env(), uploads=UploadConfig.from_env(), auth=AuthSettings.from_env(), ado_cfg=AdoConfig.from_env(),
                       gate_ttl=float(os.environ.get("TIA_TENANT_STATE_TTL", "5")),
                       default_quota=int(os.environ["TIA_DEFAULT_STORAGE_QUOTA_BYTES"]) if os.environ.get("TIA_DEFAULT_STORAGE_QUOTA_BYTES") else None)
 

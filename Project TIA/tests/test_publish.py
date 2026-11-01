@@ -197,7 +197,7 @@ def test_publish_endpoint_guards(env, monkeypatch):
     base = f"/api/v1/impact-analyses/{rep['analysis_id']}/publish"
     body = {"repository": "payments-service", "pr": 1}
     r = env.c.post(base, json=body)                                                                      # file:// remote: no GitHub identity
-    assert r.status_code == 400 and "no GitHub remote" in r.json()["detail"]
+    assert r.status_code == 400 and "no GitHub or Azure DevOps remote" in r.json()["detail"]
     publishable(env, monkeypatch)
     assert env.c.post("/api/v1/impact-analyses/nope/publish", json=body).status_code == 404
     assert env.c.post(base, json={**body, "repository": "ghost"}).status_code == 404

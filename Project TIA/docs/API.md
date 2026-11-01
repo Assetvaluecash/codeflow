@@ -389,6 +389,27 @@ Request body:
 | `job_id` | path | string | yes |
 
 
+## Other
+
+### `POST /query/tia`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  A finished Change Impact Report in Knowledge Fabric's QueryResponse shape. The analysis is named (analysis_id, or repository plus pull_request/revision for the newest such report); the question text is never parsed and no analysis is started here.
+
+Request body:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `intent` | string | no |  |
+| `query` | string | no |  |
+| `domain` | string | no |  |
+| `top_k_semantic` | integer | no |  |
+| `top_k_graph` | integer | no |  |
+| `analysis_id` | string (optional) | no |  |
+| `repository` | string (optional) | no |  |
+| `pull_request` | integer (optional) | no |  |
+| `revision` | string (optional) | no |  |
+
+
 ## Repositories
 
 ### `GET /api/v1/repositories`
@@ -614,6 +635,10 @@ Request body:
 
 
 ## Webhooks
+
+### `POST /api/v1/webhooks/ado`
+
+**Needs:** public.  Azure DevOps service hooks (pull request created / updated). Answers at once; the analysis is queued.
 
 ### `POST /api/v1/webhooks/github`
 

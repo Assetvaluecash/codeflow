@@ -250,12 +250,15 @@ def _transient(msg: str) -> bool:
 
 
 def make_handlers(db, allow_local: bool = False, allowed_hosts: Optional[list] = None, audit_key: Optional[bytes] = None,
-                  workspace: str = ".tia-data/repos", scm: Optional[ScmConfig] = None, keywrapper=None):
+                  workspace: str = ".tia-data/repos", scm: Optional[ScmConfig] = None, keywrapper=None, ado_cfg=None):
     """Job handlers for the worker. Each job runs bound to its own tenant."""
     from .jobs import JobQueue
     queue = JobQueue(db)
     base_scm = scm or ScmConfig()
     app = from_scm(base_scm)                                      # one App object: its installation tokens are cached across jobs
+    if ado_cfg is None:
+        from .ado import AdoConfig
+        ado_cfg = AdoConfig.from_env()
 
     def cancelled(job) -> bool:
         state = queue.get(job.tenant_id, job.id)
@@ -316,4 +319,50 @@ def make_handlers(db, allow_local: bool = False, allowed_hosts: Optional[list] =
             raise PermanentError(str(e))
         return {"analysis_id": rep["analysis_id"], "status": rep["status"]}
 
-    return {"impact_analysis": impact_analysis, "github_pull_request": github_pull_request}
+    def ado_pull_request(job):
+        """An Azure DevOps pull-request service hook: sync, fetch the PR, analyse against its target branch, upsert the thread and status."""
+        from . import ado
+        from .publish import audience_view
+        p = job.payload
+        if cancelled(job):
+            return {"skipped": "superseded by a newer push"}
+        token = ado_cfg.token or (SecretStore(db, job.tenant_id, keywrapper).get_text("ado/token") if keywrapper else None)
+        if not token:
+            raise PermanentError("no Azure DevOps token is configured on the worker (TIA_ADO_TOKEN or the tenant's stored ado/token)")
+        if not ado.allowed_host(ado_cfg, p["ado"]["base_url"]):
+            raise PermanentError("the organisation is not on an Azure DevOps host this server will call")
+        store = Store(db, job.tenant_id, audit_key)
+        svc = RepoService(store, workspace, allow_local=allow_local, allowed_hosts=allowed_hosts)
+        try:
+            svc.sync(p["repo"], token)
+            merged = svc.fetch_pull_request(p["repo"], p["pr"], token)
+            head = p.get("head_sha") or merged
+            try:
+                gitutil.resolve_rev(svc.get(p["repo"]).path, head)            # the source commit itself, when it was fetched with the PR
+            except gitutil.GitError:
+                head = merged
+            refresh_landscape(svc, store)
+            cfg = store.effective_config()
+            concrete = resolve(svc, {"target": p["repo"], "head": head, "base": p["base_ref"]}, cfg=cfg)
+            concrete["pr"] = p["pr"]
+            rep = execute(svc, store, concrete)
+        except IngestError as e:
+            refresh_landscape(svc, store)
+            if _transient(str(e)):
+                raise
+            raise PermanentError(str(e))
+        if cancelled(job):
+            return {"analysis_id": rep["analysis_id"], "skipped_publish": "superseded by a newer push"}
+        scm_t = with_tenant_config(base_scm, store.effective_config())
+        view = audience_view(rep, p["repo"], scm_t, [p["repo"]] if os.environ.get("TIA_AUTH_REQUIRED", "").lower() in ("1", "true", "yes") else None)
+        try:
+            res = ado.publish(ado_cfg, token, rep, view, {**p["ado"], "pr": p["pr"]}, scm_t.public_url)
+        except ado.AdoError as e:
+            if e.permanent:
+                raise PermanentError(str(e))
+            raise
+        audit_publication(store, provider="ado", full_name=f"{p['ado']['project']}/{p['ado']['repository']}", pr=p["pr"], analysis_id=rep["analysis_id"],
+                          result={"comment": res["comment"], "check_run": res["status"]})
+        return {"analysis_id": rep["analysis_id"], "status": rep["status"], "comment": res["comment"], "pr_status": res["status"]}
+
+    return {"impact_analysis": impact_analysis, "github_pull_request": github_pull_request, "ado_pull_request": ado_pull_request}

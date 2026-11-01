@@ -162,6 +162,16 @@ class Store:
                       "on conflict (tenant_id, id) do update set data = excluded.data, created_at = now()",
                       (self.tenant_id, report["analysis_id"], Jsonb(report)))
 
+    def find_analyses(self, repository: str, pull_request: Optional[int] = None, revision: Optional[str] = None, limit: int = 1) -> list[dict]:
+        """The newest reports of a repository, optionally of one pull request or one proposed revision (a full sha or a prefix of 7+)."""
+        with self.db.tx(self.tenant_id) as c:
+            rows = c.execute(
+                "select data from analyses where tenant_id = %s and data->'change'->>'repository' = %s "
+                "and (%s::int is null or (data->'change'->>'pull_request')::int = %s::int) "
+                "and (%s::text is null or data->'change'->>'proposed_revision' like %s) order by created_at desc limit %s",
+                (self.tenant_id, repository, pull_request, pull_request, revision, (revision or "") + "%", limit)).fetchall()
+        return [r[0] for r in rows]
+
     def get_analysis(self, analysis_id: str) -> Optional[dict]:
         with self.db.tx(self.tenant_id) as c:
             r = c.execute("select data from analyses where id = %s", (analysis_id,)).fetchone()

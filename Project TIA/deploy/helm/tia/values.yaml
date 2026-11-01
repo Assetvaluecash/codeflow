@@ -1,0 +1,38 @@
+# Every secret is read from a Kubernetes Secret you create (see deploy/README.md); the chart never contains one.
+image:
+  repository: registry.example.com/tia
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+publicUrl: https://tia.example.com          # TIA_PUBLIC_URL: sign-in redirects and links in PR comments
+defaultTenantId: ""                          # TIA_TENANT_ID (required)
+
+existingSecret: tia-secrets                  # keys: app-dsn, worker-dsn, admin-dsn, app-password, worker-password, audit-key, master-key, metrics-token
+                                             # optional keys: github-webhook-secret, github-app-private-key, ado-hook-password, ado-token
+extraEnv: {}                                 # any other TIA_* setting, e.g. TIA_GITHUB_APP_ID, TIA_ADO_HOOK_USERNAME
+
+api:
+  replicas: 2
+  resources: {requests: {cpu: 250m, memory: 384Mi}, limits: {cpu: "2", memory: 1Gi}}
+worker:
+  replicas: 4
+  resources: {requests: {cpu: 500m, memory: 512Mi}, limits: {cpu: "2", memory: 2Gi}}
+
+workspace:
+  size: 50Gi                                 # clones and UPLOADED code (back it up if people upload code)
+  storageClass: ""
+  accessMode: ReadWriteMany                  # shared by the API and the workers
+
+ingress:
+  enabled: false
+  className: ""
+  host: tia.example.com
+  tlsSecret: tia-tls
+  annotations: {}                            # put rate limiting here (TIA does not rate-limit itself)
+
+networkPolicy:
+  enabled: true
+  databaseCidr: 10.0.0.0/8                   # where PostgreSQL lives
+
+podDisruptionBudget:
+  minAvailable: 1

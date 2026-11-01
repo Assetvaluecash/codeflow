@@ -250,6 +250,21 @@ If an installation is removed or suspended, or a repository is outside it, the A
 
 Comments are **advisory**: they are one comment per pull request, updated in place, and never block a merge. The check run always concludes `neutral`.
 
+**Azure DevOps** (cloud or Azure DevOps Server)
+
+1. In the project's *Service hooks*, add a *Web Hooks* subscription for **Pull request created** and another for **Pull request updated**, URL `<TIA_PUBLIC_URL>/api/v1/webhooks/ado`,
+   with basic-authentication user name and password; give TIA the same values in `TIA_ADO_HOOK_USERNAME` / `TIA_ADO_HOOK_PASSWORD`.
+2. A personal access token with *Code: read* and *Pull request threads: read & write* in `TIA_ADO_TOKEN` (or each tenant's stored secret `ado/token`). Azure DevOps Server: `TIA_ADO_API_URL`.
+   The token is only ever sent to `dev.azure.com`, `*.visualstudio.com` or that configured host.
+3. Register the repositories (Git URL, or **Discover** with provider `ado`). Events of an organisation that the operator mapped with
+   `python -m tia.tenants map-installation <tenant> ado <collection id>` go to that tenant; others go to the default tenant.
+
+Each pull request gets **one comment thread**, updated in place and created *closed* so a "resolve all comments" policy is never blocked, and a pull-request **status**
+(`tia/impact-analysis`) whose state is always `notApplicable`: advisory, never a gate. Repository access is not mirrored from Azure DevOps: its repositories are `restricted`
+until an administrator grants them, and comments name only the pull request's own repository.
+
+**Knowledge Fabric V2.5 agents** can read finished reports through `POST /query/tia`; see [the adapter page](KF-ADAPTER.md).
+
 ## 10. Secrets and encryption
 
 * In transit: the database connection must use TLS off-machine; outbound calls that carry credentials (GitHub, Vault) must be https unless the host is this machine.
@@ -297,7 +312,7 @@ No dashboards or alert rules are shipped.
 ## 14. What TIA does not do
 
 * No rate limiting, no WAF, no account lockout (use a reverse proxy).
-* No Azure DevOps webhooks, PR comments or permission mirroring yet; Azure DevOps repositories can be ingested with a personal token.
+* No permission mirroring from Azure DevOps (its repositories are restricted until granted); the Azure DevOps connector has only been tested against a stand-in.
 * No container images, Compose file or Helm chart yet; no backup/restore tooling beyond PostgreSQL's.
 * Group changes at the identity provider reach a signed-in person at their next sign-in; an administrator's edits reach bearer-token users within 30 seconds.
 * Policy evaluation, runtime/event evidence, ITSM integration and the other later-release features are not built.
@@ -331,6 +346,7 @@ No dashboards or alert rules are shipped.
 | `TIA_AUDIT_KEY` | secret for the keyed audit chain |
 | `TIA_GITHUB_TOKEN`, `TIA_GITHUB_WEBHOOK_SECRET`, `TIA_GITHUB_API_URL` | interim GitHub token, webhook secret, API base (GitHub Enterprise) |
 | `TIA_GITHUB_APP_ID`, `TIA_GITHUB_APP_PRIVATE_KEY`, `TIA_GITHUB_APP_CLIENT_ID`, `TIA_GITHUB_APP_CLIENT_SECRET`, `TIA_GITHUB_WEB_URL` | the GitHub App; web base for GitHub Enterprise |
+| `TIA_ADO_HOOK_USERNAME`, `TIA_ADO_HOOK_PASSWORD`, `TIA_ADO_TOKEN`, `TIA_ADO_API_URL` | Azure DevOps service-hook credentials, personal access token, Azure DevOps Server base URL |
 | `TIA_COMMENT_AUDIENCE` | default comment audience: `target`, `readers`, `all` |
 | `TIA_CHECK_RUN` | publish a neutral check run (true) |
 | `TIA_MASTER_KEY`, `TIA_MASTER_KEY_ID`, `TIA_MASTER_KEY_PREVIOUS` | key-encryption key for tenant secrets, its id, the previous key during rotation |

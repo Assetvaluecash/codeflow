@@ -630,6 +630,19 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     if parse_failures:
         unknowns.append({"area": "parse_failures", "affects_confidence": True,
                          "reason": f"{len(parse_failures)} file(s) failed to parse.", "items": parse_failures})
+    # context paths that a configuration repository sets for services (Spring Cloud Config shared/<service>.yml) are not applied automatically:
+    # an analysis must not depend on which other repositories happened to be scanned. Say so, with the setting that would apply them.
+    ext = {}
+    for e in extracts.values():
+        ext.update(e.external_context_paths or {})
+    services = {e.service: e for e in extracts.values()}
+    missing_cp = sorted({cp for svc, cp in ext.items() if svc in services and not services[svc].context_path
+                         and cp not in tuple(req.strip_prefixes)})
+    if missing_cp:
+        unknowns.append({"area": "context_paths_not_applied", "affects_confidence": True,
+                         "reason": "A configuration repository sets servlet context paths for some services (" + ", ".join(missing_cp) + "). Calls that go through "
+                                   "them are matched only if the tenant configuration lists them in paths.strip_prefixes.",
+                         "items": [{"service": s_, "context_path": cp} for s_, cp in sorted(ext.items()) if cp in missing_cp]})
     if unevaluated:
         unknowns.append({"area": "changes_not_evaluated", "affects_confidence": True,
                          "reason": "Declarations in file(s) that do not parse at the proposed revision could not be compared with the base ("

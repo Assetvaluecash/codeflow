@@ -387,6 +387,57 @@ def _flatten(doc, prefix: str, out: dict) -> None:
         out.setdefault(prefix, doc)
 
 
+_SHARED = re.compile(r"(?:^|/)(?:shared|config-repo)/([A-Za-z0-9][A-Za-z0-9._-]*)\.(?:yml|yaml|properties)$")
+_CONTEXT_KEYS = ("server.servlet.context-path", "server.context-path", "server.servlet.contextPath")
+
+
+def is_shared_config(path: str) -> bool:
+    """A Spring Cloud Config repository's per-service file (shared/<service>.yml): it can set another service's context path."""
+    return bool(_SHARED.search(path)) and "/src/test/" not in "/" + path
+
+
+def _context_of(props: dict) -> Optional[str]:
+    for k in _CONTEXT_KEYS:
+        v = props.get(k)
+        if isinstance(v, str) and re.fullmatch(r"/[A-Za-z0-9._~/-]*", v.strip()) and v.strip() != "/":
+            return v.strip().rstrip("/")
+    return None
+
+
+def context_path(files: dict) -> Optional[str]:
+    """server.servlet.context-path of this service's own main configuration: every route is served under it."""
+    return _context_of(spring_properties({p: t for p, t in files.items() if is_service_config(p)}))
+
+
+def external_context_paths(files: dict) -> dict:
+    """service -> context path set for it in a configuration repository (Spring Cloud Config 'shared' files)."""
+    out = {}
+    for p, text in files.items():
+        m = _SHARED.search(p)
+        if not m or not is_shared_config(p):
+            continue
+        cp = _context_of(_props_of(p, text))
+        if cp:
+            out[m.group(1)] = cp
+    return out
+
+
+def _props_of(path: str, text: str) -> dict:
+    props: dict = {}
+    if path.endswith((".yml", ".yaml")):
+        try:
+            for doc in yaml.safe_load_all(text):
+                _flatten(doc, "", props)
+        except yaml.YAMLError:
+            return {}
+    else:
+        for line in text.splitlines():
+            if "=" in line and not line.lstrip().startswith(("#", "!")):
+                k, v = line.split("=", 1)
+                props.setdefault(k.strip(), v.strip())
+    return props
+
+
 def spring_properties(files: dict) -> dict:
     """Flattened Spring Boot main configuration (application/bootstrap .yml/.properties); the shortest path wins."""
     props: dict = {}
@@ -562,6 +613,19 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
                     break
             else:
                 e.response_schema = e.response_schema if e.response_schema in names else None
+    # a Spring service with server.servlet.context-path serves every route under it: that is the path its consumers call
+    out.context_path = context_path(small_files)
+    if out.context_path:
+        for e in out.endpoints:
+            if e.file.endswith(".java"):
+                e.path = out.context_path + ("" if e.path.startswith("/") else "/") + e.path
+                e.norm_path = normalize_path(e.path, strip)
+                e.id = f"{e.service}:{e.method} {e.norm_path}"
+        for t in out.tests:                                   # MockMvc paths are relative to the servlet: put them under the same context
+            if t.file.endswith(".java"):
+                t.http_calls = [[v, p if p.startswith(normalize_path(out.context_path, strip)) else normalize_path(out.context_path + p, strip)]
+                                for v, p in t.http_calls]
+    out.external_context_paths = external_context_paths(small_files)
     out.endpoints.sort(key=lambda e: e.id)
     out.schemas.sort(key=lambda s: s.id)
     out.callsites.sort(key=lambda c: c.id)
@@ -576,4 +640,5 @@ def extract_repo(repo: str, commit: str, files: dict[str, str], strip_prefixes: 
     service = smap.get("service", repo)
     per_file = {p: extract_source(repo, service, p, files[p], strip_prefixes) for p in files if is_extractable(p)}
     return assemble(repo, commit, list(files), smap, service, per_file,
-                    {p: t for p, t in files.items() if p.startswith("contracts/") and p.endswith(".json")}, strip_prefixes)
+                    {p: t for p, t in files.items() if (p.startswith("contracts/") and p.endswith(".json")) or is_service_config(p) or is_shared_config(p)},
+                    strip_prefixes)

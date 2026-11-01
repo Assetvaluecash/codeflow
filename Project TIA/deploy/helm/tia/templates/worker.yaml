@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+  labels: {{- include "tia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: worker}
+  template:
+    metadata:
+      labels: {{- include "tia.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      automountServiceAccountToken: false
+      {{- include "tia.podSecurity" . | nindent 6 }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["tia.worker"]
+          ports: [{name: metrics, containerPort: 9090}]
+          env:
+            - {name: TIA_WORKER_DATABASE_URL_FILE, value: /run/secrets/tia/worker-dsn}
+            - {name: TIA_WORKER_METRICS_PORT, value: "9090"}
+            - {name: TIA_WORKER_METRICS_HOST, value: "0.0.0.0"}
+            {{- include "tia.commonEnv" . | nindent 12 }}
+          {{- include "tia.containerSecurity" . | nindent 10 }}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 15
+          volumeMounts: {{- include "tia.mounts" . | nindent 12 }}
+      volumes: {{- include "tia.volumes" . | nindent 8 }}

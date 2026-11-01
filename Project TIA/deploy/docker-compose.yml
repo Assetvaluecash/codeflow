@@ -1,0 +1,96 @@
+# TIA on one machine: PostgreSQL, the schema migration (runs once), the API server and a worker.
+#   mkdir -p secrets && openssl rand -base64 32 > secrets/app_password ... (see deploy/README.md)
+#   docker compose -f deploy/docker-compose.yml up -d
+# Status: written and statically checked (tests/test_deploy.py); NOT run here - no Docker on the development machine.
+name: tia
+
+services:
+  db:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: tia_owner
+      POSTGRES_DB: tia
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_owner_password
+    secrets: [db_owner_password]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tia_owner -d tia"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    image: ${TIA_IMAGE:-tia:latest}
+    command: ["tia.migrate"]
+    environment:
+      TIA_ADMIN_DATABASE_URL_FILE: /run/secrets/admin_dsn
+      TIA_APP_PASSWORD_FILE: /run/secrets/app_password
+      TIA_WORKER_PASSWORD_FILE: /run/secrets/worker_password
+    secrets: [admin_dsn, app_password, worker_password]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: "no"
+
+  api:
+    image: ${TIA_IMAGE:-tia:latest}
+    command: ["tia.server"]
+    environment:
+      TIA_DATABASE_URL_FILE: /run/secrets/app_dsn
+      TIA_TENANT_ID: ${TIA_TENANT_ID:?set the default tenant id (python -m tia.tenants create ...)}
+      TIA_PUBLIC_URL: ${TIA_PUBLIC_URL:?set the address users reach TIA at}
+      TIA_AUTH_REQUIRED: "true"
+      TIA_AUDIT_KEY_FILE: /run/secrets/audit_key
+      TIA_MASTER_KEY_FILE: /run/secrets/master_key
+      TIA_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      TIA_HSTS: "true"
+    secrets: [app_dsn, audit_key, master_key, metrics_token]
+    volumes: [repos:/var/lib/tia/repos]
+    ports: ["127.0.0.1:8080:8080"]          # put a TLS-terminating, rate-limiting reverse proxy in front
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    restart: unless-stopped
+
+  worker:
+    image: ${TIA_IMAGE:-tia:latest}
+    command: ["tia.worker"]
+    environment:
+      TIA_WORKER_DATABASE_URL_FILE: /run/secrets/worker_dsn
+      TIA_AUDIT_KEY_FILE: /run/secrets/audit_key
+      TIA_MASTER_KEY_FILE: /run/secrets/master_key
+      TIA_WORKER_METRICS_PORT: "9090"
+      TIA_WORKER_METRICS_HOST: "0.0.0.0"
+      TIA_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+    secrets: [worker_dsn, audit_key, master_key, metrics_token]
+    volumes: [repos:/var/lib/tia/repos]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9090/healthz', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    restart: unless-stopped
+
+volumes:
+  pgdata: {}
+  repos: {}
+
+secrets:
+  db_owner_password: {file: ./secrets/db_owner_password}
+  admin_dsn: {file: ./secrets/admin_dsn}
+  app_password: {file: ./secrets/app_password}
+  worker_password: {file: ./secrets/worker_password}
+  app_dsn: {file: ./secrets/app_dsn}
+  worker_dsn: {file: ./secrets/worker_dsn}
+  audit_key: {file: ./secrets/audit_key}
+  master_key: {file: ./secrets/master_key}
+  metrics_token: {file: ./secrets/metrics_token}

@@ -47,6 +47,24 @@ jobs:
           name: test-results-py${{ matrix.python }}
           path: "Project TIA/test-results.xml"
 
+  container:
+    name: image builds, Compose file is valid
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -f deploy/Dockerfile -t tia:ci .
+      - name: The image runs as a non-root user and every command starts
+        run: |
+          test "$(docker run --rm --entrypoint id tia:ci -u)" = "10001"
+          docker run --rm tia:ci tia.migrate --help
+          docker run --rm tia:ci tia.tenants --help
+      - name: The Compose file is valid
+        run: |
+          mkdir -p deploy/secrets && for s in db_owner_password admin_dsn app_password worker_password app_dsn worker_dsn audit_key master_key metrics_token; do echo x > deploy/secrets/$s; done
+          TIA_TENANT_ID=00000000-0000-0000-0000-000000000000 TIA_PUBLIC_URL=https://tia.example.com docker compose -f deploy/docker-compose.yml config -q
+
   hygiene:
     name: package, dependencies, secrets
     runs-on: ubuntu-latest

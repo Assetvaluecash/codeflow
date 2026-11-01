@@ -34,7 +34,7 @@ def test_every_route_is_in_the_api_reference_with_its_permission():
 def test_every_environment_variable_the_code_reads_is_documented():
     names = set()
     for f in (ROOT / "tia").glob("*.py"):
-        names |= set(re.findall(r"\b(TIA_[A-Z0-9_]+|VAULT_[A-Z_]+)\b", f.read_text(encoding="utf-8")))
+        names |= set(re.findall(r"\b(TIA_[A-Z0-9_]+|VAULT_[A-Z_]+)\b(?!\.)", f.read_text(encoding="utf-8")))   # not a file name such as TIA_KF_V2_INTEGRATION.docx
     names = {n for n in names if not n.endswith("_")}                                           # prefixes such as TIA_TLS_
     missing = sorted(n for n in names if n not in ADMIN)
     assert not missing, f"undocumented in docs/ADMIN-GUIDE.md: {missing}"
