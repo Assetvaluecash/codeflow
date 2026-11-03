@@ -389,8 +389,10 @@ class Owner extends BaseEntity {
 class Unrelated { private String x; }'''})
     schemas = {s.name: s for s in ex.schemas}
     assert set(schemas) == {"Owner", "Pet"}                    # the base class is merged into Owner; Unrelated is not reachable from an endpoint
-    assert schemas["Owner"].fields == {"id": {"type": "Integer", "required": False}, "firstName": {"type": "String", "required": True},
-                                       "last_name": {"type": "String", "required": False}, "pets": {"type": "Set<Pet>", "required": False}}
+    assert schemas["Owner"].fields == {"id": {"type": "Integer", "required": False},
+                                       "firstName": {"type": "String", "required": True, "constraints": {"min_length": 1}},   # @NotBlank
+                                       "last_name": {"type": "String", "required": False},
+                                       "pets": {"type": "Set<Pet>", "required": False, "multi": True}}
     assert {e.response_schema for e in ex.endpoints} == {"Owner", "List[Owner]"[5:-1]}
 
 

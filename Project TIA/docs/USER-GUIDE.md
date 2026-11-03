@@ -1,6 +1,6 @@
 # TIA user guide
 
-For engineers and release managers who use TIA to understand what a change affects. Administrators read the [administrator guide](ADMIN-GUIDE.md);
+For engineers, testers and release managers who use TIA to understand what a change affects. Administrators read the [administrator guide](ADMIN-GUIDE.md);
 programmers read the [API reference](API.md).
 
 ## What TIA tells you
@@ -64,6 +64,94 @@ changed database migrations and the tables and columns they touch, and then who 
 * A report is **reproducible**: the same revisions, extractor versions and configuration give the same report; re-running it on its evidence snapshot gives an identical result even after the repositories have moved on.
 * Each analysis has a shareable page, `/analyses/<id>`, which pull-request comments link to. Opening it needs the same permission as the rest of TIA.
 
+## 4a. What to test (for testers)
+
+The report starts with **What to test**: the things you can test without reading code. It has four parts.
+
+* **Entry points to test**: every API endpoint the change reaches, in the changed service and in every analysed service that calls it. Each row gives:
+  * the plain-language name its owners gave it, if any (see below);
+  * **why** it is reached (the chain of code from the change to it);
+  * the **change effect**;
+  * the **tests found** for it and for the code between it and the change.
+
+  Code that the change reaches but no analysed endpoint calls is listed separately, under *no analysed API endpoint*. It may be used by a screen, a job or a channel TIA does not analyse.
+* **Change effect** of each changed function, and so of each entry point (the strongest on its path):
+
+  | Effect | Meaning |
+  |---|---|
+  | `breaking` | a contract breaks (removed route or field, changed type, new required field), a removed function is still called, or a function's signature changed and its callers were not updated |
+  | `behaviour change` | the logic changed (or the signature changed and its callers were updated): retest |
+  | `compatible change` | a compatible addition (optional field, new function, removed code nothing calls) |
+  | `no functional change` | documentation only (docstrings, comments, formatting): nothing to retest |
+  | `unknown` | a file TIA could only compare as a whole |
+
+* **Consistency checks**: two or more services in other repositories take data from the same changed endpoint. Call them for the same input and check they show the same records.
+* **Possible rule gaps**: a shared endpoint's consumers do not all apply the same rule to its data.
+  * Example: the statement PDF leaves out disputed payments (`not p['disputed']`) and the payments screen does not.
+  * TIA names the shared endpoint, the rule, where it is applied (function, file and line) and where it is missing.
+  * If the rule should apply everywhere, this is a defect; if not, confirm the difference is intended.
+  * When the change moves the rule into the shared service itself, it says **Rule moved into the shared service**: test every consumer, including those that already applied it.
+  * A rule counts only when it tests a field of the shared endpoint's **declared response schema**. Only confirmed relationships are used.
+
+To give entry points plain-language names, add them to the owning repository's `tia-services.yaml`. Each key is the HTTP method (any case) and the route as declared in the code:
+
+```yaml
+entry_points:
+  get /statements/{account_id}/pdf: Monthly statement PDF
+```
+
+**Before any change**, `GET /api/v1/graph/shared-components` (or `tia shared-components --repo NAME=PATH ...`) lists:
+* the endpoints and functions most entry points depend on, so a change to them needs the widest testing;
+* every rule gap in the landscape.
+
+## 4b. Automation inventory (for automation testers)
+
+`GET /api/v1/automation/api` (or `tia automation --repo NAME=PATH ...`) lists every API endpoint, as TIA reads it from the code. For each endpoint:
+* **Inputs:** each path, query and header parameter and each request-body field. For each input:
+  * mandatory or optional, and multi-valued (a list) or not;
+  * the values it allows (enums, `Literal`, Java enums);
+  * its limits: lengths, ranges, patterns, e-mail format.
+* **Valid and invalid values** generated from those rules, including boundaries such as the lowest and highest allowed amount.
+  * A pattern too complex to generate a value for is stated, not guessed.
+* **Test matrix:**
+  * one valid baseline request;
+  * one case per invalid value (expected: rejected, 422 for FastAPI, 400 for Spring);
+  * one case per boundary or allowed value (expected: accepted).
+* **Error statuses** the handler answers with (for example 404 unknown account, 409 duplicate reference).
+
+`GET /api/v1/automation/ui` (or `tia automation --ui ...`) lists every page of the front ends TIA can read (Angular, React, Vue, plain HTML). For each page:
+* **Route.**
+* **Elements**, each with:
+  * a **locator** checked to be unique on the page, best first: test id, id, name, form control, aria label, label, text, placeholder. It comes in CSS, XPath and Playwright form;
+  * whether it is **mandatory** (a `required` attribute or `Validators.required`);
+  * its input rules, with valid and invalid values;
+  * for a dropdown, its **values**: static, from a literal list in the component, or "dynamic" when they are loaded at run time.
+  * An element that has no unique locator is flagged `position (fragile)`. An element repeated for each row of a list is flagged too.
+* **APIs the page calls**, linked to the analysed endpoints.
+
+## 4c. Technical coverage: are my test cases enough?
+
+`GET /api/v1/coverage` (or `tia coverage --repo ...`) lists the **technical aspects** each endpoint and page implies:
+* it is exercised at all;
+* each mandatory input left out is rejected;
+* each input that breaks its rule is rejected;
+* each allowed value is accepted;
+* each error status is answered;
+* each data rule on its path holds (for example, disputed payments left out).
+
+For each aspect it lists which tests address it. Two kinds of test count:
+* **automated tests** in the repositories: what they call, the request bodies and values they send, and the statuses they assert;
+* **written test cases** kept in a repository under `testcases/` as CSV (a test-management export), YAML or JSON.
+  * Columns are matched loosely: *ID*, *Title*/*Summary*, *Steps*, *Expected result*, *Entry point* (an API given as method and path, such as `POST` `/accounts/{id}/payments`; a page route such as `/accounts/:id/payments`; or an entry point's plain name), *Priority*.
+
+Each aspect is `covered`, `partial` (some allowed values tested) or `missing`. Each endpoint and the whole landscape get a percentage. Written test cases that match nothing are listed.
+
+**One test case as a query:** `POST /api/v1/coverage/test-case` with `title`, `steps`, `expected` and `entry_point` (or `tia coverage --test-case FILE`). It returns what that test case covers in its area and what it misses.
+
+Coverage here is **static**. "Covered" means a test addresses the aspect, not that it passes.
+* A written test case is matched by its text: it must name the field and use words such as "missing" or "invalid".
+* Functional coverage against business requirements is a separate tool.
+
 ## 5. Pull requests
 
 When your organisation has connected GitHub, opening or updating a pull request makes TIA analyse it automatically and post **one comment**, updated in place on every push,
@@ -88,3 +176,7 @@ Two settings matter most for accuracy:
 * Compatibility is evaluated for routes and for the fields of request and response bodies; status codes, authentication, enum narrowing and headers are listed as *not evaluated*.
 * Runtime behaviour, events, deployed versions and release policy are not part of this release.
 * An *inferred* finding is a lead, not a fact: check it.
+* **What to test** is limited to API entry points:
+  * Screens are named only through the labels you declare. Front-end code (JavaScript/TypeScript) is not analysed.
+  * Tests are found by static association and are not run.
+  * Rule gaps cover item filters in Python (comprehension conditions, `filter`, loops that skip or collect items) and Java (stream `filter`, `removeIf`). Other ways of applying a rule (SQL `WHERE` clauses, validation annotations, `if` branches that return early) are not compared.

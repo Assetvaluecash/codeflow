@@ -53,7 +53,53 @@ def main(argv=None) -> int:
     a.add_argument("--max-results", type=int, default=200)
     a.add_argument("--github-repo", help="OWNER/REPO to post the PR comment to (needs --pr and $GITHUB_TOKEN)")
 
+    s = sub.add_parser("shared-components", help="endpoints and functions many entry points depend on, and rule gaps between the "
+                                                 "consumers of a shared endpoint (no change needed)")
+    s.add_argument("--repo", action="append", default=[], metavar="NAME=PATH", help="repeatable; include all repos in scope")
+    s.add_argument("--min-entry-points", type=int, default=2)
+    s.add_argument("--limit", type=int, default=50)
+
+    au = sub.add_parser("automation", help="automation inventory: every endpoint's inputs, rules, valid/invalid values and test matrix; "
+                                           "with --ui every page's elements, locators, mandatory flags and dropdown values")
+    au.add_argument("--repo", action="append", default=[], metavar="NAME=PATH", help="repeatable")
+    au.add_argument("--ui", action="store_true", help="pages and UI elements instead of APIs")
+
+    cv = sub.add_parser("coverage", help="technical coverage: the aspects each entry point and page implies and the tests that address them")
+    cv.add_argument("--repo", action="append", default=[], metavar="NAME=PATH", help="repeatable")
+    cv.add_argument("--test-case", metavar="FILE", help="assess one test case (JSON or YAML with title/steps/expected/entry_point) instead")
+
     args = ap.parse_args(argv)
+    if args.cmd in ("automation", "coverage"):
+        from .automation import api_inventory, summarise_api, ui_inventory
+        from .coverage import assess_test_case, coverage_report
+        from .graph import build_graph
+        from .impact import _extract
+        from .scrub import scrub_json
+        from .testscope import labels_of
+        ex = {n: _extract(n, p, "HEAD", None, ()) for n, p in sorted(_repos(args.repo).items())}
+        if args.cmd == "automation":
+            items = api_inventory(ex, labels_of(ex))
+            out = {"pages": ui_inventory(ex)} if args.ui else {"endpoints": items, "summary": summarise_api(items)}
+        elif args.test_case:
+            import yaml
+            tc = yaml.safe_load(Path(args.test_case).read_text(encoding="utf-8"))
+            if not isinstance(tc, dict):
+                raise SystemExit("--test-case expects one test case (an object with title/steps/expected/entry_point)")
+            out = assess_test_case(ex, build_graph(ex), tc)
+        else:
+            out = coverage_report(ex, build_graph(ex))
+        sys.stdout.buffer.write((to_json(scrub_json(out)[0]) + "\n").encode("utf-8"))
+        return 0
+    if args.cmd == "shared-components":
+        from .graph import build_graph
+        from .impact import _extract
+        from .testscope import labels_of, rule_gaps, shared_components
+        ex = {n: _extract(n, p, "HEAD", None, ()) for n, p in sorted(_repos(args.repo).items())}
+        g = build_graph(ex)
+        out = {"shared_components": shared_components(g, ex, max(args.min_entry_points, 2), args.limit),
+               "rule_gaps": rule_gaps(g, ex, labels=labels_of(ex))}
+        sys.stdout.buffer.write((to_json(out) + "\n").encode("utf-8"))
+        return 0
     if args.cmd == "analyze":
         req = AnalysisRequest(repos=_repos(args.repo), target=args.target, base=args.base, head=args.head,
                               pull_request=args.pr, change_record=args.change_record,
@@ -63,7 +109,6 @@ def main(argv=None) -> int:
         readable = args.readable.split(",") if args.readable else None
         _emit(rep, args.format, args.out, readable)
         if args.github_repo:
-            import os
             from .github import upsert_comment
             tok = os.environ.get("GITHUB_TOKEN")
             if not (tok and args.pr):

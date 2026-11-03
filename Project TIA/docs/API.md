@@ -219,6 +219,15 @@ Request body:
 
 **Needs:** `repo_write` (`engineer`, `release_manager`, `administrator`).  Full rescan of every repository (ignores caches), with drift detection against the incremental result.
 
+### `GET /api/v1/graph/shared-components`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  The landscape seen by a tester before any change: endpoints and functions that many entry points depend on (a change to them needs the widest testing), and rules on a shared endpoint's data that some consumers apply and others do not. Confirmed relationships only.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `min_entry_points` | query | integer | no |
+| `limit` | query | integer | no |
+
 ### `GET /api/v1/graph/stats`
 
 **Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  
@@ -390,6 +399,48 @@ Request body:
 
 
 ## Other
+
+### `GET /api/v1/automation/api`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  Every endpoint with its inputs (mandatory, multi-valued, allowed values, limits), generated valid and invalid values, a test matrix with expected outcomes, and the error statuses its handler answers with.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repos` | query | string|null | no |
+
+### `GET /api/v1/automation/ui`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  Every page (route) with its elements: a unique locator for each, mandatory flags, input rules, dropdown values, and the APIs the page calls.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repos` | query | string|null | no |
+
+### `GET /api/v1/coverage`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  The technical aspects of every entry point and page, and which automated tests and written test cases address each.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repos` | query | string|null | no |
+
+### `POST /api/v1/coverage/test-case`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  One test case as a query: the entry points it addresses, which of their technical aspects it covers and which it misses.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repos` | query | string|null | no |
+
+Request body:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `title` | string | no |  |
+| `steps` | string | no |  |
+| `expected` | string | no |  |
+| `entry_point` | string | no |  |
+| `id` | string (optional) | no |  |
 
 ### `POST /query/tia`
 

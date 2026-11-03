@@ -29,6 +29,7 @@ from . import telemetry, tracing
 from .scrub import scrub_json
 from .tenantconfig import DEFAULT, TenantConfig, diff as config_diff
 from .store import Store
+from .testscope import classify_function, test_scope
 
 
 @dataclass
@@ -194,26 +195,35 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     for c in contract_changes:
         changed_components.append({"type": "api_schema" if "schema" in c["kind"] or "field" in c["kind"] else "api_endpoint",
                                    "name": c["element"], "change": c["kind"], "breaking": c["breaking"],
+                                   "effect": "breaking" if c["breaking"] else "compatible_change",
                                    "detail": c["detail"], "file": c["file"], "line": c["line"]})
         for s in c["seeds"]:
             seeds.append({"node": s, "kind": "breaking" if c["breaking"] else "nonbreaking",
-                          "breaking": c["breaking"], "label": c["detail"]})
+                          "breaking": c["breaking"], "label": c["detail"],
+                          "effect": "breaking" if c["breaking"] else "compatible_change"})
     data_components = []
     for c in data_changes:
         comp = {"type": "db_column" if c["column"] else "db_table",
                 "name": f"{c['table']}.{c['column']}" if c["column"] else c["table"], "change": c["kind"],
-                "breaking": c["breaking"], "detail": c["detail"], "file": c["file"], "line": c["line"], "database": c["database"]}
+                "breaking": c["breaking"], "effect": "breaking" if c["breaking"] else "compatible_change", "detail": c["detail"], "file": c["file"], "line": c["line"], "database": c["database"]}
         changed_components.append(comp)
         data_components.append((comp, c))
         for s in c["seeds"]:
             seeds.append({"node": s["node"], "kind": "breaking" if c["breaking"] else "nonbreaking", "breaking": c["breaking"],
-                          "label": c["detail"], "access": s["access"],
+                          "label": c["detail"], "access": s["access"], "effect": "breaking" if c["breaking"] else "compatible_change",
                           "data": {"table": c["table"], "column": c["column"], "kind": c["kind"], "database": c["database"]}})
     for fid, how in fn_changes:
-        changed_components.append({"type": "function", "name": fid, "change": how})
-        seeds.append({"node": fid, "kind": "nonbreaking", "breaking": False, "label": f"{how}: {base_fn[fid].qualname}"})
+        effect, why = classify_function(fid, base_fn, head_fn)
+        changed_components.append({"type": "function", "name": fid, "change": how, "effect": effect, "detail": f"{base_fn[fid].qualname}: {why}"})
+        if effect == "no_functional_change":
+            continue                                    # a documentation-only change reaches nothing
+        # only a call that can no longer work (a removed function still called, a signature its unchanged callers no longer match) is
+        # breaking for severity; any other change to a function alters behaviour, which consumers must retest but which breaks no contract
+        seeds.append({"node": fid, "kind": "breaking" if effect == "breaking" else "nonbreaking", "breaking": effect == "breaking",
+                      "label": f"{how}: {base_fn[fid].qualname} - {why}", "effect": effect})
     for fid in added_fns:
-        changed_components.append({"type": "function", "name": fid, "change": "added"})
+        changed_components.append({"type": "function", "name": fid, "change": "added", "effect": "compatible_change",
+                                   "detail": f"{head_fn[fid].qualname}: added"})
     file_level = []
     for status, path in changed_files:
         if path in covered_files:
@@ -222,14 +232,16 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         if is_test or path.endswith((".md", ".txt")):
             continue
         ctype = "config" if path.endswith((".yaml", ".yml", ".toml", ".cfg", ".json", ".ini")) else "file"
-        changed_components.append({"type": ctype, "name": path, "change": "file_level"})
+        changed_components.append({"type": ctype, "name": path, "change": "file_level", "effect": "unknown"})
         file_level.append(path)
         for f in base_ex.functions:
             if f.file == path:
                 seeds.append({"node": f.id, "kind": "unclassified", "breaking": False,
-                              "label": f"file-level change in {path}"})
+                              "label": f"file-level change in {path}", "effect": "unknown"})
     if changed_files and only_tests:
         change_type = "test_only"
+    elif changed_components and all(c.get("effect") == "no_functional_change" for c in changed_components):
+        change_type = "no_functional_change"
     elif any(c["type"].startswith("api") for c in changed_components):
         change_type = "api_change"
     elif data_changes:
@@ -535,6 +547,7 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     findings.sort(key=lambda f: (-SEVERITY_ORDER.index(f["severity"]), f["depth"], f["component"], f["node"]))
     for i, f in enumerate(findings, 1):
         f["id"] = f"F{i}"
+    scope = test_scope(g, extracts, reached, seeds, tests_for, _path_status, req.target, head_ex, is_stale)
 
     # ---- 6. unknowns, coverage, status ----------------------------------------------------------------------------
     unknowns = []
@@ -684,6 +697,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
                               "this is not proof that no impact exists.")
     if change_type == "test_only":
         summary["message"] = "Test-only change; no production components affected within the analysed scope."
+    if change_type == "no_functional_change":
+        summary["message"] = "Documentation-only change to the code (docstrings); no behaviour changed, so nothing needs retesting."
 
     aid = (f"tia-pr-{req.pull_request}-{head_sha[:7]}" if req.pull_request is not None
            else "tia-" + hashlib.sha256(f"{req.target}|{base_sha}|{head_sha}|{snapshot_id}".encode()).hexdigest()[:12])
@@ -711,7 +726,7 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
                                   "settings_changed": [d["path"] for d in config_diff(DEFAULT.to_dict(), cfg.to_dict())][:50]}}
                if not cfg.is_default else {}),
             "criticality_configured": bool(smap["criticality"])},
-        "findings": findings, "unknowns": unknowns, "policy_results": [],
+        "findings": findings, "test_scope": scope, "unknowns": unknowns, "policy_results": [],
         "generated_at": _now(), "configuration_version": cfg.ident(CONFIG_VERSION),
         "extractor_versions": dict(EXTRACTOR_VERSIONS)}
     # PL-011: nothing that looks like a credential may leave in a report, whatever the source code contained

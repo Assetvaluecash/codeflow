@@ -28,6 +28,7 @@ the usual credential; the report is redacted for the caller exactly as in the na
 | unknowns | `ChunkItem`s with `category: "unknown"`, always appended to `reranked_chunks` whatever `top_k` is; those that affect confidence also appear in `metadata.errors` |
 | status `partial` / `complete_with_gaps` / `failed`, redaction, truncation | `metadata.errors` |
 | material findings | ranked first in `reranked_chunks` / `reranked_paths` |
+| **test scope** (what a tester must test, [USER-GUIDE 4a](USER-GUIDE.md#4a-what-to-test-for-testers)) | one `ChunkItem` per entry point to test (`category: "test_scope"`, `block_type: "tia_test_target"`, text starts `TEST`), per rule gap (`"rule_gap"`, `"tia_rule_gap"`) and per consistency check (`"consistency_check"`, `"tia_consistency_check"`); each entry point's impact path is a `PathItem` (`source_block_id: "<analysis>#test-<n>"`). In `reranked_chunks` they follow the findings, rule gaps first, at most `top_k_semantic` of them; `score` is breaking 0.9, behaviour change 0.6, unknown 0.4, compatible 0.3, halved for weak evidence |
 
 ## Verification status
 

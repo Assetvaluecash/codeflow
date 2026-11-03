@@ -83,6 +83,85 @@ def _walk(n: Node) -> Iterator[Node]:
         stack.extend(reversed(cur.children))
 
 
+HTTP_STATUS = {"BAD_REQUEST": 400, "UNAUTHORIZED": 401, "FORBIDDEN": 403, "NOT_FOUND": 404, "METHOD_NOT_ALLOWED": 405, "CONFLICT": 409,
+               "GONE": 410, "PRECONDITION_FAILED": 412, "PAYLOAD_TOO_LARGE": 413, "UNSUPPORTED_MEDIA_TYPE": 415, "UNPROCESSABLE_ENTITY": 422,
+               "TOO_MANY_REQUESTS": 429, "INTERNAL_SERVER_ERROR": 500, "SERVICE_UNAVAILABLE": 503}
+ENTITY_SHORTCUTS = {"notFound": 404, "badRequest": 400, "unprocessableEntity": 422, "internalServerError": 500}
+MOCKMVC_STATUS = {"isBadRequest": 400, "isUnauthorized": 401, "isForbidden": 403, "isNotFound": 404, "isConflict": 409,
+                  "isUnprocessableEntity": 422, "isOk": 200, "isCreated": 201, "isNoContent": 204, "isAccepted": 202,
+                  "is4xxClientError": 400, "is5xxServerError": 500}
+
+
+def _status_name(text: str) -> Optional[int]:
+    m = re.search(r"HttpStatus\.([A-Z_]+)", text)
+    if m:
+        return HTTP_STATUS.get(m.group(1))
+    m = re.fullmatch(r"\s*(\d{3})\s*", text)
+    return int(m.group(1)) if m else None
+
+
+def _java_statuses(body: Node) -> list:
+    """Error statuses a handler raises or returns: ResponseStatusException(HttpStatus.X), ResponseEntity.notFound() /
+    .status(HttpStatus.X). Statuses set by an exception class's @ResponseStatus elsewhere are not followed."""
+    out = []
+    for n in _walk(body):
+        st = None
+        if n.type == "object_creation_expression" and _t(n.child_by_field_name("type")).endswith("ResponseStatusException"):
+            args = n.child_by_field_name("arguments")
+            st = _status_name(_t(args.named_children[0])) if args is not None and args.named_children else None
+        elif n.type == "method_invocation" and _t(n.child_by_field_name("object")) == "ResponseEntity":
+            nm = _t(n.child_by_field_name("name"))
+            args = n.child_by_field_name("arguments")
+            st = ENTITY_SHORTCUTS.get(nm) or (_status_name(_t(args.named_children[0])) if nm == "status" and args is not None
+                                              and args.named_children else None)
+        if st and st >= 400:
+            out.append({"status": st, "line": n.start_point[0] + 1})
+    return sorted(out, key=lambda x: (x["line"], x["status"]))
+
+
+def _getter_field(name: str) -> str:
+    """isOnNotice -> onNotice, getStatus -> status (the field a JavaBean getter reads)."""
+    for pre in ("get", "is"):
+        if name.startswith(pre) and len(name) > len(pre) and name[len(pre)].isupper():
+            return name[len(pre)].lower() + name[len(pre) + 1:]
+    return name
+
+
+def _stream_filters(body: Node) -> list:
+    """Item filters in a method body: stream .filter(x -> cond) keeps matching items, removeIf(x -> cond) drops them.
+    Only conditions on the item's fields (getters, field access) count."""
+    out = []
+    for n in _walk(body):
+        if n.type != "method_invocation":
+            continue
+        name = _t(n.child_by_field_name("name"))
+        if name not in ("filter", "removeIf"):
+            continue
+        args = n.child_by_field_name("arguments")
+        lam = next((a for a in (args.named_children if args is not None else []) if a.type == "lambda_expression"), None)
+        if lam is None:
+            continue
+        ps = lam.child_by_field_name("parameters")
+        ids = [ps] if ps is not None and ps.type == "identifier" else [c for c in (ps.named_children if ps is not None else [])
+                                                                        if c.type == "identifier"]
+        if len(ids) != 1:
+            continue
+        var, cond = _t(ids[0]), lam.child_by_field_name("body")
+        fields = set()
+        for x in _walk(cond):
+            obj = x.child_by_field_name("object")
+            if obj is None or obj.type != "identifier" or _t(obj) != var:
+                continue
+            if x.type == "method_invocation":
+                fields.add(_getter_field(_t(x.child_by_field_name("name"))))
+            elif x.type == "field_access":
+                fields.add(_t(x.child_by_field_name("field")))
+        if fields:
+            expr = _t(cond)
+            out.append({"line": n.start_point[0] + 1, "expr": f"!({expr})" if name == "removeIf" else expr, "fields": sorted(fields)})
+    return sorted(out, key=lambda f: (f["line"], f["expr"]))
+
+
 def _simple(name: str) -> str:
     return name.rsplit(".", 1)[-1]
 
@@ -470,6 +549,10 @@ class _JavaVisitor:
         mods = self.annotations(next((c for c in node.children if c.type == "modifiers"), None))
         qual_scope = scope + [name]
         body = node.child_by_field_name("body")
+        if node.type == "enum_declaration" and body is not None:
+            vals = [_t(c.child_by_field_name("name")) for c in body.named_children if c.type == "enum_constant"]
+            if vals:
+                self.out.enums[name] = vals
         is_interface = node.type == "interface_declaration"
         feign = mods.get("FeignClient")
         class_paths = self._mapping_paths(mods.get("RequestMapping"), [""]) if "RequestMapping" in mods else [""]
@@ -493,6 +576,49 @@ class _JavaVisitor:
     # ---- schemas ---------------------------------------------------------------------------------------------------
     def _required(self, mods: dict, tn: Optional[Node]) -> bool:
         return bool(set(mods) & REQUIRED_ANNOTATIONS) or (tn is not None and tn.type in PRIMITIVE_NODES)
+
+    def _num(self, items: list, key: str = "value"):
+        v = self._arg(items, key)
+        s = (self._const_str(v) if v is not None and v.type == "string_literal" else _t(v)).strip().rstrip("LlDdFf") if v is not None else ""
+        try:
+            f = float(s)
+        except ValueError:
+            return None
+        return int(f) if f.is_integer() else f
+
+    def _field(self, mods: dict, tn: Optional[Node]) -> dict:
+        """A DTO field or handler parameter with its Bean Validation rules."""
+        typ = _t(tn)
+        multi = bool(re.match(r"(List|Set|Collection|Iterable)\b", typ)) or typ.endswith("[]")
+        d = {"type": typ, "required": self._required(mods, tn)}
+        c = {}
+        if "Size" in mods:
+            for k, ck in (("min", "min_items" if multi else "min_length"), ("max", "max_items" if multi else "max_length")):
+                v = self._num(mods["Size"], k)
+                if v is not None:
+                    c[ck] = v
+        for a, ck in (("Min", "minimum"), ("DecimalMin", "minimum"), ("Max", "maximum"), ("DecimalMax", "maximum")):
+            if a in mods and self._num(mods[a]) is not None:
+                c[ck] = self._num(mods[a])
+        if "Positive" in mods:
+            c["exclusive_minimum"] = 0
+        if "PositiveOrZero" in mods:
+            c["minimum"] = 0
+        if "Negative" in mods:
+            c["exclusive_maximum"] = 0
+        if "Pattern" in mods:
+            p = self._const_str(self._arg(mods["Pattern"], "regexp"))
+            if p:
+                c["pattern"] = p
+        if "Email" in mods:
+            c["format"] = "email"
+        if set(mods) & {"NotBlank", "NotEmpty"} and "min_length" not in c and not multi:
+            c["min_length"] = 1
+        if multi:
+            d["multi"] = True
+        if c:
+            d["constraints"] = c
+        return d
 
     def _json_name(self, mods: dict, name: str) -> Optional[str]:
         """The name a field has on the wire: @JsonProperty("x") renames it, @JsonIgnore hides it."""
@@ -518,7 +644,7 @@ class _JavaVisitor:
                     mods = self.annotations(next((c for c in p.children if c.type == "modifiers"), None))
                     key = self._json_name(mods, _t(p.child_by_field_name("name")))
                     if key:
-                        fields[key] = {"type": _t(tn), "required": self._required(mods, tn)}
+                        fields[key] = self._field(mods, tn)
         else:
             body = node.child_by_field_name("body")
             for f in (body.children if body is not None else []):
@@ -532,7 +658,7 @@ class _JavaVisitor:
                     if d.type == "variable_declarator":
                         key = self._json_name(mods, _t(d.child_by_field_name("name")))
                         if key:
-                            fields[key] = {"type": _t(tn), "required": self._required(mods, tn)}
+                            fields[key] = self._field(mods, tn)
         if fields or extends:
             self.out.schemas.append(Schema(id=f"{self.service}:schema:{name}", service=self.service, repo=self.repo, name=name,
                                            fields=fields, file=self.path, line=node.start_point[0] + 1, extends=extends))
@@ -747,7 +873,13 @@ class _JavaVisitor:
         if self.is_test_file and set(mods) & TEST_ANNOTATIONS:
             self._add_test(m, fid, name, calls, body, line)
             return
-        self.out.functions.append(Function(id=fid, repo=self.repo, file=self.path, qualname=qual, line=line, hash=h, calls=calls))
+        ret = m.child_by_field_name("type")
+        sig = {"params": [{"name": _t(p.child_by_field_name("name")), "kind": "positional",
+                           "type": _t(p.child_by_field_name("type")) if p.child_by_field_name("type") is not None else ""} for p in self._params(m)],
+               "returns": _t(ret) if ret is not None else None}
+        self.out.functions.append(Function(id=fid, repo=self.repo, file=self.path, qualname=qual, line=line, hash=h, calls=calls,
+                                           signature=sig, body_hash=h, filters=_stream_filters(body) if body is not None else [],
+                                           statuses=_java_statuses(body) if body is not None else []))
         if mapped:
             self._add_endpoints(m, fid, qual, line, mapped, class_paths)
         if body is not None:
@@ -759,13 +891,23 @@ class _JavaVisitor:
 
     def _add_endpoints(self, m: Node, fid: str, qual: str, line: int, mapped: list, class_paths: list):
         resp = self.unwrap(m.child_by_field_name("type"))
-        reqs = []
+        reqs, params = [], []
         for p in self._params(m):
             pm = self.annotations(next((c for c in p.children if c.type == "modifiers"), None))
             if "RequestBody" in pm or "ModelAttribute" in pm:
                 t = self.unwrap(p.child_by_field_name("type"))
                 if t:
                     reqs.append(t[5:-1] if t.startswith("List[") else t)
+            for ann, where in (("PathVariable", "path"), ("RequestParam", "query"), ("RequestHeader", "header")):
+                if ann in pm:
+                    items = pm[ann]
+                    pname = self._const_str(self._arg(items, "value", "name")) or _t(p.child_by_field_name("name"))
+                    f = self._field(pm, p.child_by_field_name("type"))
+                    has_default = self._arg(items, "defaultValue") is not None
+                    f["required"] = where == "path" or (self._flag(items, "required", True) and not has_default)
+                    if has_default and self._const_str(self._arg(items, "defaultValue")) is not None:
+                        f["default"] = self._const_str(self._arg(items, "defaultValue"))
+                    params.append({"name": pname, "in": where, **f})
         for verb, path in mapped:
             for cp in class_paths:
                 full = (cp.rstrip("/") + "/" + path.lstrip("/")) if path else cp
@@ -775,7 +917,7 @@ class _JavaVisitor:
                 self.out.endpoints.append(Endpoint(
                     id=f"{self.service}:{verb} {np_}", service=self.service, repo=self.repo, method=verb, path=full,
                     norm_path=np_, handler=qual, handler_id=fid, file=self.path, line=line,
-                    response_schema=resp, request_schemas=sorted(set(reqs))))
+                    response_schema=resp, request_schemas=sorted(set(reqs)), params=params))
 
     # ---- outbound calls ---------------------------------------------------------------------------------------------------------
     def _scan_body(self, body: Node, fid: str):
@@ -868,9 +1010,23 @@ class _JavaVisitor:
                 if verb and p and p.startswith("/"):
                     http.append([verb, normalize_path(p, self.strip)])
         used = sorted(self.imports.get(t) or (f"{self.package}.{t}" if self.package else t) for t in self.type_names_used)
+        statuses, literals = set(), []
+        for n in _walk(body) if body is not None else []:
+            if n.type == "method_invocation" and _t(n.child_by_field_name("name")) in MOCKMVC_STATUS:
+                statuses.add(MOCKMVC_STATUS[_t(n.child_by_field_name("name"))])
+            elif n.type == "method_invocation" and _t(n.child_by_field_name("name")) in ("is", "isEqualTo") and "status" in _t(n):
+                args = n.child_by_field_name("arguments")
+                st = _status_name(_t(args.named_children[0])) if args is not None and args.named_children else None
+                if st:
+                    statuses.add(st)
+            elif n.type in ("string_literal", "decimal_integer_literal", "decimal_floating_point_literal", "true", "false") and len(literals) < 60:
+                v = _string(n) if n.type == "string_literal" else _t(n)
+                if v is not None and len(v) <= 60 and v not in literals:
+                    literals.append(v)
         self.out.tests.append(TestCase(
             id=fid, repo=self.repo, file=self.path, name=name, line=line,
-            imports=sorted(set(self.import_list) | set(used)), called=calls, http_calls=http))
+            imports=sorted(set(self.import_list) | set(used)), called=calls, http_calls=http,
+            statuses=sorted(statuses), literals=literals))
 
 
 def extract_file(repo: str, service: str, path: str, text: str, strip_prefixes: tuple = ()) -> RepoExtract:

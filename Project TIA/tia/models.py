@@ -37,6 +37,7 @@ class Endpoint:
     line: int
     response_schema: Optional[str] = None
     request_schemas: list = field(default_factory=list)
+    params: list = field(default_factory=list)   # [{"name", "in": path|query|header, "type", "required", "constraints"}] (not the body)
 
 
 @dataclass
@@ -45,7 +46,7 @@ class Schema:
     service: str
     repo: str
     name: str
-    fields: dict            # name -> {"type": str, "required": bool}
+    fields: dict            # name -> {"type": str, "required": bool, optional "multi": bool, "nullable": bool, "constraints": {...}}
     file: str
     line: int
     extends: Optional[str] = None     # Java: simple name of the superclass (its fields are merged at assembly)
@@ -77,6 +78,10 @@ class Function:
     line: int
     hash: str
     calls: list = field(default_factory=list)
+    signature: Optional[dict] = None    # {"params": [{"name", "kind", "default"|"type"}], "returns"}: compared to classify a change
+    body_hash: Optional[str] = None     # hash without the docstring: equal hashes mean a documentation-only change
+    filters: list = field(default_factory=list)   # [{"line", "expr", "fields"}] item filters the function applies (business rules)
+    statuses: list = field(default_factory=list)  # [{"status", "line", "detail"}] HTTP error statuses the function raises or returns
 
 
 @dataclass
@@ -89,6 +94,9 @@ class TestCase:
     imports: list = field(default_factory=list)       # module names
     called: list = field(default_factory=list)        # simple names called
     http_calls: list = field(default_factory=list)    # [(method, norm_path)]
+    statuses: list = field(default_factory=list)      # HTTP statuses the test asserts
+    literals: list = field(default_factory=list)      # string / number literals and dict keys in the test (bounded): its data
+    bodies: list = field(default_factory=list)        # [[method, norm_path, [body keys], {key: literal value}]] request bodies it sends
 
 
 @dataclass
@@ -178,6 +186,10 @@ class RepoExtract:
     strip_prefixes: list = field(default_factory=list)     # gateway prefixes the paths were normalised with: part of the cache identity
     context_path: Optional[str] = None                     # Spring server.servlet.context-path of this service (already applied to its endpoints)
     external_context_paths: dict = field(default_factory=dict)   # service -> context path, from a configuration repository (shared/<service>.yml)
+    enums: dict = field(default_factory=dict)              # enum type name -> allowed values (Python Enum, Java enum)
+    ui_facts: list = field(default_factory=list)           # per-file front-end facts (templates, components, routes): assembly input
+    ui_pages: list = field(default_factory=list)           # assembled pages: elements, locators, mandatory flags, options, API calls
+    manual_tests: list = field(default_factory=list)       # written test cases from testcases/*.csv|yaml|json
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -203,7 +215,8 @@ class RepoExtract:
             data_unknowns=d.get("data_unknowns", []), repositories=d.get("repositories", []),
             data_refs=d.get("data_refs", []), secrets_withheld=d.get("secrets_withheld", 0),
             strip_prefixes=d.get("strip_prefixes", []), context_path=d.get("context_path"),
-            external_context_paths=d.get("external_context_paths", {}))
+            external_context_paths=d.get("external_context_paths", {}), enums=d.get("enums", {}),
+            ui_facts=d.get("ui_facts", []), ui_pages=d.get("ui_pages", []), manual_tests=d.get("manual_tests", []))
 
 
 def normalize_path(path: str, strip_prefixes: tuple = ()) -> str:

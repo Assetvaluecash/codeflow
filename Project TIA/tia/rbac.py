@@ -52,7 +52,9 @@ ROUTES = {
     ("GET", "/api/v1/audit"): "audit_read", ("GET", "/api/v1/audit/verify"): "audit_read",
     # graph
     ("GET", "/api/v1/graph"): "read", ("GET", "/api/v1/graph/versions"): "read", ("GET", "/api/v1/graph/versions/{gid}"): "read",
-    ("GET", "/api/v1/graph/relationships"): "read", ("GET", "/api/v1/graph/stats"): "read", ("POST", "/api/v1/graph/rescan"): "repo_write",
+    ("GET", "/api/v1/graph/relationships"): "read", ("GET", "/api/v1/graph/stats"): "read", ("GET", "/api/v1/graph/shared-components"): "read",
+    ("GET", "/api/v1/automation/api"): "read", ("GET", "/api/v1/automation/ui"): "read", ("GET", "/api/v1/coverage"): "read",
+    ("POST", "/api/v1/coverage/test-case"): "read", ("POST", "/api/v1/graph/rescan"): "repo_write",
     # analyses
     ("POST", "/api/v1/impact-analyses"): "analyze", ("GET", "/api/v1/jobs/{job_id}"): "read", ("DELETE", "/api/v1/jobs/{job_id}"): "analyze",
     ("GET", "/api/v1/impact-analyses/{aid}"): "read", ("GET", "/analyses/{aid}"): "read",

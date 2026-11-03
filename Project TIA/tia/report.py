@@ -4,6 +4,8 @@ from __future__ import annotations
 import copy
 import json
 
+from .testscope import redact_scope
+
 MARKER = "<!-- tia-analysis -->"
 SEV_ICON = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW", "unknown": "UNKNOWN"}
 
@@ -27,6 +29,8 @@ def redact(report: dict, readable_repos) -> dict:
         f["tests"] = [t for t in f["tests"] if t["repo"] in readable]
         kept.append(f)
     r["findings"] = kept
+    if r.get("test_scope"):
+        redact_scope(r["test_scope"], readable)
     for u in r["unknowns"]:
         if "items" in u:
             n = len(u["items"])
@@ -137,6 +141,7 @@ def render_comment(report: dict, max_rows: int = 12, link: str | None = None) ->
     elif not s["findings"]:
         L += [f"**{withheld} finding(s) in other repositories are withheld from this comment** (visibility policy). "
               "This is not a clean result: open the TIA report for the full impact.", ""]
+    L += _test_scope_md(report.get("test_scope"), max_rows)
     mat = [f for f in report["findings"] if f["material"]]
     if mat:
         L += ["| Severity | Component | Evidence | Why |", "|---|---|---|---|"]
@@ -182,6 +187,44 @@ def render_comment(report: dict, max_rows: int = 12, link: str | None = None) ->
     if withheld and s["findings"]:
         L += ["", f"_{withheld} more finding(s) in other repositories are withheld from this comment (visibility policy)._"]
     return "\n".join(L + ["", _footer(report, link)])
+
+
+EFFECT_TEXT = {"breaking": "BREAKING", "behaviour_change": "behaviour change", "compatible_change": "compatible change",
+               "no_functional_change": "no functional change", "unknown": "unknown (file-level)"}
+
+
+def _md(text) -> str:
+    """A value placed in a markdown table cell: no pipes or line breaks from source code."""
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def _test_scope_md(ts: dict | None, max_rows: int) -> list:
+    """The tester's view first: which entry points to test because of this change, and the rule gaps and consistency checks it touches."""
+    if not ts or not (ts["entry_points"] or ts["code_without_entry_point"] or ts["rule_gaps"]):
+        return []
+    L = []
+    rows = ts["entry_points"] + ts["code_without_entry_point"]
+    if rows:
+        L += ["**What to test** (entry points this change reaches)", "", "| Entry point | Service | Change effect | Tests found |", "|---|---|---|---|"]
+        for e in rows[:max_rows]:
+            name = f"{e['label']} (`{_md(e['entry_point'])}`)" if e.get("label") else f"`{_md(e['entry_point'])}`"
+            if e["type"] != "endpoint":
+                name += " - no analysed API endpoint"
+            tests = ", ".join(f"`{_md(t['name'])}`" for t in e["tests"][:3]) + (" ..." if len(e["tests"]) > 3 else "") or "none found"
+            ev = "" if e["evidence_status"] in ("source_confirmed", "contract_confirmed", "corroborated") else f" ({e['evidence_status']})"
+            L.append(f"| {name} | {_md(e['service'])} | {EFFECT_TEXT[e['change_effect']]}{ev} | {tests} |")
+        if len(rows) > max_rows:
+            L.append(f"| _+{len(rows) - max_rows} more in the full report_ | | | |")
+        L.append("")
+    for gp in ts["rule_gaps"]:
+        L.append(("- **Rule moved into the shared service** - " if gp.get("resolved_by_this_change") else "- **Possible rule gap** - ") + _md(gp["reason"]))
+    for c in ts["consistency_checks"]:
+        L.append(f"- **Consistency check** - {_md(c['check'])}")
+    if ts["rule_gaps"] or ts["consistency_checks"]:
+        L.append("")
+    if (ts.get("redacted") or {}).get("items"):
+        L += [f"_{ts['redacted']['note']}_", ""]
+    return L
 
 
 def _footer(report: dict, link: str | None = None) -> str:

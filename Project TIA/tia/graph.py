@@ -21,6 +21,7 @@ class Graph:
         self.nodes: dict[str, dict] = {}
         self.edges: list[Edge] = []
         self._impact: dict[str, list] = defaultdict(list)
+        self._deps: dict[str, list] = defaultdict(list)     # the reverse of _impact: what a node depends on
         self.unresolved: list[dict] = []
         self.resolution_stats: dict = {}
         self.ambiguous_calls = 0
@@ -33,12 +34,18 @@ class Graph:
         # impact direction (who is affected when `key` changes)
         if e.rel == "HANDLES":                 # handler change -> endpoint
             self._impact[e.src].append((e.dst, e))
+            self._deps[e.dst].append((e.src, e))
         elif e.rel in ("CALLS", "USES_SCHEMA", "CONSUMES_API", "ISSUES", "TESTS", "MAPS_TO", "MAPS_COLUMN", "READS", "WRITES"):
             self._impact[e.dst].append((e.src, e))     # table/column -> entity -> function: who is affected by a data change
+            self._deps[e.src].append((e.dst, e))
         # EXPOSES / OWNED_BY / MIGRATES are not traversed
 
     def impacted_by(self, nid: str):
         return sorted(self._impact.get(nid, []), key=lambda t: (t[0], t[1].rel))
+
+    def depends_on(self, nid: str):
+        """What a change to these nodes would reach `nid` through (the reverse of impacted_by)."""
+        return sorted(self._deps.get(nid, []), key=lambda t: (t[0], t[1].rel))
 
     def to_dict(self) -> dict:
         return {"nodes": self.nodes, "edges": [asdict(e) for e in self.edges], "unresolved": self.unresolved,
@@ -70,7 +77,7 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
             g.add_node(s.id, type="schema", repo=repo, service=ex.service, file=s.file, line=s.line, name=s.name)
         for e in ex.endpoints:
             g.add_node(e.id, type="endpoint", repo=repo, service=ex.service, file=e.file, line=e.line,
-                       method=e.method, path=e.norm_path)
+                       method=e.method, path=e.norm_path, route=e.path)
         for c in ex.callsites:
             g.add_node(c.id, type="callsite", repo=repo, service=ex.service, file=c.file, line=c.line)
         for t in ex.tests:

@@ -76,9 +76,47 @@ def _finding_row(f: dict) -> str:
             f"<td data-label=\"Why\">{_e(f['reason'])}<ul>{lims}</ul>{''.join(extra)}</td></tr>")
 
 
+EFFECT_TEXT = {"breaking": "breaking", "behaviour_change": "behaviour change", "compatible_change": "compatible change",
+               "no_functional_change": "no functional change", "unknown": "unknown (file-level)"}
+EFFECT_CLASS = {"breaking": "s-high", "behaviour_change": "s-medium", "compatible_change": "s-low", "no_functional_change": "s-low", "unknown": "s-unknown"}
+
+
+def _test_scope(report: dict) -> str:
+    ts = report.get("test_scope")
+    if not ts:
+        return '<p class="mut">No test scope was recorded for this analysis.</p>'
+    rows = []
+    for e in ts["entry_points"] + ts["code_without_entry_point"]:
+        name = (f"{_e(e['label'])}<br><code>{_e(e['entry_point'])}</code>" if e.get("label") else f"<code>{_e(e['entry_point'])}</code>")
+        if e["type"] != "endpoint":
+            name += '<br><span class="mut">no analysed API endpoint</span>'
+        tests = "".join(f"<li><code>{_e(t['name'])}</code> <span class=\"mut\">({_e(t['file'])}, {_e(t['association'])})</span></li>" for t in e["tests"])
+        ev = "" if e["evidence_status"] in ("source_confirmed", "contract_confirmed", "corroborated") else f"<br><span class=\"mut\">{_e(e['evidence_status'])}</span>"
+        rows.append(f"<tr><td data-label=\"Entry point\">{name}</td><td data-label=\"Service\">{_e(e['service'])}<br><span class=\"mut\">{_e(e['repo'])}</span></td>"
+                    f"<td data-label=\"Change effect\"><span class=\"sev {EFFECT_CLASS[e['change_effect']]}\">{_e(EFFECT_TEXT[e['change_effect']])}</span>{ev}</td>"
+                    f"<td data-label=\"Why\">{_e(e['why'])}" + (f"<ul>{tests}</ul>" if tests else '<br><span class="mut">No test found for it.</span>') + "</td></tr>")
+    out = (f'<div class="wrap"><table class="stack"><tr><th>Entry point</th><th>Service</th><th>Change effect</th><th>Why, and the tests found</th></tr>{"".join(rows)}</table></div>'
+           if rows else '<p class="mut">No entry point is reached by this change.</p>')
+    for gp in ts["rule_gaps"]:
+        title = "Rule moved into the shared service" if gp.get("resolved_by_this_change") else "Possible rule gap"
+        have = "".join(f"<li>applied by <code>{_e(a['entry_point'])}</code> ({_e(a['service'])}) in <code>{_e(a['function'])}</code> "
+                       f"<span class=\"mut\">({_loc(a['repo'], a.get('function_file'), a.get('function_line'))})</span>: <code>{_e(a['expr'])}</code></li>"
+                       for a in gp["applied_by"])
+        lack = "".join(f"<li>not applied by <code>{_e(m['entry_point'])}</code> ({_e(m['service'])})</li>" for m in gp["missing_in"])
+        out += f'<div class="banner"><b>{title}</b>: {_e(gp["reason"])}<ul>{have}{lack}</ul></div>'
+    for c in ts["consistency_checks"]:
+        out += f"<p><b>Consistency check</b>: {_e(c['check'])}</p>"
+    if (ts.get("redacted") or {}).get("items"):
+        out += f'<p class="mut">{_e(ts["redacted"]["note"])}</p>'
+    return out
+
+
 def _components(report: dict) -> str:
     rows = []
     for c in report.get("change", {}).get("changed_components", []):
+        if c["type"] == "function" and c.get("effect"):
+            rows.append(f"<li><b>{_e(EFFECT_TEXT[c['effect']])}</b> {_e(c.get('detail') or c['name'])}</li>")
+            continue
         if c["type"] == "function" or c.get("change") == "file_level":
             continue
         mapped = c.get("mapped_by")
@@ -86,7 +124,7 @@ def _components(report: dict) -> str:
         flag = "BREAKING" if c.get("breaking") else "non-breaking"
         rows.append(f"<li><b>{_e(flag)}</b> {_e(c.get('detail') or c['name'])} <span class=\"mut\">({_e(str(c.get('file') or ''))}"
                     f"{':' + _e(str(c['line'])) if c.get('line') else ''}){tail}</span></li>")
-    return f"<ul>{''.join(rows)}</ul>" if rows else '<p class="mut">No contract or schema change was detected.</p>'
+    return f"<ul>{''.join(rows)}</ul>" if rows else '<p class="mut">No contract, schema or code change was detected.</p>'
 
 
 def _unknowns(report: dict) -> str:
@@ -164,6 +202,7 @@ def render_page(report: dict, analysis_url: str = "") -> str:
 <p class="mut"><code>{_e(str(ch.get('repository', '')))}</code> {_e(base)} &rarr; {_e(head)}{pr} &middot; change type <b>{_e(str(ch.get('change_type', 'unknown')))}</b>
 &middot; analysis <code>{_e(report['analysis_id'])}</code></p>
 {note}{cards}{links}
+<h2>What to test</h2>{_test_scope(report) if st != "failed" else '<p class="mut">The analysis failed.</p>'}
 <h2>Findings</h2>{table}
 <h2>Changes analysed</h2>{_components(report)}
 <h2>Unknowns</h2>{_unknowns(report)}

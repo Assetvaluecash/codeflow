@@ -151,4 +151,29 @@ def scrub_extract(part) -> int:
             fix(u, "reason", True, mask=True)
     for f in part.files_failed:
         fix(f, "error", True)
+
+    def clean(value, generic=False):
+        nonlocal total
+        out, n = scrub_json(value, generic_everywhere=generic)
+        total += n
+        return out
+    # data quoted from source: rule expressions, test data and request bodies, UI texts and option values, written test cases
+    for f in part.functions:
+        if f.filters:
+            f.filters = clean(f.filters)
+        if f.statuses:
+            f.statuses = clean(f.statuses)
+    for t in part.tests:
+        t.literals = clean(t.literals)
+        t.bodies = clean(t.bodies)
+    for s in part.schemas:
+        s.fields = clean(s.fields)
+    for e in part.endpoints:
+        e.params = clean(e.params)
+    if part.enums:
+        part.enums = clean(part.enums)
+    if part.ui_facts:
+        part.ui_facts = clean(part.ui_facts)
+    if part.manual_tests:
+        part.manual_tests = clean(part.manual_tests, generic=True)
     return total

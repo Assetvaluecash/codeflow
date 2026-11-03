@@ -24,7 +24,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import authapi, kfadapter
 from .identity import current_principal
@@ -32,6 +32,11 @@ from .graphview import LEVELS, build_view, impact_overlay, landscape_stats, rest
 from .analysis_service import (execute, group_key, job_key, landscape_extracts, pr_event_group_key, pr_event_job_key,
                                refresh_landscape, reproduce, rescan_landscape, resolve)
 from .graphstore import LANDSCAPE, get_or_build
+from .testscope import labels_of, rule_gaps, shared_components
+from .automation import api_inventory, summarise_api, ui_inventory
+from .coverage import assess_test_case, coverage_report, summary_of as summary_of_coverage
+from .graph import build_graph
+from .scrub import scrub_json
 from .publish import PublishError, audit_publication, comment_scope, publish_to_github
 from .reportpage import not_found_page, render_page
 from .tenantconfig import DEFAULT as DEFAULT_CONFIG, ConfigError, diff as config_diff, parse as parse_config
@@ -102,6 +107,14 @@ class ConfigIn(BaseModel):
 
 class SyncIn(BaseModel):
     token: Optional[str] = None
+
+
+class TestCaseIn(BaseModel):
+    title: str = Field("", max_length=500)
+    steps: str = Field("", max_length=20000)
+    expected: str = Field("", max_length=5000)
+    entry_point: str = Field("", max_length=500)          # e.g. "POST /accounts/{id}/payments" or a page route
+    id: Optional[str] = Field(None, max_length=200)
 
 
 class AnalysisIn(BaseModel):
@@ -793,6 +806,88 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
         rows = landscape_stats(ex, current_graph(ex)[0] if ex else None)
         ok = audience(x_tia_readable_repos)
         return [r for r in rows if ok is None or r["repo"] in ok]
+
+    @app.get("/api/v1/graph/shared-components")
+    def graph_shared_components(min_entry_points: int = 2, limit: int = 100, x_tia_readable_repos: Optional[str] = Header(None)):
+        """The landscape seen by a tester before any change: endpoints and functions that many entry points depend on (a change to them needs
+        the widest testing), and rules on a shared endpoint's data that some consumers apply and others do not. Confirmed relationships only."""
+        ex = landscape()
+        if not ex:
+            return {"shared_components": [], "rule_gaps": [], "withheld": 0}
+        g, gid = current_graph(ex)
+        rows = shared_components(g, ex, max(min_entry_points, 2), min(max(limit, 1), 1000))
+        gaps = rule_gaps(g, ex, labels=labels_of(ex))
+        ok = audience(x_tia_readable_repos)
+        withheld = 0
+        if ok is not None:
+            kept = []
+            for r in rows:
+                if r["repo"] not in ok:
+                    withheld += 1
+                    continue
+                users = [u for u in r["used_by"] if u["repo"] in ok]
+                if len(users) != len(r["used_by"]):
+                    r = {**r, "used_by": users, "used_by_withheld": len(r["used_by"]) - len(users)}
+                kept.append(r)
+            rows = kept
+            n = len(gaps)
+            gaps = [x for x in gaps if x["repo"] in ok and all(y["repo"] in ok for y in x["applied_by"] + x["missing_in"])]
+            withheld += n - len(gaps)
+        return {"graph_version": gid, "shared_components": rows, "rule_gaps": gaps, "withheld": withheld,
+                "basis": "confirmed relationships only; a rule counts when it tests fields of the shared endpoint's declared response schema"}
+
+    # ---- tester views: automation inventory (UC-3) and technical coverage (UC-2) ---------------------------------------------
+    def tester_scope(repos: Optional[str], header: Optional[str]):
+        """Extracts and graph of the repositories the caller may read (optionally narrowed): nothing in an unreadable repository is
+        matched, counted or named."""
+        ok = audience(header)
+        names = [x.strip() for x in repos.split(",") if x.strip()] if repos else None
+        if names:
+            for n in names:
+                require_repo(n)
+        ex = {n: e for n, e in landscape(names).items() if ok is None or n in ok}
+        for n in names or []:
+            if n not in ex:
+                raise HTTPException(404, f"repository '{n}' is not registered")
+        if not ex:
+            return ex, None
+        if names is None and len(ex) == len(svc.list()):
+            return ex, current_graph(ex)[0]
+        cfg = store.effective_config()
+        return ex, build_graph(ex, tuple(cfg.strip_prefixes), cfg.test_naming)
+
+    @app.get("/api/v1/automation/api")
+    def automation_api(repos: Optional[str] = None, x_tia_readable_repos: Optional[str] = Header(None)):
+        """Every endpoint with its inputs (mandatory, multi-valued, allowed values, limits), generated valid and invalid values, a test
+        matrix with expected outcomes, and the error statuses its handler answers with."""
+        ex, _ = tester_scope(repos, x_tia_readable_repos)
+        items = api_inventory(ex, labels_of(ex))
+        return scrub_json({"endpoints": items, "summary": summarise_api(items)})[0]
+
+    @app.get("/api/v1/automation/ui")
+    def automation_ui(repos: Optional[str] = None, x_tia_readable_repos: Optional[str] = Header(None)):
+        """Every page (route) with its elements: a unique locator for each, mandatory flags, input rules, dropdown values, and the APIs
+        the page calls."""
+        ex, _ = tester_scope(repos, x_tia_readable_repos)
+        pages = ui_inventory(ex)
+        return scrub_json({"pages": pages, "summary": {"pages": len(pages), "elements": sum(p["summary"]["elements"] for p in pages),
+                                                       "without_unique_locator": sum(p["summary"]["without_unique_locator"] for p in pages)}})[0]
+
+    @app.get("/api/v1/coverage")
+    def coverage(repos: Optional[str] = None, x_tia_readable_repos: Optional[str] = Header(None)):
+        """The technical aspects of every entry point and page, and which automated tests and written test cases address each."""
+        ex, g = tester_scope(repos, x_tia_readable_repos)
+        if not ex:
+            return {"entry_points": [], "unmatched_written_tests": [], "summary": summary_of_coverage([], 0, 0, 0)}
+        return scrub_json(coverage_report(ex, g))[0]
+
+    @app.post("/api/v1/coverage/test-case")
+    def coverage_test_case(body: TestCaseIn, repos: Optional[str] = None, x_tia_readable_repos: Optional[str] = Header(None)):
+        """One test case as a query: the entry points it addresses, which of their technical aspects it covers and which it misses."""
+        ex, g = tester_scope(repos, x_tia_readable_repos)
+        if not ex:
+            raise HTTPException(404, "no repository to assess against")
+        return scrub_json(assess_test_case(ex, g, body.model_dump()))[0]
 
     # ---- analyses ----------------------------------------------------------------------------------------------
     @app.post("/api/v1/impact-analyses")

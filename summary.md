@@ -294,3 +294,70 @@ config mgmt (UC1-24); then accuracy harness (UC1-25), performance (UC1-26), secu
 - **Context paths** (accuracy gap): a Spring service's own `server.servlet.context-path` (or Boot 1 `server.context-path`) is applied to its routes and its MockMvc test paths (`RepoExtract.context_path`); context paths set in a configuration repository (`shared/<service>.yml`) are read (`external_context_paths`) and reported as the unknown `context_paths_not_applied` with the `paths.strip_prefixes` setting that applies them. Extractor versions now py-3 / java-4. `tests/test_context_paths.py` (11). Piggymetrics still needs the setting (its paths are in the config repo), but the report now says so.
 - **UC1-23** `deploy/Dockerfile` (non-root 10001, git only, healthcheck, auth on by default), `deploy/docker-compose.yml` (PostgreSQL 16, migrate once, api + worker; secrets from files; read-only, cap_drop ALL, port bound to 127.0.0.1), `deploy/helm/tia` (api x2 + PDB, workers x4, migration pre-install/pre-upgrade hook, workspace PVC kept on uninstall, optional ingress, network policy), `deploy/README.md`; CI job `container` builds the image and validates Compose. `tests/test_deploy.py` (14) STATIC checks only. NEVER built, started or installed (no Docker/Kubernetes here).
 - **Full suite 2026-11-01: 964 passed, 1 failed** (an expected-message test still said 'no GitHub remote'; the message now also names Azure DevOps - test updated; tests/test_publish.py 22/22 pass). Effective result: 965 passing, 0 failing, 1 skipped.
+
+## 2026-11-02: tester view of a change (CASE-STUDY UC-1, UC1-31)
+- **Context:** recorded discussion with the testing stakeholder, transcribed locally (faster-whisper small.en) into `docs/CASE-STUDY.md`.
+  - Testers need business/tester terms, not "function called in 3 places".
+  - Three demo use cases: UC-1 change impact, UC-2 technical coverage, UC-3 automation inventory.
+  - User decisions: scope is TIA Lane 0 only (business-requirement mapping out of scope); Keka was only an example; build UC-1 on the existing test landscapes.
+- **Built** `tia/testscope.py`, wired into `impact.py`, `report.py` (PR comment "What to test", redaction), `reportpage.py`, `kfadapter.py` (chunks `test_scope`/`rule_gap`/`consistency_check` and paths), `api.py` (`GET /api/v1/graph/shared-components`, permission read), `cli.py` (`tia shared-components`):
+  - **Change effect per changed function:** `breaking` (removed but still called; signature changed and callers not updated), `behaviour_change`, `compatible_change`, `no_functional_change` (docstring only).
+    - Severity changes only for those breaking cases; before, every function change was "nonbreaking".
+    - Extractors now record signatures, a docstring-free body hash and item filters. Versions py-4 / java-5.
+  - **Report `test_scope`:**
+    - entry points (endpoints) reached, with why, effect, evidence and the tests found in the entry point's own repository;
+    - code with no analysed endpoint listed separately (incl. declared contracts);
+    - consistency checks (≥2 consumers in other repos of one changed endpoint);
+    - rule gaps (consumers of a shared endpoint applying different item filters on fields of its declared response schema; confirmed edges only; `resolved_by_this_change` when the change moves the rule into the shared service).
+  - **Labels:** `tia-services.yaml` `entry_points:` give entry points plain names.
+- **Demo landscape** `fixtures/build_lanes_fixture.py` (payments-service shared, statement-service PDF filters disputed, customer-portal does not; branches behaviour / move_rule / signature / signature_unfixed / docstring / contract). Run: `python tools/demo.py --landscape lanes --branch behaviour`.
+- **Bug found and fixed:** every `tia` CLI command crashed (UnboundLocalError: `import os` inside `main()`).
+- **Docs:** USER-GUIDE §4a and limits, KF-ADAPTER mapping, API.md regenerated, CASE-STUDY status table.
+- **Tracker:** UC1-31 + 3 tasks.
+- **Tests:** `tests/test_testscope.py` (28) pass.
+  - Full suite: 988 passed, 1 skipped, 3 failed, 2 errors.
+    - Failures: 2 report-page tests counting tables, 1 docs test reading a YAML example as a route. Tests/docs updated.
+    - Errors: 2 observability tests whose git remote setup failed under load.
+  - All 79 tests in those files pass on re-run; no clean single full run after the fixes yet.
+  - A previous full-suite attempt never ran: embedded PostgreSQL exceeded its 10 s start timeout. Its orphaned server was stopped with pg_ctl.
+- **Verification level:** Verified (simulated). No customer code; screens only via declared labels (no front-end analysis); rules in SQL/validation annotations/early returns not compared.
+
+## 2026-11-03: UC-2 technical coverage and UC-3 automation inventory (UC1-32, UC1-33); final local run
+- **UC-3 APIs** `tia/automation.py`:
+  - Extractors py-4/java-5 now also record:
+    - field rules: Pydantic `Field`/`Literal`/`Enum`/`constr`/`EmailStr`/`Annotated`, FastAPI `Path`/`Query`/`Header`, Java Bean Validation and enums;
+    - endpoint parameters;
+    - handler error statuses (`HTTPException`, `ResponseStatusException`, `ResponseEntity`);
+    - test asserted statuses, literals and request bodies with values.
+  - Inventory: inputs (mandatory, multi, allowed, limits), generated valid/invalid values (patterns generated only when simple, else stated), a test matrix with expected outcomes (422 FastAPI / 400 Spring), error statuses.
+- **UC-3 UI** `tia/extract_ui.py` (standard library, no new dependency):
+  - frameworks: Angular (templates, `@Component`, reactive-form validators, routes), React (JSX, React Router), Vue, HTML;
+  - per page: elements with unique-checked locators (CSS/XPath/Playwright) ranked test id > id > name > form control > aria > label > text > placeholder > position (fragile); mandatory flags, rules, dropdown values (static / literal list / dynamic); API calls linked to endpoints;
+  - not misled by JS comments, generics or script blocks.
+- **UC-2** `tia/coverage.py` + `tia/testcases.py`:
+  - Aspects per endpoint and page: exercised, missing mandatory input, invalid value, allowed values, error statuses, data rules.
+  - Matched to automated tests (Python bodies checked value-by-value against the rules) and written cases (`testcases/*.csv|yaml|json`).
+  - Single test-case query.
+  - Guards: provider tests never count for consumers; page-first matching of written cases; a test omitting one field is not an invalid-value test of another.
+- **Access:**
+  - API: `GET /api/v1/automation/api`, `/automation/ui`, `/coverage`, `POST /api/v1/coverage/test-case` (permission read; computed only over readable repositories).
+  - CLI: `tia automation [--ui]`, `tia coverage [--test-case FILE]`.
+  - Secrets scrubbed in the new fields.
+- **Sample data:** `fixtures/build_lanes_fixture.py` extended:
+  - a payment-creation API with rules, 404/409;
+  - 4 automated tests;
+  - 9 written test cases (CSV + YAML);
+  - Angular and React pages.
+- `tools/run_dev.py --landscape lanes`.
+- **Docs:** USER-GUIDE 4b/4c, CASE-STUDY status, API.md regenerated.
+- **Tracker:** UC1-32, UC1-33 + 3 tasks; UC1-31..33 Verified (live).
+- **Tests:** `tests/test_tester_views.py` (25) + `tests/test_testscope.py` (28) pass.
+  - **Full local suite: 1016 passed, 1 skipped, 2 failed.**
+    - Both failures were outdated expectations: a user-guide example read as an API route (reworded), and a Java field test now that fields carry `min_length`/`multi` (updated).
+    - Both files pass on re-run (46 tests).
+- **Live local run** (real server + PostgreSQL + worker on the sample landscape):
+  - UC-1: 3 entry points with tests, 1 rule gap, 1 consistency check; report page and KF answer.
+  - UC-3: 5 APIs / 29 cases; 2 pages / 14 elements.
+  - UC-2: 41.4% of 35 aspects covered; test-case query answered.
+  - Evidence in the session scratchpad `live-evidence/`.
+- **Not done:** customer code base; reading Playwright/Cypress tests and Java test bodies; KF exposure of UC-2/UC-3; web UI screens for these views (API/CLI only).

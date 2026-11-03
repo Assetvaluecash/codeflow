@@ -20,6 +20,8 @@ from .extract_data import (alembic_migration, django_migration, extract_file as 
                            resolve_data)
 from .extract_java import extract_file as extract_java_file, keep_reachable_schemas, module_fqn, resolve_clients
 from .extract_orm import function_refs, model_entity
+from .extract_ui import assemble_pages, extract_ui_file, is_ui_file
+from .testcases import is_testcase_file, parse_testcases
 from .scrub import scrub_extract
 from .models import (CallSite, Endpoint, Function, RepoExtract, Schema, TestCase,
                      normalize_path)
@@ -55,6 +57,242 @@ def _unparse(n) -> str:
         return ast.unparse(n)
     except Exception:  # pragma: no cover
         return "?"
+
+
+# ---- field and parameter rules (UC-3) ---------------------------------------------------------------------------------------------
+CONSTRAINT_KW = {"min_length": "min_length", "max_length": "max_length", "ge": "minimum", "le": "maximum", "gt": "exclusive_minimum",
+                 "lt": "exclusive_maximum", "pattern": "pattern", "regex": "pattern", "min_items": "min_items", "max_items": "max_items",
+                 "multiple_of": "multiple_of"}
+PARAM_CALLS = {"Field", "Query", "Path", "Body", "Header", "Cookie", "Form"}
+MULTI_TYPES = {"List", "list", "Set", "set", "Sequence", "Tuple", "tuple", "FrozenSet", "conlist"}
+SKIP_PARAM_TYPES = {"Request", "Response", "BackgroundTasks", "Session", "AsyncSession", "WebSocket", "HTTPConnection"}
+
+
+def _literal(n):
+    if isinstance(n, ast.Constant) and isinstance(n.value, (str, int, float, bool)) and n.value is not Ellipsis:
+        return n.value
+    if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.USub) and isinstance(n.operand, ast.Constant) and isinstance(n.operand.value, (int, float)):
+        return -n.operand.value
+    return None
+
+
+def _call_name(n) -> str:
+    return _unparse(n.func).split(".")[-1] if isinstance(n, ast.Call) else ""
+
+
+def _kw_constraints(call: ast.Call) -> dict:
+    out = {}
+    for kw in call.keywords:
+        if kw.arg in CONSTRAINT_KW and _literal(kw.value) is not None:
+            out[CONSTRAINT_KW[kw.arg]] = _literal(kw.value)
+    return out
+
+
+def _ann_info(ann) -> dict:
+    """What an annotation says about a value: multi-valued, nullable, allowed values, constraints, email format."""
+    info = {"multi": False, "nullable": False, "constraints": {}}
+
+    def walk(a):
+        if a is None:
+            return
+        if isinstance(a, ast.BinOp) and isinstance(a.op, ast.BitOr):                      # X | None
+            for side in (a.left, a.right):
+                if isinstance(side, ast.Constant) and side.value is None:
+                    info["nullable"] = True
+                else:
+                    walk(side)
+            return
+        if isinstance(a, ast.Call) and _call_name(a) in ("constr", "conint", "confloat", "conlist", "condecimal"):
+            info["constraints"].update(_kw_constraints(a))
+            if _call_name(a) == "conlist":
+                info["multi"] = True
+            return
+        if isinstance(a, ast.Subscript):
+            head = _unparse(a.value).split(".")[-1]
+            args = a.slice.elts if isinstance(a.slice, ast.Tuple) else [a.slice]
+            if head == "Optional":
+                info["nullable"] = True
+                walk(args[0])
+            elif head == "Union":
+                for x in args:
+                    if isinstance(x, ast.Constant) and x.value is None:
+                        info["nullable"] = True
+                    else:
+                        walk(x)
+            elif head == "Literal":
+                vals = [_literal(x) for x in args]
+                if all(v is not None for v in vals):
+                    info["constraints"]["allowed"] = vals
+            elif head == "Annotated":
+                walk(args[0])
+                for x in args[1:]:
+                    if isinstance(x, ast.Call) and _call_name(x) in PARAM_CALLS:
+                        info["constraints"].update(_kw_constraints(x))
+            elif head in MULTI_TYPES:
+                info["multi"] = True
+                walk(args[0])
+            return
+        if _unparse(a).split(".")[-1] == "EmailStr":
+            info["constraints"]["format"] = "email"
+
+    walk(ann)
+    return info
+
+
+def py_field(ann, value) -> dict:
+    """A schema field or handler parameter: type, required, and the rules the annotation and default declare."""
+    info = _ann_info(ann)
+    d = {"type": _unparse(ann) if ann is not None else "", "required": value is None}
+    default = None
+    if isinstance(value, ast.Call) and _call_name(value) in PARAM_CALLS:
+        first = value.args[0] if value.args else next((k.value for k in value.keywords if k.arg == "default"), None)
+        has_factory = any(k.arg == "default_factory" for k in value.keywords)
+        d["required"] = (first is None and not has_factory) or (isinstance(first, ast.Constant) and first.value is Ellipsis)
+        if first is not None and not d["required"]:
+            default = _literal(first)
+            if isinstance(first, ast.Constant) and first.value is None:
+                info["nullable"] = True
+        info["constraints"].update(_kw_constraints(value))
+    elif isinstance(value, ast.Constant) and value.value is None:
+        info["nullable"] = True
+    elif value is not None:
+        default = _literal(value)
+    if info["multi"]:
+        d["multi"] = True
+    if info["nullable"]:
+        d["nullable"] = True
+    if info["constraints"]:
+        d["constraints"] = info["constraints"]
+    if default is not None:
+        d["default"] = default
+    return d
+
+
+def _status_of(n) -> Optional[int]:
+    v = _literal(n)
+    if isinstance(v, int) and 100 <= v <= 599:
+        return v
+    m = re.search(r"HTTP_(\d{3})_", _unparse(n)) if isinstance(n, ast.Attribute) else None
+    return int(m.group(1)) if m else None
+
+
+def raised_statuses(node) -> list:
+    """HTTP error statuses a handler raises (HTTPException(404) / status.HTTP_404_NOT_FOUND) or returns (JSONResponse(status_code=409))."""
+    out = []
+    for n in ast.walk(node):
+        call = n.exc if isinstance(n, ast.Raise) and isinstance(n.exc, ast.Call) else n.value if isinstance(n, ast.Return) and isinstance(n.value, ast.Call) else None
+        if call is None or not _call_name(call).endswith(("HTTPException", "Response", "JSONResponse")):
+            continue
+        st = next((_status_of(k.value) for k in call.keywords if k.arg == "status_code"), None)
+        if st is None and call.args and _call_name(call).endswith("HTTPException"):
+            st = _status_of(call.args[0])
+        if st and st >= 400:
+            detail = next((_const_str(k.value) for k in call.keywords if k.arg == "detail"), None)
+            out.append({"status": st, "line": n.lineno, **({"detail": detail[:120]} if detail else {})})
+    return sorted(out, key=lambda x: (x["line"], x["status"]))
+
+
+def asserted_statuses(node) -> list:
+    """HTTP statuses a test asserts: r.status_code == 404, r.status_code in (400, 422)."""
+    out = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Compare) and _unparse(n.left).endswith("status_code"):
+            for c in n.comparators:
+                for x in (c.elts if isinstance(c, (ast.Tuple, ast.List, ast.Set)) else [c]):
+                    st = _status_of(x)
+                    if st:
+                        out.add(st)
+    return sorted(out)
+
+
+def literal_values(node, limit: int = 60) -> list:
+    """The data a test uses: string and number literals and dict keys (bounded; long strings are not data)."""
+    out = []
+    for n in ast.walk(node):
+        v = _literal(n)
+        if v is not None and not isinstance(v, bool) and len(str(v)) <= 60 and str(v) not in out:
+            out.append(str(v))
+        elif isinstance(n, ast.Constant) and isinstance(n.value, bool) and str(n.value) not in out:
+            out.append(str(n.value))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _signature(node) -> dict:
+    """Parameters (name, kind, whether they have a default) and the return annotation: what callers depend on."""
+    a = node.args
+    pos = a.posonlyargs + a.args
+    first_default = len(pos) - len(a.defaults)
+    params = [{"name": x.arg, "kind": "positional", "default": i >= first_default} for i, x in enumerate(pos)]
+    if a.vararg:
+        params.append({"name": a.vararg.arg, "kind": "var_positional", "default": True})
+    params += [{"name": x.arg, "kind": "keyword", "default": d is not None} for x, d in zip(a.kwonlyargs, a.kw_defaults)]
+    if a.kwarg:
+        params.append({"name": a.kwarg.arg, "kind": "var_keyword", "default": True})
+    return {"params": params, "returns": _unparse(node.returns) if node.returns else None}
+
+
+def _body_hash(node) -> str:
+    """The function's hash without its docstring (comments and formatting are not in the syntax tree at all)."""
+    body = node.body
+    if body and isinstance(body[0], ast.Expr) and _const_str(body[0].value) is not None:
+        body = body[1:]
+    parts = [node.name, ast.dump(node.args), ast.dump(node.returns) if node.returns else ""]
+    parts += [ast.dump(d) for d in node.decorator_list] + [ast.dump(s) for s in body]
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+
+def _item_fields(cond, var: str) -> set:
+    """Fields of the loop item a condition reads: item["x"], item.get("x"), item.x."""
+    gets = set()
+    out = set()
+    for n in ast.walk(cond):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "get"
+                and isinstance(n.func.value, ast.Name) and n.func.value.id == var and n.args and _const_str(n.args[0])):
+            out.add(_const_str(n.args[0]))
+            gets.add(id(n.func))
+    for n in ast.walk(cond):
+        if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name) and n.value.id == var and _const_str(n.slice):
+            out.add(_const_str(n.slice))
+        elif isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == var and id(n) not in gets:
+            out.add(n.attr)
+    return out
+
+
+def item_filters(node) -> list:
+    """Conditions that decide which items of a collection a function keeps: the business rules it applies to data
+    (comprehension conditions, filter(lambda ...), and loops that skip or collect items). Only conditions on the items' fields count."""
+    out = []
+
+    def add(cond, var, line, negate=False):
+        fields = _item_fields(cond, var)
+        if fields:
+            expr = _unparse(cond)
+            out.append({"line": line, "expr": f"not ({expr})" if negate else expr, "fields": sorted(fields)})
+
+    for n in ast.walk(node):
+        if isinstance(n, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            for gen in n.generators:
+                if isinstance(gen.target, ast.Name):
+                    for cond in gen.ifs:
+                        add(cond, gen.target.id, n.lineno)
+        elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "filter" and n.args
+              and isinstance(n.args[0], ast.Lambda) and len(n.args[0].args.args) == 1):
+            add(n.args[0].body, n.args[0].args.args[0].arg, n.lineno)
+        elif isinstance(n, (ast.For, ast.AsyncFor)) and isinstance(n.target, ast.Name):
+            var = n.target.id
+            for st in n.body:
+                if not isinstance(st, ast.If):
+                    continue
+                if any(isinstance(x, ast.Continue) for x in st.body):
+                    add(st.test, var, st.lineno, negate=True)               # skipped items: the rule keeps the others
+                elif any(isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr in ("append", "add", "yield")
+                         and any(isinstance(a, ast.Name) and a.id == var for a in c.args) for x in st.body for c in ast.walk(x)):
+                    add(st.test, var, st.lineno)
+                elif any(isinstance(x, ast.Expr) and isinstance(x.value, ast.Yield) for x in st.body):
+                    add(st.test, var, st.lineno)
+    return sorted(out, key=lambda f: (f["line"], f["expr"]))
 
 
 class _FileVisitor:
@@ -145,11 +383,16 @@ class _FileVisitor:
             if ent is not None:
                 self.out.entities.append(ent)
         bases = {_unparse(b).split(".")[-1] for b in node.bases}
+        if bases & {"Enum", "IntEnum", "StrEnum"}:
+            vals = [_literal(st.value) for st in node.body if isinstance(st, ast.Assign) and len(st.targets) == 1
+                    and isinstance(st.targets[0], ast.Name) and _literal(st.value) is not None]
+            if vals:
+                self.out.enums[node.name] = vals
         if "BaseModel" in bases:
             fields = {}
             for st in node.body:
                 if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name):
-                    fields[st.target.id] = {"type": _unparse(st.annotation), "required": st.value is None}
+                    fields[st.target.id] = py_field(st.annotation, st.value)
             self.out.schemas.append(Schema(
                 id=f"{self.service}:schema:{node.name}", service=self.service, repo=self.repo,
                 name=node.name, fields=fields, file=self.path, line=node.lineno))
@@ -172,7 +415,9 @@ class _FileVisitor:
             self.add_test(node, fid, calls)
         else:
             self.out.functions.append(Function(id=fid, repo=self.repo, file=self.path, qualname=qual,
-                                               line=node.lineno, hash=h, calls=sorted(set(calls))))
+                                               line=node.lineno, hash=h, calls=sorted(set(calls)),
+                                               signature=_signature(node), body_hash=_body_hash(node), filters=item_filters(node),
+                                               statuses=raised_statuses(node)))
             self.maybe_endpoint(node, fid, qual)
             if not self.is_migration:
                 self.out.data_refs += function_refs(node, fid, self.path, scope, self.out)
@@ -211,12 +456,33 @@ class _FileVisitor:
             for a in node.args.args:
                 if a.annotation is not None:
                     reqs.append(_unparse(a.annotation))
+            params = self._params(node, path)
             for m in methods:
                 np_ = normalize_path(path, self.strip)
                 self.out.endpoints.append(Endpoint(
                     id=f"{self.service}:{m} {np_}", service=self.service, repo=self.repo, method=m,
                     path=path, norm_path=np_, handler=qual, handler_id=fid, file=self.path,
-                    line=node.lineno, response_schema=resp, request_schemas=reqs))
+                    line=node.lineno, response_schema=resp, request_schemas=reqs, params=params))
+
+    def _params(self, node, path: str) -> list:
+        """Path, query and header parameters of a handler with their rules. A parameter typed with a request model is the body: it is
+        dropped at assembly, when the repository's models are known."""
+        a = node.args
+        pos = a.posonlyargs + a.args
+        defaults = [None] * (len(pos) - len(a.defaults)) + list(a.defaults)
+        out = []
+        for arg, dflt in list(zip(pos, defaults)) + list(zip(a.kwonlyargs, a.kw_defaults)):
+            if arg.arg in ("self", "cls") or arg.annotation is None:
+                continue
+            if _unparse(arg.annotation).split(".")[-1] in SKIP_PARAM_TYPES or _call_name(dflt) in ("Depends", "Security", "Body", "Form"):
+                continue
+            where = ("header" if _call_name(dflt) == "Header" else "cookie" if _call_name(dflt) == "Cookie"
+                     else "path" if re.search(r"\{" + re.escape(arg.arg) + r"(:[^}]*)?\}", path) else "query")
+            f = py_field(arg.annotation, dflt)
+            if where == "path":
+                f["required"] = True
+            out.append({"name": arg.arg, "in": where, **f})
+        return out
 
     # ---- outbound call sites ----------------------------------------------------------
     def maybe_callsite(self, call: ast.Call, fid: Optional[str]):
@@ -323,7 +589,7 @@ class _FileVisitor:
 
     # ---- tests ----------------------------------------------------------------------------
     def add_test(self, node, fid, calls):
-        http = []
+        http, bodies = [], []
         for sub in ast.walk(node):
             if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
                     and sub.func.attr in HTTP_VERBS and sub.args):
@@ -335,9 +601,16 @@ class _FileVisitor:
                         s = p
                     if s and s.startswith("/"):
                         http.append([sub.func.attr.upper(), normalize_path(s, self.strip)])
+                        body = next((k.value for k in sub.keywords if k.arg in ("json", "data")), None)
+                        if isinstance(body, ast.Dict):
+                            vals = {_const_str(k): _literal(v) for k, v in zip(body.keys, body.values)
+                                    if _const_str(k) is not None and _literal(v) is not None}
+                            bodies.append([sub.func.attr.upper(), normalize_path(s, self.strip),
+                                           sorted(_const_str(k) for k in body.keys if _const_str(k) is not None), vals])
         self.out.tests.append(TestCase(
             id=fid, repo=self.repo, file=self.path, name=node.name, line=node.lineno,
-            imports=sorted(set(self.import_modules)), called=sorted(set(calls)), http_calls=http))
+            imports=sorted(set(self.import_modules)), called=sorted(set(calls)), http_calls=http,
+            statuses=asserted_statuses(node), literals=literal_values(node), bodies=bodies))
 
 
 BINARY_EXT = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".gz", ".tar", ".jar", ".class", ".exe", ".dll",
@@ -510,8 +783,9 @@ SOURCE_EXT = (".py", ".java")
 
 
 def is_extractable(path: str) -> bool:
-    """Files whose facts are extracted per file and cached: Python and Java source, SQL and Liquibase migrations."""
-    return path.endswith(SOURCE_EXT) or is_data_file(path)
+    """Files whose facts are extracted per file and cached: Python and Java source, SQL and Liquibase migrations, front-end templates
+    and scripts, written test cases."""
+    return path.endswith(SOURCE_EXT) or is_data_file(path) or is_testcase_file(path) or is_ui_file(path)
 
 
 def extract_source(repo: str, service: str, path: str, text: str, strip_prefixes: tuple = ()) -> RepoExtract:
@@ -520,6 +794,20 @@ def extract_source(repo: str, service: str, path: str, text: str, strip_prefixes
         part = extract_java_file(repo, service, path, text, strip_prefixes)
     elif path.endswith(".py"):
         part = extract_file(repo, service, path, text, strip_prefixes)
+    elif is_testcase_file(path):
+        part = RepoExtract(repo=repo, service=service, commit="", extractor_version=EXTRACTOR_VERSION)
+        try:
+            part.manual_tests = parse_testcases(path, text)
+            part.files_analysed = 1
+        except ValueError as e:
+            part.files_failed.append({"file": path, "error": f"test cases: {e}"})
+    elif is_ui_file(path):
+        part = RepoExtract(repo=repo, service=service, commit="", extractor_version=EXTRACTOR_VERSION)
+        part.ui_facts = extract_ui_file(path, text)
+        if part.ui_facts or path.lower().endswith((".html", ".htm", ".vue")):
+            part.files_analysed = 1
+        else:
+            part.non_python_files = 1          # a script with no page in it (e.g. Node server code) is still not analysed
     else:
         part = extract_data_file(repo, service, path, text)
     part.secrets_withheld = scrub_extract(part)          # secrets in source never reach the cache, the graph or a report
@@ -589,6 +877,10 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
             out.repositories += part.repositories
             out.data_refs += part.data_refs
             out.secrets_withheld += part.secrets_withheld
+            out.non_python_files += part.non_python_files
+            out.enums.update(part.enums)
+            out.ui_facts += part.ui_facts
+            out.manual_tests += part.manual_tests
         elif path.startswith("contracts/") and path.endswith(".json"):
             try:
                 c = json.loads(small_files[path])
@@ -605,6 +897,7 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
     names = {s.name for s in out.schemas}
     for e in out.endpoints:
         e.request_schemas = sorted({r for r in e.request_schemas if r in names})
+        e.params = [p for p in e.params if p["type"].split("[")[-1].rstrip("]") not in names]      # a model parameter is the body
         if e.response_schema:
             # response_model=List[X] / list[X] -> X
             for nm in names:
@@ -626,6 +919,7 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
                 t.http_calls = [[v, p if p.startswith(normalize_path(out.context_path, strip)) else normalize_path(out.context_path + p, strip)]
                                 for v, p in t.http_calls]
     out.external_context_paths = external_context_paths(small_files)
+    out.ui_pages = assemble_pages(out.ui_facts, repo)
     out.endpoints.sort(key=lambda e: e.id)
     out.schemas.sort(key=lambda s: s.id)
     out.callsites.sort(key=lambda c: c.id)
