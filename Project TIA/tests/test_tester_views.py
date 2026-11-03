@@ -341,6 +341,18 @@ def test_one_test_case_as_a_query(ex):
     assert none["matched"] == [] and "does not name any analysed entry point" in none["note"]
 
 
+# ---- the web UI: all three use cases have a place on the page (driven in real Chrome by the browser check; see docs/CASE-STUDY.md) --
+def test_the_web_ui_shows_the_three_use_cases():
+    html = (ROOT / "tia" / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'id="scope"' in html and "scopeHtml(rep.test_scope)" in html                                  # UC-1 in the report
+    for url in ("/api/v1/graph/shared-components", "/api/v1/coverage", "/api/v1/automation/api", "/api/v1/automation/ui",
+                "/api/v1/coverage/test-case"):
+        assert url in html, url                                                                        # UC-1 landscape, UC-2, UC-3
+    for tab in ("shared", "cov", "api", "ui", "tc"):
+        assert f'data-ttab="{tab}"' in html and f'id="ttab-{tab}"' in html
+    assert html.index("show(r.report") < html.index('msg("runmsg", "Done"')                              # "Done" only once the report is drawn
+
+
 # ---- over HTTP and from the command line -----------------------------------------------------------------------------------------
 def test_tester_views_over_http(lanes, tmp_path):
     c = TestClient(make_app(tmp_path / "ws", allow_local=True))

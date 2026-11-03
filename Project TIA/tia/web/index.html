@@ -12,8 +12,9 @@
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif}
   header{padding:14px 20px;border-bottom:1px solid var(--line);background:var(--card);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
   header h1{font-size:18px;margin:0} header small{color:var(--mut)}
-  main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:16px}
-  section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px}
+  main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0;overflow-x:auto}
+  code{overflow-wrap:anywhere}
   h2{font-size:15px;margin:0 0 10px}
   label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
   input,select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
@@ -37,6 +38,11 @@
   .ctl{display:flex;gap:10px;flex-wrap:wrap;align-items:end} .ctl>div{min-width:130px}
   main.locked>section:not(#signin){display:none} #who{margin-left:auto} header button{padding:3px 10px}
   .roles label{display:inline-block;margin:0 10px 0 0;color:var(--fg)} .roles input{width:auto}
+  .ttabs{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap} .ttabs button{background:transparent;color:var(--fg);border-color:var(--line)} .ttabs button.on{border-color:var(--acc);color:var(--acc)}
+  .covered{color:var(--ok);border-color:var(--ok)} .partial{color:var(--warn);border-color:var(--warn)} .missing,.breaking{color:var(--bad);border-color:var(--bad)}
+  .behaviour_change{color:var(--warn);border-color:var(--warn)} .compatible_change,.no_functional_change{color:var(--mut)}
+  details{border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin:6px 0} summary{cursor:pointer} .wrapx{overflow-x:auto}
+  .gap{padding:8px 12px;border-radius:6px;border:1px solid var(--bad);margin:8px 0} .gap.moved{border-color:var(--ok)}
   textarea.json{width:100%;height:200px;font:12px ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px}
 </style>
 </head>
@@ -146,14 +152,41 @@
   <h2>4. Change Impact Report <span id="status" class="pill"></span></h2>
   <div id="warn"></div>
   <div id="summary" class="mut"></div>
+  <div id="scope"></div>
+  <h2 style="margin-top:16px">Findings</h2>
   <table id="findings"><thead><tr><th>Severity</th><th>Component</th><th>Evidence</th><th>Why</th><th>Tests</th></tr></thead><tbody></tbody></table>
   <h2 style="margin-top:16px">Unknowns</h2><ul id="unknowns"></ul>
   <h2>PR comment (markdown)</h2><pre id="comment"></pre>
   <p><button class="sec" id="toimpact" disabled>Show on graph</button> <button class="sec" id="copy">Copy comment</button> <button class="sec" id="json">Show full JSON</button> <a id="permalink" class="mut"></a></p>
   <pre id="raw" class="hidden"></pre>
 </section>
+<section id="testersec">
+  <h2>5. Tester views</h2>
+  <p class="mut" style="margin:0 0 6px">What the code means for testing, across every ingested repository you can read. Matching is static: "covered" means a test addresses it, not that it passes.</p>
+  <div class="ttabs">
+    <button class="on" data-ttab="shared">Common components &amp; rule gaps</button>
+    <button data-ttab="cov">Technical coverage</button>
+    <button data-ttab="api">Automation: APIs</button>
+    <button data-ttab="ui">Automation: pages &amp; locators</button>
+    <button data-ttab="tc">Check one test case</button>
+  </div>
+  <div id="ttab-shared"><p><button class="sec" id="tshared">Refresh</button> <span id="tsharedmsg" class="mut"></span></p><div id="tsharedout"></div></div>
+  <div id="ttab-cov" class="hidden"><p><button class="sec" id="tcov">Refresh</button> <span id="tcovmsg" class="mut"></span></p><div id="tcovout"></div></div>
+  <div id="ttab-api" class="hidden"><p><button class="sec" id="tapi">Refresh</button> <span id="tapimsg" class="mut"></span></p><div id="tapiout"></div></div>
+  <div id="ttab-ui" class="hidden"><p><button class="sec" id="tui">Refresh</button> <span id="tuimsg" class="mut"></span></p><div id="tuiout"></div></div>
+  <div id="ttab-tc" class="hidden">
+    <div class="row">
+      <div><label>Title</label><input id="tctitle" maxlength="500" placeholder="Pay in GBP"></div>
+      <div><label>Entry point (API "POST /accounts/{id}/payments" or a page route)</label><input id="tcentry" maxlength="500"></div>
+    </div>
+    <label>Steps</label><textarea id="tcsteps" class="json" style="height:70px" maxlength="20000"></textarea>
+    <label>Expected result</label><textarea id="tcexpected" class="json" style="height:50px" maxlength="5000"></textarea>
+    <p><button id="tccheck">Check coverage of this test case</button> <span id="tcmsg"></span></p>
+    <div id="tcout"></div>
+  </div>
+</section>
 <section id="cfgsec">
-  <h2>5. Configuration <span id="cfgid" class="pill"></span></h2>
+  <h2>6. Configuration <span id="cfgid" class="pill"></span></h2>
   <p class="mut" id="cfgmeta">Per-tenant limits, severity rules, criticality and path prefixes. Every save is a new immutable version.</p>
   <textarea id="cfgtext" spellcheck="false" style="width:100%;height:260px;font:12px ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px"></textarea>
   <ul id="cfgproblems" class="err"></ul>
@@ -162,7 +195,7 @@
   <table id="cfghist"><thead><tr><th>Version</th><th>Saved by</th><th>Comment</th><th>When</th><th></th></tr></thead><tbody></tbody></table>
 </section>
 <section id="adminsec" class="hidden">
-  <h2>6. Administration</h2>
+  <h2>7. Administration</h2>
   <h3 style="font-size:13px">People</h3>
   <table id="adusers"><thead><tr><th>Person</th><th>Roles</th><th>Source-host login</th><th>Last sign-in</th><th></th></tr></thead><tbody></tbody></table>
   <h3 style="font-size:13px">Repository access</h3>
@@ -368,7 +401,7 @@ $("run").onclick = async () => {
     const body = {target:$("target").value, head:$("head").value.trim()||null, pr:$("pr").value?+$("pr").value:null, base:$("base").value.trim()||null, token:$("atoken").value||null};
     const r = await api("/api/v1/impact-analyses", {method:"POST", body});
     lastAnalysis = r.analysis_id; $("gimpact").disabled = false; $("toimpact").disabled = false;
-    msg("runmsg", "Done", "ok"); show(r.report, await api(`/api/v1/impact-analyses/${r.analysis_id}/comment`));
+    show(r.report, await api(`/api/v1/impact-analyses/${r.analysis_id}/comment`)); msg("runmsg", "Done", "ok");
   } catch(e) { msg("runmsg", e.message, "err") } busy($("run"), false);
 };
 function show(rep, comment) {
@@ -381,12 +414,99 @@ function show(rep, comment) {
     <td>${esc(f.evidence_status)}${f.resolution_strategy ? `<br><span class="mut">${esc(f.resolution_strategy)}</span>`:""}</td><td>${esc(f.reason)}${(f.limitations||[]).map(l=>`<br><span class="mut">- ${esc(l)}</span>`).join("")}</td>
     <td>${(f.tests||[]).map(t=>esc(t.name)+` <span class="mut">(${esc(t.association)})</span>`).join("<br>") || '<span class="mut">none found</span>'}</td></tr>`).join("") || `<tr><td colspan="5" class="mut">No findings.</td></tr>`;
   $("unknowns").innerHTML = (rep.unknowns||[]).map(u => `<li>${esc(u.reason)}${u.items ? "<ul>" + u.items.slice(0,15).map(i=>`<li class="mut">${i.rule ? esc(i.rule) + " x" + esc(i.count) : `${esc(i.repo||"")} ${esc(i.file||"")}${i.line?":"+i.line:""}${i.service ? " " + esc(i.service) : ""}${i.count && !i.reason ? " x" + esc(i.count) : ""} - ${esc(i.reason||i.error||"")}`}</li>`).join("") + (u.items.length>15?`<li class="mut">... ${u.items.length-15} more in JSON</li>`:"") + "</ul>" : ""}</li>`).join("");
+  $("scope").innerHTML = scopeHtml(rep.test_scope);
   $("comment").textContent = comment; $("raw").textContent = JSON.stringify(rep, null, 2);
   $("permalink").textContent = rep.analysis_id; $("permalink").href = `/analyses/${encodeURIComponent(rep.analysis_id)}`; $("permalink").target = "_blank";
   $("result").scrollIntoView({behavior:"smooth"});
 }
 $("copy").onclick = () => navigator.clipboard.writeText($("comment").textContent);
 $("json").onclick = () => $("raw").classList.toggle("hidden");
+
+// ================= tester views (docs/CASE-STUDY.md UC-1, UC-2, UC-3) =================
+const EFFECT = {breaking:"breaking", behaviour_change:"behaviour change", compatible_change:"compatible change", no_functional_change:"no functional change", unknown:"unknown (file-level)"};
+const pill = (cls, text) => `<span class="pill ${esc(cls)}">${esc(text)}</span>`;
+const v2s = v => v === null || v === undefined ? "?" : typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v);
+function gapHtml(g) {
+  const head = g.resolved_by_this_change ? "Rule moved into the shared service" : "Possible rule gap";
+  return `<div class="gap ${g.resolved_by_this_change ? "moved" : ""}"><b>${head}</b>: ${esc(g.reason)}<ul>` +
+    g.applied_by.map(a => `<li>applied by <code>${esc(a.label || a.entry_point)}</code> (${esc(a.service)}) in <code>${esc(a.function)}</code> <span class="mut">${esc(a.function_file)}:${esc(a.function_line)}</span>: <code>${esc(a.expr)}</code></li>`).join("") +
+    g.missing_in.map(m => `<li>not applied by <code>${esc(m.label || m.entry_point)}</code> (${esc(m.service)})</li>`).join("") + "</ul></div>";
+}
+function scopeHtml(ts) {
+  if (!ts) return "";
+  const rows = [...ts.entry_points, ...ts.code_without_entry_point];
+  if (!rows.length && !ts.rule_gaps.length) return `<h2 style="margin-top:16px">What to test</h2><p class="mut">No entry point is reached by this change: nothing to retest.</p>`;
+  return `<h2 style="margin-top:16px">What to test <span class="mut" style="font-weight:normal">(${ts.summary.entry_points} entry point(s), ${ts.summary.tests_linked} test(s) found)</span></h2>
+    <table id="scopetable"><thead><tr><th>Entry point</th><th>Service</th><th>Change effect</th><th>Why</th><th>Tests found</th></tr></thead><tbody>` +
+    rows.map(e => `<tr><td>${e.label ? `<b>${esc(e.label)}</b><br>` : ""}<code>${esc(e.entry_point)}</code>${e.type !== "endpoint" ? '<br><span class="mut">no analysed API endpoint</span>' : ""}</td>
+      <td>${esc(e.service)}</td><td>${pill(e.change_effect, EFFECT[e.change_effect] || e.change_effect)}${["source_confirmed","contract_confirmed","corroborated"].includes(e.evidence_status) ? "" : `<br><span class="mut">${esc(e.evidence_status)}</span>`}</td>
+      <td>${esc(e.why)}</td><td>${e.tests.map(t => `${esc(t.name)} <span class="mut">(${esc(t.file)})</span>`).join("<br>") || '<span class="err">none found</span>'}</td></tr>`).join("") +
+    `</tbody></table>` + ts.rule_gaps.map(gapHtml).join("") +
+    ts.consistency_checks.map(c => `<div class="banner"><b>Consistency check</b>: ${esc(c.check)}</div>`).join("") +
+    (ts.redacted ? `<p class="mut">${esc(ts.redacted.note)}</p>` : "");
+}
+document.querySelectorAll(".ttabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".ttabs button").forEach(x => x.classList.toggle("on", x === b));
+  ["shared","cov","api","ui","tc"].forEach(t => $("ttab-" + t).classList.toggle("hidden", t !== b.dataset.ttab));
+  const load = {shared: tShared, cov: tCov, api: tApi, ui: tUi}[b.dataset.ttab];
+  if (load && !$("t" + b.dataset.ttab + "out").dataset.loaded) load();
+});
+async function tview(key, url, render) {
+  const out = $(`t${key}out`); msg(`t${key}msg`, "Loading...");
+  try { const j = await api(url); out.innerHTML = render(j); out.dataset.loaded = "1"; msg(`t${key}msg`, ""); }
+  catch (e) { msg(`t${key}msg`, e.message, "err"); }
+}
+const tShared = () => tview("shared", "/api/v1/graph/shared-components", j =>
+  `<h3 style="font-size:13px">Common components</h3><p class="mut">Endpoints and functions that several entry points depend on: a change to them needs the widest testing.</p>
+   <table id="sharedtable"><thead><tr><th>Component</th><th>Type</th><th>Service</th><th>Entry points depending on it</th></tr></thead><tbody>` +
+  j.shared_components.map(r => `<tr><td><code>${esc(r.name)}</code><br><span class="mut">${esc(r.file)}:${esc(r.line)}</span></td><td>${esc(r.type)}</td><td>${esc(r.service)}</td>
+    <td><b>${esc(r.entry_points)}</b> in ${esc(r.services)} service(s)<br>${r.used_by.map(u => `<span class="mut">${esc(u.label || u.entry_point)} (${esc(u.service)})</span>`).join("<br>")}${r.used_by_withheld ? `<br><span class="mut">+${esc(r.used_by_withheld)} you cannot see</span>` : ""}</td></tr>`).join("") +
+  `</tbody></table>` + (j.shared_components.length ? "" : '<p class="mut">No component is shared by two or more entry points.</p>') +
+  `<h3 style="font-size:13px">Rule gaps</h3>` + (j.rule_gaps.map(gapHtml).join("") || '<p class="mut">No rule gap found between the consumers of a shared endpoint.</p>'));
+const tCov = () => tview("cov", "/api/v1/coverage", j => {
+  const s = j.summary;
+  const kinds = Object.entries(s.by_kind || {}).map(([k, v]) => `<tr><td>${esc(k.replace(/_/g, " "))}</td><td>${v.total}</td><td class="ok">${v.covered}</td><td style="color:var(--warn)">${v.partial}</td><td class="err">${v.missing}</td></tr>`).join("");
+  return `<p id="covsummary"><b>${esc(s.percent)}%</b> of ${esc(s.aspects)} technical aspects covered: ${pill("covered", s.covered + " covered")} ${pill("partial", s.partial + " partial")} ${pill("missing", s.missing + " missing")}
+      <span class="mut">from ${esc(s.automated_tests)} automated test(s) and ${esc(s.written_tests)} written test case(s), over ${esc(s.entry_points)} entry point(s) and page(s)</span></p>
+    <table><thead><tr><th>Aspect kind</th><th>Total</th><th>Covered</th><th>Partial</th><th>Missing</th></tr></thead><tbody>${kinds}</tbody></table>` +
+    j.entry_points.map(e => `<details class="coventry"><summary><b>${esc(e.label || e.entry_point)}</b> <span class="mut">${esc(e.service)}</span> - ${esc(e.covered)}/${esc(e.total)} covered${e.partial ? `, ${esc(e.partial)} partial` : ""} (${esc(e.percent)}%)</summary>
+      <table><thead><tr><th>Status</th><th>Technical aspect</th><th>Addressed by</th></tr></thead><tbody>` +
+      e.aspects.map(a => `<tr><td>${pill(a.status, a.status)}</td><td>${esc(a.title)}${a.values_missing && a.values_missing.length ? `<br><span class="mut">not tested: ${esc(a.values_missing.join(", "))}</span>` : ""}</td>
+        <td>${a.covered_by.map(x => `${x.type === "written" ? `<b>${esc(x.id)}</b> ${esc(x.title)}` : `<code>${esc(x.name)}</code>`} <span class="mut">(${esc(x.type)}: ${esc(x.why)})</span>`).join("<br>") || '<span class="err">no test</span>'}</td></tr>`).join("") + `</tbody></table></details>`).join("") +
+    (j.unmatched_written_tests.length ? `<p class="mut" id="unmatched">Written test cases that match no analysed entry point or page: ${j.unmatched_written_tests.map(u => `<b>${esc(u.id)}</b> ${esc(u.title)} (${esc(u.file)})`).join("; ")}</p>` : "");
+});
+const tApi = () => tview("api", "/api/v1/automation/api", j =>
+  `<p class="mut">${esc(j.summary.endpoints)} endpoint(s), ${esc(j.summary.inputs)} input(s) (${esc(j.summary.mandatory_inputs)} mandatory, ${esc(j.summary.inputs_with_rules)} with rules), ${esc(j.summary.cases)} test case(s) in the matrices.</p>` +
+  j.endpoints.map(it => `<details class="apientry"><summary><b>${esc(it.label || it.entry_point)}</b> <span class="mut">${esc(it.service)} - ${it.inputs.length} input(s), ${it.case_count} case(s)${it.error_statuses.length ? ", errors " + it.error_statuses.map(s => s.status).join("/") : ""}</span></summary>
+    <div class="wrapx"><table><thead><tr><th>Input</th><th>In</th><th>Mandatory</th><th>Rules</th><th>Valid values</th><th>Invalid values</th></tr></thead><tbody>` +
+    it.inputs.map(i => `<tr><td><code>${esc(i.name)}</code><br><span class="mut">${esc(i.type)}${i.multi ? " (list)" : ""}</span></td><td>${esc(i.in)}</td><td>${i.required ? "yes" : "no"}</td><td>${esc(i.rules) || '<span class="mut">none declared</span>'}</td>
+      <td>${i.valid.map(v => `<code>${esc(v2s(v.value))}</code> <span class="mut">${esc(v.why)}</span>`).join("<br>")}</td><td>${i.invalid.map(v => `<code>${esc(v.value === "<missing>" ? "(left out)" : v2s(v.value))}</code> <span class="mut">${esc(v.why)}</span>`).join("<br>")}</td></tr>`).join("") +
+    `</tbody></table></div>` + (it.error_statuses.length ? `<p>Error answers: ${it.error_statuses.map(s => `<b>${esc(s.status)}</b>${s.detail ? " " + esc(s.detail) : ""} <span class="mut">(${esc(s.function)})</span>`).join("; ")}</p>` : "") +
+    `<div class="wrapx"><table><thead><tr><th>Case</th><th>Kind</th><th>Input</th><th>Expect</th><th>Why</th></tr></thead><tbody>` +
+    it.cases.map(c => `<tr><td>${esc(c.id)}</td><td>${esc(c.kind)}${c.field ? `<br><code>${esc(c.field)}</code>` : ""}</td><td><code>${esc(JSON.stringify(c.input))}</code></td><td>${esc(c.expect)}</td><td class="mut">${esc(c.why)}</td></tr>`).join("") +
+    `</tbody></table></div></details>`).join(""));
+const tUi = () => tview("ui", "/api/v1/automation/ui", j =>
+  (j.pages.length ? `<p class="mut">${esc(j.summary.pages)} page(s), ${esc(j.summary.elements)} element(s), ${esc(j.summary.without_unique_locator)} without a unique locator.</p>` : '<p class="mut">No front-end page found in the ingested repositories.</p>') +
+  j.pages.map(p => `<details class="uipage"><summary><b>${esc(p.page)}</b> <span class="mut">${esc(p.framework)}${p.component ? " " + esc(p.component) : ""} - ${p.summary.elements} element(s), ${p.summary.mandatory} mandatory${p.summary.without_unique_locator ? `, <span class="err">${p.summary.without_unique_locator} without a unique locator</span>` : ""}</span></summary>
+    <div class="wrapx"><table><thead><tr><th>Element</th><th>Mandatory</th><th>Locator</th><th>Rules</th><th>Values</th></tr></thead><tbody>` +
+    p.elements.map(e => `<tr><td><b>${esc(e.label || e.text || e.name || e.tag)}</b><br><span class="mut">${esc(e.tag)}${e.type && e.tag === "input" ? " " + esc(e.type) : ""}</span></td><td>${e.mandatory ? "yes" : "no"}</td>
+      <td><span class="${e.locator.strategy.startsWith("position") ? "err" : ""}">${esc(e.locator.strategy)}</span><br><code>${esc(e.locator.css || e.locator.xpath)}</code><br><code class="mut">${esc(e.locator.playwright)}</code>${e.locator_note ? `<br><span class="mut">${esc(e.locator_note)}</span>` : ""}</td>
+      <td>${esc(e.rules || "")}</td><td>${e.tag === "select" ? (e.options || []).filter(o => o.value !== "").map(o => esc(o.value ?? o.text)).join(", ") + `<br><span class="mut">${esc(e.options_source || "")}</span>` : ""}</td></tr>`).join("") +
+    `</tbody></table></div><p>Calls: ${p.api_calls.map(c => `<code>${esc(c.method)} ${esc(c.path)}</code> &rarr; ${c.endpoints.length ? c.endpoints.map(x => `${esc(x.entry_point)} <span class="mut">(${esc(x.service)})</span>`).join(", ") : `<span class="mut">${esc(c.note)}</span>`}`).join("; ") || '<span class="mut">none found</span>'}</p></details>`).join(""));
+$("tshared").onclick = tShared; $("tcov").onclick = tCov; $("tapi").onclick = tApi; $("tui").onclick = tUi;
+$("tccheck").onclick = async () => {
+  busy($("tccheck"), true); msg("tcmsg", "Checking...");
+  try {
+    const j = await api("/api/v1/coverage/test-case", {method: "POST", body: {title: $("tctitle").value, entry_point: $("tcentry").value, steps: $("tcsteps").value, expected: $("tcexpected").value}});
+    $("tcout").innerHTML = j.matched.length ? j.matched.map(m => `<h3 style="font-size:13px">${esc(m.label || m.entry_point)} <span class="mut">${esc(m.service)} - this test case covers ${esc(m.percent_of_area)}% of its area</span></h3>
+      <table class="tcresult"><thead><tr><th></th><th>Technical aspect</th><th>Why</th></tr></thead><tbody>` +
+      m.covers.map(c => `<tr><td>${pill("covered", "covers")}</td><td>${esc(c.title)}${c.values_missing ? `<br><span class="mut">not used: ${esc(c.values_missing.join(", "))}</span>` : ""}</td><td class="mut">${esc(c.why)}</td></tr>`).join("") +
+      m.misses.map(c => `<tr><td>${pill("missing", "misses")}</td><td>${esc(c.title)}</td><td></td></tr>`).join("") + `</tbody></table>`).join("") + `<p class="mut">${esc(j.note)}</p>`
+      : `<p class="err">${esc(j.note)}</p>`;
+    msg("tcmsg", "");
+  } catch (e) { msg("tcmsg", e.message, "err"); }
+  busy($("tccheck"), false);
+};
 
 
 // ================= code graph =================
@@ -528,7 +648,7 @@ async function boot() {
   applyPermissions();
   cfgLoad();
   if (can("admin")) adminLoad();
-  loadRepos().then(() => gload());
+  loadRepos().then(() => { gload(); tShared(); });
 }
 // ---- administration (people, repository access, tokens, identity providers)
 const when = d => d ? new Date(d).toLocaleString() : "never";

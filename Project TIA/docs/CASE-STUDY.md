@@ -7,6 +7,10 @@
 * All three are tested on our own sample applications:
   * automated tests (`tests/test_testscope.py`, `tests/test_tester_views.py`);
   * a live local run on 2026-11-03. The real TIA server, with PostgreSQL and a background worker, ran every tester feature over HTTP (`tools/run_dev.py --demo --landscape lanes`).
+  * a real-Chrome check of the web UI on 2026-11-03: **27/27 checks passed**.
+    * The report's What to test block, with its rule gap and consistency check.
+    * Each tester tab: common components, coverage, API inventory, pages and locators, and the one-test-case form.
+    * No sideways scroll at phone width; no console errors.
 * Not yet tried on a customer code base or real test repositories.
 * The "What TIA does today" table (§5) is kept as a record of where we started, with each row's current state.
 

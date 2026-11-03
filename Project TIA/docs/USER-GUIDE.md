@@ -66,6 +66,17 @@ changed database migrations and the tables and columns they touch, and then who 
 
 ## 4a. What to test (for testers)
 
+In the web UI the tester's view is in two places:
+* the **What to test** block at the top of each analysis report;
+* section **5. Tester views**, with these tabs:
+  * *Common components & rule gaps*;
+  * *Technical coverage*;
+  * *Automation: APIs*;
+  * *Automation: pages & locators*;
+  * *Check one test case*.
+
+The same information is available from the API and the command line described below.
+
 The report starts with **What to test**: the things you can test without reading code. It has four parts.
 
 * **Entry points to test**: every API endpoint the change reaches, in the changed service and in every analysed service that calls it. Each row gives:

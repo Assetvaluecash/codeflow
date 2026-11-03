@@ -361,3 +361,20 @@ config mgmt (UC1-24); then accuracy harness (UC1-25), performance (UC1-26), secu
   - UC-2: 41.4% of 35 aspects covered; test-case query answered.
   - Evidence in the session scratchpad `live-evidence/`.
 - **Not done:** customer code base; reading Playwright/Cypress tests and Java test bodies; KF exposure of UC-2/UC-3; web UI screens for these views (API/CLI only).
+
+## 2026-11-03 (later): web UI for the three tester use cases
+- **`tia/web/index.html`:**
+  - Report section 4 starts with **What to test**: entry points with plain names, change effect, why and tests found, plus the rule gap and the consistency check (UC-1).
+  - New section **5. Tester views** with tabs (configuration and administration are now 6 and 7):
+    - Common components & rule gaps (UC-1 landscape);
+    - Technical coverage (UC-2: summary, per-kind table, per entry point/page aspects with covered/partial/missing and the tests behind each, unmatched written cases);
+    - Automation: APIs (UC-3: inputs, rules, valid/invalid values, error answers, test matrix);
+    - Automation: pages & locators (UC-3: elements, locator in CSS/XPath/Playwright, fragile ones flagged, mandatory, rules, dropdown values, page API calls);
+    - Check one test case (UC-2 form).
+  - All values escaped.
+- **Fixes:**
+  - "Done" was shown before the report was drawn; now shown after.
+  - The page scrolled sideways at phone width (grid items had no min-width); fixed.
+- **Real-Chrome check** (puppeteer-core driving installed Chrome against `tools/run_dev.py --demo --landscape lanes`): **27/27 checks passed**, 0 console errors, 0 px horizontal overflow at 390 px. Screenshots in the session scratchpad `ui/shots/tester-*.png`.
+- **Tests:** new UI test `test_the_web_ui_shows_the_three_use_cases`. UI-related test files: 141 passed.
+- A dev data folder was damaged by temp clean-up (`pg_notify` missing); a fresh folder was used.
