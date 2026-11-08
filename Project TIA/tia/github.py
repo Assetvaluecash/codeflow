@@ -15,8 +15,10 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
+from .policy import check_conclusion
 from . import metrics, tracing
 from .report import MARKER, render_comment
+from . import airgap
 
 CHECK_NAME = "TIA impact analysis"
 MAX_ANNOTATIONS = 50                      # GitHub accepts at most 50 per request
@@ -40,7 +42,7 @@ def _call(method: str, url: str, token: str, payload: Optional[dict] = None):
                                                   "Content-Type": "application/json", "User-Agent": "tia",
                                                   **tracing.propagation_headers()})
             try:
-                with urllib.request.urlopen(req, timeout=20) as r:
+                with urllib.request.urlopen(airgap.checked(req, "github"), timeout=20) as r:
                     return json.loads(r.read() or b"null")
             except urllib.error.HTTPError as e:
                 outcome = f"http_{e.code // 100}xx"
@@ -118,9 +120,18 @@ def _summary(report: dict, details_url: Optional[str]) -> str:
     unk = [u for u in report.get("unknowns", []) if u.get("affects_confidence")]
     if unk:
         lines.append(f"{len(unk)} unknown(s) affect confidence: " + ", ".join(sorted({u['area'] for u in unk})) + ".")
+    pol = report.get("policy") or {}
+    for r in report.get("policy_results", [])[:10]:
+        lines.append(f"- policy **{r['id']}** ({'mandatory' if r['mandatory'] else 'optional'}): **{r['outcome']}** - {r['reason']}")
+    ver = [v for f in report.get("findings", []) if f.get("material") for v in f.get("required_verification", [])]
+    if ver:
+        lines.append("Required verification: " + "; ".join(dict.fromkeys(ver))[:1500])
     if details_url:
         lines.append(f"[Full report]({details_url})")
-    lines.append("Advisory only - this check never blocks a merge.")
+    if pol.get("mode") == "enforcing":
+        lines.append("Policy mode: a failed mandatory policy is reported as a failing check; your repository protection decides what that blocks.")
+    else:
+        lines.append("Advisory only - this check never blocks a merge.")
     return "\n".join(lines)
 
 
@@ -137,9 +148,11 @@ def check_run_annotations(report: dict) -> list:
 
 
 def check_run_payload(report: dict, head_sha: str, details_url: Optional[str] = None) -> dict:
-    """The check run for one analysis. Always completed and ``neutral``: TIA is advisory and must never block a merge."""
+    """The check run for one analysis. Advisory mode (the default): always ``neutral``, never blocks. Policy mode (configured by the
+    customer): the conclusion reports the mandatory policy outcomes; the repository's protection rules decide what that blocks (FR-036)."""
     text = render_comment(report, max_rows=50)
-    payload = {"name": CHECK_NAME, "head_sha": head_sha, "status": "completed", "conclusion": "neutral",
+    payload = {"name": CHECK_NAME, "head_sha": head_sha, "status": "completed", "conclusion": check_conclusion(report.get("policy") and
+                                                                                                          {**report["policy"], "results": report.get("policy_results", [])}),
                "completed_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
                "external_id": report["analysis_id"],
                "output": {"title": _title(report)[:255], "summary": _summary(report, details_url)[:MAX_TEXT],

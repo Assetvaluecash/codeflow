@@ -1,7 +1,9 @@
 # TIA on one machine: PostgreSQL, the schema migration (runs once), the API server and a worker.
 #   mkdir -p secrets && openssl rand -base64 32 > secrets/app_password ... (see deploy/README.md)
 #   docker compose -f deploy/docker-compose.yml up -d
-# Status: written and statically checked (tests/test_deploy.py); NOT run here - no Docker on the development machine.
+# Status: built and run on Docker Desktop 29.9 (2026-11-06): migration, server, worker, tenant creation, an analysis, upgrade re-run, backup/restore.
+# The database is reachable only on the internal 'backend' network (no host port, no outbound route), so TIA_ALLOW_INSECURE_DB is set for
+# that hop; a database on another machine must use TLS (sslmode=verify-full) instead.
 name: tia
 
 services:
@@ -13,6 +15,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/db_owner_password
     secrets: [db_owner_password]
     volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tia_owner -d tia"]
       interval: 5s
@@ -27,7 +30,10 @@ services:
       TIA_ADMIN_DATABASE_URL_FILE: /run/secrets/admin_dsn
       TIA_APP_PASSWORD_FILE: /run/secrets/app_password
       TIA_WORKER_PASSWORD_FILE: /run/secrets/worker_password
-    secrets: [admin_dsn, app_password, worker_password]
+      TIA_ALLOW_INSECURE_DB: "true"            # the database is on the internal backend network only (see the header)
+      TIA_BACKUP_KEY_FILE: /run/secrets/backup_key
+    secrets: [admin_dsn, app_password, worker_password, backup_key]
+    networks: [backend]
     depends_on:
       db: {condition: service_healthy}
     restart: "no"
@@ -44,9 +50,11 @@ services:
       TIA_MASTER_KEY_FILE: /run/secrets/master_key
       TIA_METRICS_TOKEN_FILE: /run/secrets/metrics_token
       TIA_HSTS: "true"
+      TIA_ALLOW_INSECURE_DB: "true"
     secrets: [app_dsn, audit_key, master_key, metrics_token]
+    networks: [backend, frontend]
     volumes: [repos:/var/lib/tia/repos]
-    ports: ["127.0.0.1:8080:8080"]          # put a TLS-terminating, rate-limiting reverse proxy in front
+    ports: ["127.0.0.1:8080:8080"]          # put a TLS-terminating reverse proxy in front (TIA rate-limits too: tia/ratelimit.py)
     depends_on:
       migrate: {condition: service_completed_successfully}
     read_only: true
@@ -65,7 +73,9 @@ services:
       TIA_WORKER_METRICS_PORT: "9090"
       TIA_WORKER_METRICS_HOST: "0.0.0.0"
       TIA_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      TIA_ALLOW_INSECURE_DB: "true"
     secrets: [worker_dsn, audit_key, master_key, metrics_token]
+    networks: [backend, frontend]            # frontend: outbound for git fetches
     volumes: [repos:/var/lib/tia/repos]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9090/healthz', timeout=4).status == 200 else 1)"]
@@ -79,6 +89,10 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     restart: unless-stopped
+
+networks:
+  backend: {internal: true}
+  frontend: {}
 
 volumes:
   pgdata: {}
@@ -94,3 +108,4 @@ secrets:
   audit_key: {file: ./secrets/audit_key}
   master_key: {file: ./secrets/master_key}
   metrics_token: {file: ./secrets/metrics_token}
+  backup_key: {file: ./secrets/backup_key}

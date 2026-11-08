@@ -172,6 +172,20 @@ class Store:
                 (self.tenant_id, repository, pull_request, pull_request, revision, (revision or "") + "%", limit)).fetchall()
         return [r[0] for r in rows]
 
+    def list_analyses(self, since: Optional[str] = None, until: Optional[str] = None, limit: int = 20000) -> list[dict]:
+        """Stored reports in a period, oldest first (trends, calibration)."""
+        where, args = [], []
+        if since:
+            where.append("created_at >= %s")
+            args.append(since)
+        if until:
+            where.append("created_at < %s")
+            args.append(until)
+        with self.db.tx(self.tenant_id) as c:
+            rows = c.execute("select data from analyses" + (" where " + " and ".join(where) if where else "") + " order by created_at limit %s",
+                             (*args, limit)).fetchall()
+        return [r[0] for r in rows]
+
     def get_analysis(self, analysis_id: str) -> Optional[dict]:
         with self.db.tx(self.tenant_id) as c:
             r = c.execute("select data from analyses where id = %s", (analysis_id,)).fetchone()
@@ -212,23 +226,31 @@ class Store:
         ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         with self.db.tx(self.tenant_id) as c:
             c.execute("select pg_advisory_xact_lock(hashtextextended(%s, 0))", (self.tenant_id,))
-            last = c.execute("select seq, hash from audit_log order by seq desc limit 1").fetchone()
+            last = c.execute("select seq, hash from audit_log where tenant_id = %s order by seq desc limit 1", (self.tenant_id,)).fetchone()
+            if last is None:                                               # every entry purged by retention: continue from the anchor
+                last = c.execute("select seq, hash from audit_anchors where tenant_id = %s", (self.tenant_id,)).fetchone()
             seq, prev = (last[0] + 1, last[1]) if last else (1, GENESIS)
             c.execute("insert into audit_log (tenant_id, seq, ts, event, payload, prev_hash, hash) values (%s,%s,%s,%s,%s,%s,%s)",
                       (self.tenant_id, seq, ts, event, payload, prev, _chain_hash(prev, seq, ts, event, payload, self.audit_key)))
 
     def audit_events(self, limit: int = 100) -> list[dict]:
         with self.db.tx(self.tenant_id) as c:
-            rows = c.execute("select seq, ts, event, payload from audit_log order by seq desc limit %s", (limit,)).fetchall()
+            rows = c.execute("select seq, ts, event, payload from audit_log where tenant_id = %s order by seq desc limit %s", (self.tenant_id, limit)).fetchall()
         return [{"seq": s, "ts": t, "event": e, **json.loads(p)} for s, t, e, p in rows]
 
     def verify_audit(self) -> dict:
         """Recompute the whole chain. ok=False names the first sequence number that does not verify."""
         with self.db.tx(self.tenant_id) as c:
-            rows = c.execute("select seq, ts, event, payload, prev_hash, hash from audit_log order by seq").fetchall()
-        prev, expect = GENESIS, 1
+            rows = c.execute("select seq, ts, event, payload, prev_hash, hash from audit_log where tenant_id = %s order by seq", (self.tenant_id,)).fetchall()
+            anchor = c.execute("select seq, hash, purged_before from audit_anchors where tenant_id = %s", (self.tenant_id,)).fetchone()
+        # entries removed by retention (tia.retention) leave an anchor: the chain continues from the last removed entry's hash
+        prev, expect = (anchor[1], anchor[0] + 1) if anchor else (GENESIS, 1)
         for seq, ts, event, payload, ph, h in rows:
             if seq != expect or ph != prev or h != _chain_hash(prev, seq, ts, event, payload, self.audit_key):
-                return {"ok": False, "entries": len(rows), "first_bad_seq": seq}
+                return {"ok": False, "entries": len(rows), "first_bad_seq": seq, "anchor": _anchor(anchor)}
             prev, expect = h, expect + 1
-        return {"ok": True, "entries": len(rows), "first_bad_seq": None}
+        return {"ok": True, "entries": len(rows), "first_bad_seq": None, "anchor": _anchor(anchor)}
+
+
+def _anchor(a) -> Optional[dict]:
+    return {"seq": a[0], "purged_before": a[2]} if a else None

@@ -19,7 +19,7 @@ from psycopg_pool import ConnectionPool
 
 # Tenant-owned tables the runtime role may read (the tenant registry tables are admin-only). tests/test_tenants.py checks this list
 # against the catalog, so a migration that adds a tenant table cannot be forgotten here.
-RUNTIME_TABLES = ("analyses", "audit_log", "auth_login_states", "auth_sessions", "evidence_snapshots", "extractions", "file_extracts",
+RUNTIME_TABLES = ("analyses", "audit_anchors", "audit_log", "auth_login_states", "auth_sessions", "evidence_records", "evidence_snapshots", "extractions", "file_extracts",
                   "graph_heads", "graph_versions", "jobs", "relationships", "repo_access", "repo_grants", "repositories", "saml_assertions_seen",
                   "scm_permissions", "scm_sync_status", "service_tokens", "tenant_config_versions", "tenant_idps", "tenant_keys", "tenant_secrets",
                   "tenant_users")

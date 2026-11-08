@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+MESSAGING_PACKAGES = {"kafka", "confluent_kafka", "aiokafka", "faust"}
+
 from .models import (CONFIRMED, CONTRACT_CONFIRMED, CORROBORATED, INFERRED,
                      SOURCE_CONFIRMED, Edge, RepoExtract, normalize_path)
 
@@ -59,6 +61,8 @@ def resolve_consumers(extracts: dict[str, RepoExtract], strip_prefixes: tuple = 
 
     for ex in extracts.values():
         for cs in ex.callsites:
+            if (cs.client_pkg or "").split(".")[0] in MESSAGING_PACKAGES:
+                continue                         # a Kafka client call is an event (tia.events), not an HTTP call to resolve
             total += 1
             edge = None
             reason = cs.reason

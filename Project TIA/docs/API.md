@@ -187,6 +187,15 @@ Request body:
 |---|---|---|---|
 | `limit` | query | integer | no |
 
+### `GET /api/v1/audit/report`
+
+**Needs:** `audit_read` (`auditor`, `administrator`).  Who did what in a period, by event and by actor (auditors).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `start` | query | string | yes |
+| `end` | query | string | yes |
+
 ### `GET /api/v1/audit/verify`
 
 **Needs:** `audit_read` (`auditor`, `administrator`).  
@@ -247,6 +256,83 @@ Request body:
 | Parameter | In | Type | Required |
 |---|---|---|---|
 | `gid` | path | string | yes |
+
+
+## Environments
+
+### `GET /api/v1/environments`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  FR-029: per repository and environment, the revision deployed; per environment, the runtime observations held.
+
+### `GET /api/v1/environments/at`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  FR-011: which revision of each repository was running in each environment at a point in time (from deployment records).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `at` | query | string | yes |
+| `repo` | query | string|null | no |
+
+
+## Evidence
+
+### `GET /api/v1/evidence`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `kind` | query | string | yes |
+| `repo` | query | string|null | no |
+| `limit` | query | integer | no |
+
+### `POST /api/v1/evidence/coverage`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  Coverage of one run (Cobertura XML, JaCoCo XML, or coverage.py JSON with --show-contexts for per-test execution).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repo` | query | string | yes |
+| `revision` | query | string|null | no |
+| `format` | query | string|null | no |
+
+### `POST /api/v1/evidence/deployments`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  Deployments: [{repo or service, environment, revision, artifact, deployed_at}].
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `source` | query | string | no |
+
+### `POST /api/v1/evidence/runtime`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  Observed service-to-service calls: OpenTelemetry traces (OTLP/JSON) or pre-aggregated edges. One record per observed edge.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `format` | query | string | no |
+| `source` | query | string | no |
+
+### `POST /api/v1/evidence/test-results`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  CI test results for one run of a repository (JUnit XML, or JSON: pytest-json-report or a list of {name, classname, result}).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repo` | query | string | yes |
+| `revision` | query | string|null | no |
+| `build_id` | query | string|null | no |
+| `environment` | query | string|null | no |
+| `report_ref` | query | string|null | no |
+| `format` | query | string | no |
+
+### `DELETE /api/v1/evidence/{rid}`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `rid` | path | integer | yes |
 
 
 ## Evidence snapshots
@@ -312,9 +398,62 @@ Request body:
 |---|---|---|---|
 | `aid` | path | string | yes |
 
+### `POST /api/v1/impact-analyses/{aid}/acknowledgements`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  An affected team acknowledges that it has seen the change (recorded with who and when).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+
+Request body:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `team` | string | yes |  |
+| `comment` | string (optional) | no |  |
+
+### `POST /api/v1/impact-analyses/{aid}/approvals`
+
+**Needs:** `analyze` (`engineer`, `release_manager`, `administrator`).  An owning team's approval (or rejection) of a change that materially affects it.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+
+Request body:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `owner` | string | yes |  |
+| `decision` | string | yes |  |
+| `comment` | string (optional) | no |  |
+
+### `POST /api/v1/impact-analyses/{aid}/change-record`
+
+**Needs:** `analyze` (`engineer`, `release_manager`, `administrator`).  Attach the report summary and its link to a change record (the PR's change record when none is given). Nothing else is modified.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+
+Request body:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `change_record` | string (optional) | no |  |
+
 ### `GET /api/v1/impact-analyses/{aid}/comment`
 
 **Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+
+### `GET /api/v1/impact-analyses/{aid}/coordination`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  FR-045: per affected team, the notification sent and the acknowledgement received.
 
 | Parameter | In | Type | Required |
 |---|---|---|---|
@@ -328,6 +467,22 @@ Request body:
 |---|---|---|---|
 | `aid` | path | string | yes |
 
+### `GET /api/v1/impact-analyses/{aid}/findings`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  PRD 9.3: the findings that match every filter given (comma-separated values are alternatives). reach: direct|transitive; kind: contract|data|test|runtime|operational; issue: unresolved|stale|inferred.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+| `severity` | query | string|null | no |
+| `service` | query | string|null | no |
+| `reach` | query | string|null | no |
+| `kind` | query | string|null | no |
+| `evidence` | query | string|null | no |
+| `environment` | query | string|null | no |
+| `policy` | query | string|null | no |
+| `issue` | query | string|null | no |
+
 ### `GET /api/v1/impact-analyses/{aid}/graph`
 
 **Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  
@@ -336,9 +491,25 @@ Request body:
 |---|---|---|---|
 | `aid` | path | string | yes |
 
+### `POST /api/v1/impact-analyses/{aid}/notifications`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  Notify the owning teams of materially affected components (once per team; a failed delivery is retried).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+
 ### `GET /api/v1/impact-analyses/{aid}/paths`
 
 **Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+
+### `GET /api/v1/impact-analyses/{aid}/policy`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  The release-policy outcome of an analysis with the approvals recorded so far (the stored report is never changed).
 
 | Parameter | In | Type | Required |
 |---|---|---|---|
@@ -378,6 +549,50 @@ Request body:
 |---|---|---|---|
 | `aid` | path | string | yes |
 
+### `POST /api/v1/impact-analyses/{aid}/verdicts`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  A reviewer's verdict on one finding: confirmed, false_positive or irrelevant. The report is never changed.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+
+Request body:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `finding_id` | string | yes |  |
+| `verdict` | string | yes |  |
+| `comment` | string (optional) | no |  |
+
+
+## Incidents
+
+### `POST /api/v1/incidents`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  FR-031: an incident record {id, title, service or repo, environment, started_at, ended_at, severity, changes: [{repo, revision, pull_request, change_record}]}.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `source` | query | string | no |
+
+### `GET /api/v1/incidents/{iid}/investigation`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  FR-032, AC-034: candidate changes with how each is associated (never a root cause).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `iid` | path | string | yes |
+| `window_hours` | query | number|null | no |
+
+### `POST /api/v1/incidents/{iid}/links`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  A person's validated link between an incident and a change: {repo, revision, note}. Recorded with who and when.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `iid` | path | string | yes |
+
 
 ## Jobs
 
@@ -400,47 +615,29 @@ Request body:
 
 ## Other
 
-### `GET /api/v1/automation/api`
+### `GET /api/v1/calibration`
 
-**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  Every endpoint with its inputs (mandatory, multi-valued, allowed values, limits), generated valid and invalid values, a test matrix with expected outcomes, and the error statuses its handler answers with.
-
-| Parameter | In | Type | Required |
-|---|---|---|---|
-| `repos` | query | string|null | no |
-
-### `GET /api/v1/automation/ui`
-
-**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  Every page (route) with its elements: a unique locator for each, mandatory flags, input rules, dropdown values, and the APIs the page calls.
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  FR-044: per-rule precision from reviewer verdicts and incident outcomes.
 
 | Parameter | In | Type | Required |
 |---|---|---|---|
-| `repos` | query | string|null | no |
+| `since` | query | string|null | no |
+| `until` | query | string|null | no |
 
-### `GET /api/v1/coverage`
+### `GET /api/v1/trends`
 
-**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  The technical aspects of every entry point and page, and which automated tests and written test cases address each.
-
-| Parameter | In | Type | Required |
-|---|---|---|---|
-| `repos` | query | string|null | no |
-
-### `POST /api/v1/coverage/test-case`
-
-**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  One test case as a query: the entry points it addresses, which of their technical aspects it covers and which it misses.
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  FR-043: descriptive change-risk figures per application or team and period (never probabilities).
 
 | Parameter | In | Type | Required |
 |---|---|---|---|
-| `repos` | query | string|null | no |
+| `group` | query | string | no |
+| `period` | query | string | no |
+| `since` | query | string|null | no |
+| `until` | query | string|null | no |
 
-Request body:
+### `POST /mcp`
 
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `title` | string | no |  |
-| `steps` | string | no |  |
-| `expected` | string | no |  |
-| `entry_point` | string | no |  |
-| `id` | string (optional) | no |  |
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  
 
 ### `POST /query/tia`
 
@@ -459,6 +656,36 @@ Request body:
 | `repository` | string (optional) | no |  |
 | `pull_request` | integer (optional) | no |  |
 | `revision` | string (optional) | no |  |
+
+
+## Releases
+
+### `GET /api/v1/releases`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  
+
+### `POST /api/v1/releases`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  A named release: {name, revisions: {repo: commit, tag or branch}, description}. The graph at exactly those revisions is built and kept.
+
+### `GET /api/v1/releases/compare`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  AC-033: dependencies introduced, removed and modified between two releases.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `base` | query | string | yes |
+| `head` | query | string | yes |
+| `cross_service_only` | query | boolean | no |
+
+### `GET /api/v1/releases/{name}/consumers`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  Who was known to depend on an endpoint, schema or topic in that release (component: a node id, or 'METHOD /path' of an endpoint).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `name` | path | string | yes |
+| `component` | query | string | yes |
 
 
 ## Repositories
@@ -575,6 +802,14 @@ Request body:
 
 **Needs:** public.  
 
+### `POST /api/v1/registry/import`
+
+**Needs:** `config_write` (`release_manager`, `administrator`).  Owners and criticalities from the organisation's service catalog, saved as a new configuration version.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `format` | query | string | no |
+
 ### `GET /api/v1/tenant`
 
 **Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  This tenant's own lifecycle status and storage use against its quota (approximate: row sizes plus workspace bytes).
@@ -638,6 +873,59 @@ Request body:
 |---|---|---|---|
 | `n` | path | integer | yes |
 
+### `GET /api/v1/usage`
+
+**Needs:** `admin` (`administrator`).  PL-014: this organisation's metered usage and its plan (administrators).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `month` | query | string|null | no |
+
+
+## Tester views
+
+### `GET /api/v1/automation/api`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  Every endpoint with its inputs (mandatory, multi-valued, allowed values, limits), generated valid and invalid values, a test matrix with expected outcomes, and the error statuses its handler answers with.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repos` | query | string|null | no |
+
+### `GET /api/v1/automation/ui`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  Every page (route) with its elements: a unique locator for each, mandatory flags, input rules, dropdown values, and the APIs the page calls.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repos` | query | string|null | no |
+
+### `GET /api/v1/coverage`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  The technical aspects of every entry point and page, and which automated tests and written test cases address each.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repos` | query | string|null | no |
+
+### `POST /api/v1/coverage/test-case`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  One test case as a query: the entry points it addresses, which of their technical aspects it covers and which it misses.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `repos` | query | string|null | no |
+
+Request body:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `title` | string | no |  |
+| `steps` | string | no |  |
+| `expected` | string | no |  |
+| `entry_point` | string | no |  |
+| `id` | string (optional) | no |  |
+
 
 ## Uploads
 
@@ -691,9 +979,17 @@ Request body:
 
 **Needs:** public.  Azure DevOps service hooks (pull request created / updated). Answers at once; the analysis is queued.
 
+### `POST /api/v1/webhooks/bitbucket`
+
+**Needs:** public.  Bitbucket Cloud and Data Center pull-request events (HMAC signature). Answers at once; the analysis is queued.
+
 ### `POST /api/v1/webhooks/github`
 
 **Needs:** public.  GitHub pull_request events. Returns quickly: verification and matching happen here, the work is queued.
+
+### `POST /api/v1/webhooks/gitlab`
+
+**Needs:** public.  GitLab merge request events (secret token). Answers at once; the analysis is queued.
 
 
 ## Who am I

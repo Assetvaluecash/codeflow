@@ -16,6 +16,24 @@ Landscape: **500 repositories, 19 798 files, 605 101 lines** (generated; not rea
 | Determinism | same inputs, same findings | re-analysis on the evidence snapshot identical (checked on 5 in each run) | yes |
 | Availability 99.9 %, RPO/RTO | proposed | not measured (needs an HA topology) | no |
 
+## With the Release 2-4 work switched on (2026-11-08)
+
+`python tools/benchmark.py ... --enterprise`: the same 500-repository landscape. For every repository the run holds CI results, coverage,
+deployments to three environments and a runtime edge (3,000 evidence records). The tenant has an enforcing release policy (no breaking change,
+tests passed, analysis complete, teams acknowledged), owners for every service and automatic team notification. So every timed analysis also
+pins evidence, enriches tests, resolves deployments and runtime edges, and evaluates the policy.
+
+| PRD 12 requirement | Target | Measured | Met |
+|---|---|---|---|
+| Incremental PR analysis | P95 <= 120 s | P50 6.4 s, **P95 8.9 s**, max 9.9 s (30 analyses) | yes |
+| Interactive report | P95 <= 5 s | **P95 0.19 s** (200 requests) | yes |
+| Concurrent analyses / PR-comment latency | >= 50 concurrent; P95 <= 180 s | **50 jobs, 8 workers: all completed, P95 147.5 s, last after 153 s** | yes |
+| Initial scan | <= 4 h / 20 M LOC | 0.6 M LOC in **380 s**; peak 264 MB | not demonstrated at 20 M LOC |
+| Determinism | identical | 5 of 5 | yes |
+
+The generated changes rarely produce material findings (median 0 per analysis), so team notification was seldom triggered in the timed path.
+SQL lineage, event lineage and the new language adapters are not part of the generated landscape.
+
 ## What this does and does not show
 
 * Linear extrapolation from 0.6 M to 20 M lines would be about 2.4 h for the scan, but that is an extrapolation, not a measurement; real code has larger files, more dependencies and deeper call graphs.

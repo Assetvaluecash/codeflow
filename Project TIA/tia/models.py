@@ -38,6 +38,10 @@ class Endpoint:
     response_schema: Optional[str] = None
     request_schemas: list = field(default_factory=list)
     params: list = field(default_factory=list)   # [{"name", "in": path|query|header, "type", "required", "constraints"}] (not the body)
+    response_shape: Optional[str] = None         # "object" | "list": a response that changes between them breaks its consumers
+    success_status: Optional[int] = None         # the declared success status (201 for a create), when the code states it
+    auth: list = field(default_factory=list)     # authentication / authorisation markers on the route (Depends(get_current_user), @PreAuthorize)
+    source: str = "code"                         # "code" | "openapi" (declared in a specification file only)
 
 
 @dataclass
@@ -82,6 +86,7 @@ class Function:
     body_hash: Optional[str] = None     # hash without the docstring: equal hashes mean a documentation-only change
     filters: list = field(default_factory=list)   # [{"line", "expr", "fields"}] item filters the function applies (business rules)
     statuses: list = field(default_factory=list)  # [{"status", "line", "detail"}] HTTP error statuses the function raises or returns
+    end_line: Optional[int] = None      # last line of the function (coverage: did a test execute it)
 
 
 @dataclass
@@ -190,6 +195,10 @@ class RepoExtract:
     ui_facts: list = field(default_factory=list)           # per-file front-end facts (templates, components, routes): assembly input
     ui_pages: list = field(default_factory=list)           # assembled pages: elements, locators, mandatory flags, options, API calls
     manual_tests: list = field(default_factory=list)       # written test cases from testcases/*.csv|yaml|json
+    events: list = field(default_factory=list)             # [{kind: produces|consumes, topic, function_id, file, line, via, declared?}]
+    event_schemas: list = field(default_factory=list)      # [{id, name, format: avro|json-schema, fields, file, line, topic, topic_source}]
+    sql_access: list = field(default_factory=list)         # SQL in code (FR-041): [{function_id, op: read|write|call, target, file, line, sql, columns}]
+    procedures: list = field(default_factory=list)         # SQL definitions (FR-041): [{name, kind, reads, writes, calls, columns, file, line, ...}]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -216,7 +225,9 @@ class RepoExtract:
             data_refs=d.get("data_refs", []), secrets_withheld=d.get("secrets_withheld", 0),
             strip_prefixes=d.get("strip_prefixes", []), context_path=d.get("context_path"),
             external_context_paths=d.get("external_context_paths", {}), enums=d.get("enums", {}),
-            ui_facts=d.get("ui_facts", []), ui_pages=d.get("ui_pages", []), manual_tests=d.get("manual_tests", []))
+            ui_facts=d.get("ui_facts", []), ui_pages=d.get("ui_pages", []), manual_tests=d.get("manual_tests", []),
+            events=d.get("events", []), event_schemas=d.get("event_schemas", []),
+            sql_access=d.get("sql_access", []), procedures=d.get("procedures", []))
 
 
 def normalize_path(path: str, strip_prefixes: tuple = ()) -> str:

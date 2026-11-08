@@ -349,6 +349,9 @@ class IdentityStore:
                           "coalesce(idp_id, '00000000-0000-0000-0000-000000000000'::uuid) = coalesce(%s::uuid, '00000000-0000-0000-0000-000000000000'::uuid)",
                           (self.tenant_id, ident["subject"], idp_id)).fetchone()
             if r is None:
+                lim = ((c.execute("select plan from tia_tenant_settings()").fetchone() or [{}])[0] or {}).get("max_users")
+                if lim is not None and c.execute("select count(*) from tenant_users where tenant_id = %s and not disabled", (self.tenant_id,)).fetchone()[0] >= lim:
+                    raise AuthError("plan_limit", 402, f"the plan allows {lim} users", tenant=self.tenant_id)
                 r = c.execute("insert into tenant_users (tenant_id, idp_id, subject, email, display_name, scm_logins, last_login) "
                               f"values (%s,%s,%s,%s,%s,%s, now()) returning {self.USER_COLS}",
                               (self.tenant_id, idp_id, ident["subject"], ident.get("email"), ident.get("name"),

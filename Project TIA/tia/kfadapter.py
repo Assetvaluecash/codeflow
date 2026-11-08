@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 SEVERITY_SCORE = {"critical": 1.0, "high": 0.85, "medium": 0.6, "low": 0.35}
 WEAK_EVIDENCE = {"inferred": 0.5, "stale": 0.5, "unknown": 0.3}
 INTENT = "software_tia"
-FORWARD = {"HANDLES"}                       # the one traversed relationship whose stored direction is the direction of impact
+FORWARD = {"HANDLES", "PUBLISHES"}                       # the one traversed relationship whose stored direction is the direction of impact
 
 
 # ---- the KF V2 wire format (document section 5); extra keys are refused so the contract cannot drift silently -----------------------

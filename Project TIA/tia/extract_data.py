@@ -1048,6 +1048,17 @@ def resolve_data(out: RepoExtract, smap: dict) -> None:
     for e in concrete:
         if e.kind == "django" and (e.app, e.name.lower()) in declared:
             e.table, e.table_source = declared[(e.app, e.name.lower())], "declared"
+    # Entity Framework: a class is an entity when a DbContext exposes it as DbSet<T> (table: ToTable(), else the DbSet's name, EF Core's
+    # convention) or it declares [Table]; any other C# class with properties is a plain class, not an entity
+    dbsets = [r for r in out.repositories if r.get("kind") == "ef_dbset"]
+    ef_table = {}
+    for d in dbsets:
+        ef_table.setdefault(d["entity"], ((d.get("table") or d["name"]).lower(), "declared" if d.get("table") else "ef_convention"))
+    for e in concrete:
+        if e.kind == "ef" and e.table_source == "unresolved" and e.name in ef_table:
+            e.table, e.table_source = ef_table[e.name]
+    concrete = [e for e in concrete if not (e.kind == "ef" and e.table_source == "unresolved")]
+    dbset_entity = {d["name"]: d["entity"] for d in dbsets}
     names: dict = {}
     for e in concrete:
         names.setdefault(e.name, []).append(e)
@@ -1077,7 +1088,8 @@ def resolve_data(out: RepoExtract, smap: dict) -> None:
     # ---- Spring Data repositories ------------------------------------------------------------------------------------
     repos = {}
     for r in out.repositories:
-        repos.setdefault(r["name"], []).append(r)
+        if r.get("kind") != "ef_dbset":
+            repos.setdefault(r["name"], []).append(r)
     for tc in sorted(out.typed_calls, key=lambda t: (t["file"], t["line"], t["method"])):
         cands = repos.get(tc["type"], [])
         if not cands:
@@ -1110,7 +1122,11 @@ def resolve_data(out: RepoExtract, smap: dict) -> None:
             continue
         add(tc["function_id"], ent, op, tc["file"], tc["line"], via)
     # ---- Python model references -------------------------------------------------------------------------------------
-    for ref in sorted(out.data_refs, key=lambda x: (x["file"], x["line"], x["model"])):
+    for ref in sorted(out.data_refs, key=lambda x: (x["file"], x["line"], x.get("model") or x.get("dbset") or "")):
+        model = ref.get("model") or dbset_entity.get(ref.get("dbset") or "")        # EF: db.Orders -> the DbSet's entity
+        if not model:
+            continue
+        ref = {**ref, "model": model}
         cands = names.get(ref["model"], [])
         if not cands:
             continue

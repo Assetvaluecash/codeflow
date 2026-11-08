@@ -173,6 +173,7 @@ def main(argv=None) -> int:
     ap.add_argument("--report-calls", type=int, default=200)
     ap.add_argument("--report")
     ap.add_argument("--keep", help="keep the generated data in this directory")
+    ap.add_argument("--enterprise", action="store_true", help="switch on the Release 2-4 work: evidence, enforcing policy, owners, notification")
     a = ap.parse_args(argv)
 
     import pgserver
@@ -219,6 +220,37 @@ def main(argv=None) -> int:
                                "per_repository_ms": round(1000 * (reg + scan) / a.repos, 1), "peak_rss_mb": round(rss_mb(), 0),
                                "target": "<= 4 h for 500 repositories / 20 M LOC (proposed)"}
         print(f"initial scan: {res['initial_scan']}", flush=True)
+
+        # ---- Release 2-4 work switched on (--enterprise): evidence held, enforcing policy, owners, automatic team notification ----------
+        if a.enterprise:
+            from tia import gitutil
+            from tia.evidence import EvidenceStore, parse_coverage, parse_deployments, parse_edges, parse_junit
+            t0 = time.perf_counter()
+            es = EvidenceStore(db, tenant)
+            names_all = sorted(meta["repos"])
+            for i, name in enumerate(names_all):
+                rev = gitutil.resolve_rev(svc.get(name).path, "main")
+                junit = "<testsuite>" + "".join(f'<testcase classname="tests.test_{name.replace("-", "_")}" name="test_case_{k}"/>' for k in range(20)) + "</testsuite>"
+                es.put("test_run", "ci", {"build_id": f"b{i}", "tests": parse_junit(junit)}, repo=name, revision=rev)
+                es.put("coverage", "ci", parse_coverage(json.dumps({"files": {"app.py": {"executed_lines": list(range(1, 60)), "missing_lines": [99]}}})),
+                       repo=name, revision=rev)
+                for d in parse_deployments([{"repo": name, "environment": env, "revision": rev, "deployed_at": "2026-11-01T10:00:00Z"}
+                                            for env in ("testing", "staging", "production")]):
+                    es.put("deployment", "pipeline", d, repo=name, environment=d["environment"], revision=rev)
+                peer = names_all[(i + 1) % len(names_all)]
+                for e in parse_edges([{"from_service": name, "to_service": peer, "method": "GET", "path": "/api/v1/items", "environment": "production",
+                                       "from_ts": "2026-11-01T00:00:00Z", "to_ts": "2026-11-02T00:00:00Z", "count": 100}]):
+                    es.put("runtime_edge", "otel", e, service=name, environment="production")
+            owners = {name: f"team-{i % 10}" for i, name in enumerate(names_all)}
+            store.put_config({"ownership": owners, "coordination": {"auto_notify": True, "default": {"type": "email", "to": "oncall@bank.example"}},
+                              "policies": {"mode": "enforcing", "rules": [
+                                  {"id": "no-breaking", "type": "no_breaking_change"}, {"id": "tests", "type": "tests_passed"},
+                                  {"id": "complete", "type": "analysis_complete"}, {"id": "acks", "type": "teams_acknowledged"}]}},
+                             "benchmark: release 2-4 settings", "bench")
+            res["enterprise_setup"] = {"evidence_records": 6 * len(names_all), "seconds": round(time.perf_counter() - t0, 1),
+                                       "note": "CI results, coverage, 3 deployments and a runtime edge per repository; enforcing policy; owners; "
+                                               "automatic notification (no mail server: each attempt is recorded as failed, as in production)"}
+            print(f"enterprise setup: {res['enterprise_setup']}", flush=True)
 
         # ---- incremental PR analyses (graph built, evidence cached) ----------------------------------------------------------------
         rng = random.Random(11)

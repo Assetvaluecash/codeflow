@@ -65,7 +65,8 @@ def test_page_shows_the_whole_report(client, fx):
     assert "This is not a clean impact assessment" in text                                          # the caveat is on the page
     ts = rep["test_scope"]
     assert p.tags.count("tr") == (1 + len(ts["entry_points"]) + len(ts["code_without_entry_point"])        # what to test
-                                  + 1 + len(rep["findings"]) + 1 + len(rep["coverage"]["repositories_analysed"]))   # headers + rows
+                                  + 1 + len(rep["findings"]) + 1 + len(rep["coverage"]["repositories_analysed"])    # headers + rows
+                                  + (1 + len(rep["test_recommendations"]["tests"]) if rep["test_recommendations"]["tests"] else 0))
     for e in ts["entry_points"]:
         assert e["entry_point"] in text                                                              # the tester's view first
     for f in rep["findings"]:
@@ -109,8 +110,8 @@ def test_tables_stack_into_labelled_cards_on_narrow_screens(client, fx):
     cells = [a for a in p.attrs if a[0] == "td"]
     labelled = [a for a in cells if a[1] == "data-label"]
     assert p.tags.count("td") == len(labelled) and len(labelled) > 0                  # no unlabelled cell: nothing is lost when stacked
-    assert {a[2] for a in labelled} >= {"Severity", "Component", "Evidence", "Why", "Repository", "Revision", "Entry point", "Change effect"}
-    assert sum(1 for a in p.attrs if a[:2] == ("table", "class") and a[2] == "stack") == 3          # what to test, findings, coverage
+    assert {a[2] for a in labelled} >= {"Severity", "Component", "Evidence", "Why", "Repository", "Revision", "Entry point", "Change effect", "Priority", "Test"}
+    assert sum(1 for a in p.attrs if a[:2] == ("table", "class") and a[2] == "stack") == 4          # what to test, recommended tests, findings, coverage
     assert "@media (max-width:700px)" in html and 'name="viewport"' in html
 
 

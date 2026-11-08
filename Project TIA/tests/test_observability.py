@@ -236,7 +236,8 @@ def test_http_metrics_use_route_templates_so_cardinality_stays_bounded(app):
     assert val("tia_http_requests_total", method="GET", route="unmatched", status="404") >= 40
     series = {dict(k[1]).get("route") for k in p if k[0] == "tia_http_requests_total"}
     assert not any("tia-" in s or "definitely" in s for s in series)                         # no raw path ever becomes a label value
-    assert len(series) < 60 and val("tia_http_requests_in_flight") == 0
+    from tia.rbac import ROUTES
+    assert len(series) <= len({path for _, path in ROUTES}) + 1 and val("tia_http_requests_in_flight") == 0   # templates + "unmatched", never raw paths
     assert val("tia_http_request_duration_seconds", method="GET", route="/api/v1/impact-analyses/{aid}") >= 40
 
 

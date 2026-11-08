@@ -1,6 +1,6 @@
 # TIA container image: one image, three commands (server, worker, migrate).
 #   docker build -f deploy/Dockerfile -t tia:<version> .
-# Status: written and statically checked (tests/test_deploy.py); NOT built or run here - no Docker on the development machine.
+# Status: built and run with Docker Desktop 29.9 on 2026-11-06/08 (Compose end to end; see deploy/README.md).
 
 FROM python:3.11-slim-bookworm AS build
 WORKDIR /src
@@ -19,7 +19,8 @@ RUN apt-get update \
  && mkdir -p /var/lib/tia/repos \
  && chown -R tia:tia /var/lib/tia
 COPY --from=build /dist/*.whl /tmp/
-RUN python -m pip install --no-cache-dir "$(ls /tmp/*.whl)[api]" && rm -f /tmp/*.whl
+RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1" \
+ && python -m pip install --no-cache-dir "$(ls /tmp/*.whl)[api]" && rm -f /tmp/*.whl
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

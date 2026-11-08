@@ -3,4 +3,4 @@ name: tia
 description: TIA - Technical Impact Analysis (API server, worker, schema migration). Status - written and statically checked; never installed on a cluster.
 type: application
 version: 0.1.0
-appVersion: "0.1.0"
+appVersion: "1.0.0"

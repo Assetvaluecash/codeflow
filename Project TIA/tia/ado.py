@@ -25,8 +25,10 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Optional
 
+from .policy import ado_state
 from . import metrics
 from .report import MARKER
+from . import airgap
 
 API = "api-version=7.1"
 STATUS_CONTEXT = {"name": "impact-analysis", "genre": "tia"}
@@ -108,7 +110,7 @@ def _call(cfg: AdoConfig, method: str, url: str, token: str, payload=None):
                                  headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json", "Accept": "application/json", "User-Agent": "tia"})
     outcome = "success"
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(airgap.checked(req, "ado"), timeout=20) as r:
             return json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
         outcome = f"http_{e.code // 100}xx"
@@ -139,9 +141,12 @@ def upsert_thread(cfg: AdoConfig, token: str, base_url: str, project: str, repos
 
 def post_status(cfg: AdoConfig, token: str, base_url: str, project: str, repository_id: str, pr: int, report: dict, link: Optional[str]) -> str:
     s = report.get("summary") or {}
-    desc = f"Advisory: {s.get('material_findings', 0)} material finding(s), report {report.get('status')}"
+    pol = report.get("policy") and {**report["policy"], "results": report.get("policy_results", [])}
+    state = ado_state(pol)
+    desc = (f"Advisory: {s.get('material_findings', 0)} material finding(s), report {report.get('status')}" if state == "notApplicable" else
+            f"Policy {report['policy'].get('outcome')}: {s.get('material_findings', 0)} material finding(s), report {report.get('status')}")
     _call(cfg, "POST", f"{_pr_base(base_url, project, repository_id, pr)}/statuses?api-version=7.1-preview.1", token,
-          {"state": "notApplicable", "description": desc[:250], "context": STATUS_CONTEXT, **({"targetUrl": link} if link else {})})
+          {"state": state, "description": desc[:250], "context": STATUS_CONTEXT, **({"targetUrl": link} if link else {})})
     return "created"
 
 

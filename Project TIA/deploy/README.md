@@ -1,9 +1,27 @@
 # Deploying TIA
 
-**Status: written and statically checked only.** There was no Docker or Kubernetes on the development machine: the image has never been built, the Compose file
-never started and the Helm chart never installed or rendered by `helm`. `tests/test_deploy.py` checks what can be checked without them (valid YAML, every secret
-from a file, non-root, read-only file systems, dropped capabilities, health probes on the real endpoints, migration before the server, settings that exist in the code).
-Treat the first real build and install as a verification step.
+**Status (2026-11-06/08):**
+- **Image:** built with Docker Desktop 29.9 (480 MB, non-root, read-only file system).
+- **Compose:** run end to end on one machine:
+  - migration of all 17 schema versions;
+  - tenant creation with `tia.tenants`;
+  - API and worker ready (`/readyz`: database, schema, workspace, worker heartbeat);
+  - an authenticated service token uploading 6 repositories and analysing a breaking change (5 findings);
+  - the audit chain verified;
+  - the migration re-run on the live system (the upgrade path: nothing to apply);
+  - an encrypted tenant backup restored into a second database and verified (26 tables, no mismatch).
+- **Helm chart:** installed on Kubernetes 1.36 (Docker Desktop, kubeadm, one node) on 2026-11-08:
+  - the migration ran as the pre-install hook; 2 API and 2 worker replicas became ready;
+  - a tenant was created from a pod;
+  - `helm upgrade` (revision 2) re-ran the migration hook and rolled the pods;
+  - through the service: `/readyz` ready, an authenticated upload of 6 repositories and an analysis (5 findings), audit chain verified;
+  - an API pod and a worker pod were deleted: health checks kept answering and both pods were replaced.
+  - Fixed by this run: the migration job ignored `extraEnv` and had no `imagePullPolicy`.
+  - **Not verified:** a multi-node cluster, node failure, a ReadWriteMany workspace (the single node used ReadWriteOnce), an ingress, the network policy under a CNI that enforces it.
+- **Azure Terraform** (`deploy/terraform/azure`): **never validated or applied**.
+
+`tests/test_deploy.py` also checks statically: valid YAML, every secret from a file, non-root, read-only file systems, dropped capabilities, health probes on
+the real endpoints, migration before the server, settings that exist in the code.
 
 | File | For |
 |---|---|
@@ -20,10 +38,11 @@ Nothing secret is in these files. Compose reads them from `deploy/secrets/<name>
 
 ## First start
 
-1. Build: `docker build -f deploy/Dockerfile -t tia:0.1.0 .` (from `Project TIA/`).
+1. Build: `docker build -f deploy/Dockerfile -t tia:1.0.0 .` (from `Project TIA/`).
 2. Create the secrets, start the database and run the migration (Compose does it before the API starts; the chart's hook does it before any pod).
 3. Create the first tenant and its identity provider with the admin DSN: `docker compose run --rm migrate tia.tenants create acme-bank`, then `tia.tenants idp-set ...`
    (see [the administrator guide](../docs/ADMIN-GUIDE.md)). Put the tenant id in `TIA_TENANT_ID` / `defaultTenantId`.
-4. Put a TLS-terminating reverse proxy with rate limiting in front of port 8080 (Compose binds it to 127.0.0.1 only).
+4. Put a TLS-terminating reverse proxy in front of port 8080 (Compose binds it to 127.0.0.1 only). TIA rate-limits itself too (`tia/ratelimit.py`).
+5. Compose keeps PostgreSQL on an internal-only network and sets `TIA_ALLOW_INSECURE_DB` for that hop; a database on another machine needs TLS (`sslmode=verify-full`). The backup key is the `backup_key` secret (`TIA_BACKUP_KEY_FILE`).
 
 The workspace volume holds clones (re-fetchable) and **uploaded code (not re-fetchable)**: back it up with the database.

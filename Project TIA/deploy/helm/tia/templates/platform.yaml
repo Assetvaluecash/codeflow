@@ -16,11 +16,16 @@ spec:
       containers:
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["tia.migrate"]
           env:
             - {name: TIA_ADMIN_DATABASE_URL_FILE, value: /run/secrets/tia/admin-dsn}
             - {name: TIA_APP_PASSWORD_FILE, value: /run/secrets/tia/app-password}
             - {name: TIA_WORKER_PASSWORD_FILE, value: /run/secrets/tia/worker-password}
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
           {{- include "tia.containerSecurity" . | nindent 10 }}
           volumeMounts:
             - {name: secrets, mountPath: /run/secrets/tia, readOnly: true}

@@ -7,8 +7,8 @@
 <title>TIA - Technical Impact Analysis</title>
 <script src="/vendor/cytoscape.min.js"></script>
 <style>
-  :root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d21;--mut:#5b6472;--line:#dfe3e8;--acc:#1f4fd8;--ok:#127a3b;--warn:#a86400;--bad:#b3261e}
-  @media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2127;--fg:#e8eaed;--mut:#9aa3af;--line:#2d333b;--acc:#7aa2ff;--ok:#5fd08a;--warn:#f0b35a;--bad:#ff8f87}}
+  :root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d21;--mut:#5b6472;--line:#dfe3e8;--acc:#1f4fd8;--ok:#127a3b;--warn:#a86400;--bad:#b3261e;--btnfg:#fff}
+  @media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2127;--fg:#e8eaed;--mut:#9aa3af;--line:#2d333b;--acc:#7aa2ff;--ok:#5fd08a;--warn:#f0b35a;--bad:#ff8f87;--btnfg:#0b1220}}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif}
   header{padding:14px 20px;border-bottom:1px solid var(--line);background:var(--card);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
   header h1{font-size:18px;margin:0} header small{color:var(--mut)}
@@ -19,7 +19,7 @@
   label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
   input,select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
   .row{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
-  button{padding:7px 14px;border:1px solid var(--acc);background:var(--acc);color:#fff;border-radius:6px;font:inherit;cursor:pointer}
+  button{padding:7px 14px;border:1px solid var(--acc);background:var(--acc);color:var(--btnfg);border-radius:6px;font:inherit;cursor:pointer}
   button.sec{background:transparent;color:var(--acc)} button:disabled{opacity:.5;cursor:wait}
   .tabs{display:flex;gap:6px;margin-bottom:8px} .tabs button{background:transparent;color:var(--fg);border-color:var(--line)} .tabs button.on{border-color:var(--acc);color:var(--acc)}
   table{width:100%;border-collapse:collapse;margin-top:8px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -153,12 +153,42 @@
   <div id="warn"></div>
   <div id="summary" class="mut"></div>
   <div id="scope"></div>
+  <div id="evid"></div>
   <h2 style="margin-top:16px">Findings</h2>
+  <div id="ffilter" class="row" role="group" aria-label="Filter findings">
+    <label>Severity <select id="f_severity"><option value="">any</option><option>critical</option><option>high</option><option>medium</option><option>low</option><option>unknown</option></select></label>
+    <label>Service or repository <input id="f_service" size="16" placeholder="any"></label>
+    <label>Reach <select id="f_reach"><option value="">any</option><option>direct</option><option>transitive</option></select></label>
+    <label>Impact <select id="f_kind"><option value="">any</option><option>contract</option><option>data</option><option>test</option><option>runtime</option><option>operational</option></select></label>
+    <label>Evidence <select id="f_evidence"><option value="">any</option><option>source_confirmed</option><option>contract_confirmed</option><option>corroborated</option><option>runtime_observed</option><option>inferred</option><option>stale</option></select></label>
+    <label>Environment <input id="f_environment" size="10" placeholder="any"></label>
+    <label>Policy <select id="f_policy"><option value="">any</option><option>pass</option><option>fail</option><option>not_evaluated</option><option>requires_review</option></select></label>
+    <label>Evidence gaps <select id="f_issue"><option value="">any</option><option>unresolved</option><option>stale</option><option>inferred</option></select></label>
+    <button class="sec" id="fclear" type="button">Clear filters</button> <span id="fcount" class="mut" aria-live="polite"></span>
+  </div>
   <table id="findings"><thead><tr><th>Severity</th><th>Component</th><th>Evidence</th><th>Why</th><th>Tests</th></tr></thead><tbody></tbody></table>
   <h2 style="margin-top:16px">Unknowns</h2><ul id="unknowns"></ul>
-  <h2>PR comment (markdown)</h2><pre id="comment"></pre>
+  <h2 style="margin-top:16px">Team coordination</h2>
+  <p class="mut" style="margin:0">Teams owning materially affected components: who was told and who has acknowledged.</p>
+  <table id="coordtable"><thead><tr><th>Team</th><th>Components</th><th>Notification</th><th>Acknowledged</th><th>Status</th></tr></thead><tbody></tbody></table>
+  <div class="ctl">
+    <div><button class="sec" id="coordnotify" type="button">Notify the teams</button></div>
+    <div><label for="ackteam">Acknowledge for team</label><select id="ackteam"></select></div>
+    <div><label for="ackcomment">Comment</label><input id="ackcomment" maxlength="1000"></div>
+    <div><button class="sec" id="ackbtn" type="button">Acknowledge</button></div>
+    <span id="coordmsg" class="mut" aria-live="polite"></span>
+  </div>
+  <h2 style="margin-top:16px">Reviewer verdict</h2>
+  <div class="ctl">
+    <div><label for="vfinding">Finding</label><select id="vfinding"></select></div>
+    <div><label for="vverdict">Verdict</label><select id="vverdict"><option value="confirmed">confirmed</option><option value="false_positive">false positive</option><option value="irrelevant">irrelevant</option></select></div>
+    <div><label for="vcomment">Comment</label><input id="vcomment" maxlength="1000"></div>
+    <div><button class="sec" id="vsave" type="button">Record verdict</button></div>
+    <span id="vmsg" class="mut" aria-live="polite"></span>
+  </div>
+  <h2>PR comment (markdown)</h2><pre id="comment" tabindex="0" aria-label="Pull request comment (markdown)"></pre>
   <p><button class="sec" id="toimpact" disabled>Show on graph</button> <button class="sec" id="copy">Copy comment</button> <button class="sec" id="json">Show full JSON</button> <a id="permalink" class="mut"></a></p>
-  <pre id="raw" class="hidden"></pre>
+  <pre id="raw" class="hidden" tabindex="0" aria-label="Full report (JSON)"></pre>
 </section>
 <section id="testersec">
   <h2>5. Tester views</h2>
@@ -185,10 +215,53 @@
     <div id="tcout"></div>
   </div>
 </section>
+<section id="relsec">
+  <h2>5a. Releases, environments and incidents</h2>
+  <div class="ttabs">
+    <button class="on" data-rtab="rel" type="button">Releases</button>
+    <button data-rtab="env" type="button">What ran where</button>
+    <button data-rtab="inc" type="button">Incidents</button>
+  </div>
+  <div id="rtab-rel">
+    <div class="row">
+      <div><label for="relname">New release name</label><input id="relname" maxlength="80" placeholder="2026.11"></div>
+      <div><label for="relrevs">Revisions (JSON: repository to commit, tag or branch)</label><input id="relrevs" placeholder='{"orders-service": "main"}'></div>
+    </div>
+    <p><button class="sec" id="relsave" type="button">Record release</button> <button class="sec" id="relload" type="button">Refresh</button> <span id="relmsg" class="mut" aria-live="polite"></span></p>
+    <table id="reltable"><thead><tr><th>Release</th><th>Repositories</th><th>Recorded</th></tr></thead><tbody></tbody></table>
+    <div class="ctl">
+      <div><label for="relbase">Compare from</label><select id="relbase"></select></div>
+      <div><label for="relhead">to</label><select id="relhead"></select></div>
+      <div><button class="sec" id="relcmp" type="button">Compare</button></div>
+    </div>
+    <div id="relout"></div>
+  </div>
+  <div id="rtab-env" class="hidden">
+    <div class="ctl"><div><label for="envat">At (date and time, UTC)</label><input id="envat" type="datetime-local"></div>
+      <div><button class="sec" id="envgo" type="button">Show</button></div> <span id="envmsg" class="mut" aria-live="polite"></span></div>
+    <div id="envout"></div>
+  </div>
+  <div id="rtab-inc" class="hidden">
+    <p><button class="sec" id="incload" type="button">Refresh incidents</button> <span id="incmsg" class="mut" aria-live="polite"></span></p>
+    <table id="inctable"><thead><tr><th>Incident</th><th>Service</th><th>Environment</th><th>Started</th><th></th></tr></thead><tbody></tbody></table>
+    <div id="incout"></div>
+  </div>
+</section>
+<section id="insightsec">
+  <h2>5b. Insights: trends and rule precision</h2>
+  <div class="ctl">
+    <div><label for="trgroup">Group by</label><select id="trgroup"><option value="application">application</option><option value="team">team</option></select></div>
+    <div><label for="trperiod">Period</label><select id="trperiod"><option value="month">month</option><option value="week">week</option><option value="quarter">quarter</option></select></div>
+    <div><button class="sec" id="trgo" type="button">Show trends</button></div>
+    <div><button class="sec" id="calgo" type="button">Show rule precision</button></div>
+    <span id="insmsg" class="mut" aria-live="polite"></span>
+  </div>
+  <div id="trout"></div><div id="calout"></div>
+</section>
 <section id="cfgsec">
   <h2>6. Configuration <span id="cfgid" class="pill"></span></h2>
   <p class="mut" id="cfgmeta">Per-tenant limits, severity rules, criticality and path prefixes. Every save is a new immutable version.</p>
-  <textarea id="cfgtext" spellcheck="false" style="width:100%;height:260px;font:12px ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px"></textarea>
+  <textarea id="cfgtext" aria-label="Tenant configuration (JSON)" spellcheck="false" style="width:100%;height:260px;font:12px ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px"></textarea>
   <ul id="cfgproblems" class="err"></ul>
   <div class="row"><div><label>Comment for this version</label><input id="cfgcomment" maxlength="500" placeholder="why this change"></div></div>
   <p><button class="sec" id="cfgvalidate">Validate</button> <button id="cfgsave">Save as new version</button> <button class="sec" id="cfgreload">Reload</button> <span id="cfgmsg"></span></p>
@@ -207,14 +280,28 @@
     <div><label>Expires in days</label><input id="tkdays" type="number" min="1" value="90"></div></div>
   <div class="roles" id="tkroles"></div>
   <p><button id="tkmake">Create token</button> <span id="tkmsg"></span></p>
-  <pre id="tkshow" class="hidden"></pre>
+  <pre id="tkshow" class="hidden" tabindex="0" aria-label="New token"></pre>
   <table id="adtokens"><thead><tr><th>Name</th><th>Roles</th><th>Repositories</th><th>Expires</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
   <h3 style="font-size:13px">Identity providers</h3>
   <table id="adidps"><thead><tr><th>Name</th><th>Type</th><th>Enabled</th><th></th></tr></thead><tbody></tbody></table>
   <p class="mut">Add or change one (JSON: name, protocol, config, enabled, and optionally client_secret, which is stored encrypted and never shown again):</p>
-  <textarea id="idptext" class="json" spellcheck="false"></textarea>
+  <textarea id="idptext" class="json" aria-label="Identity provider (JSON)" spellcheck="false"></textarea>
   <ul id="idpproblems" class="err"></ul>
   <p><button id="idpsave">Save identity provider</button> <span id="idpmsg"></span></p>
+  <h3 style="font-size:13px">Usage and plan</h3>
+  <p><button class="sec" id="adusage" type="button">Show this month's usage</button> <span id="adusagemsg" class="mut" aria-live="polite"></span></p>
+  <div id="adusageout"></div>
+  <h3 style="font-size:13px">Service catalog import (owners and criticality)</h3>
+  <div class="ctl"><div><label for="regfmt">Format</label><select id="regfmt"><option value="backstage">Backstage catalog-info</option><option value="csv">CSV</option><option value="json">JSON</option></select></div></div>
+  <label for="regtext">Catalog content</label><textarea id="regtext" class="json" spellcheck="false" style="height:110px"></textarea>
+  <p><button class="sec" id="regimport" type="button">Import as a new configuration version</button> <span id="regmsg" class="mut" aria-live="polite"></span></p>
+  <h3 style="font-size:13px">Evidence held</h3>
+  <div class="ctl"><div><label for="evkind">Kind</label><select id="evkind"><option>test_run</option><option>coverage</option><option>runtime_edge</option><option>deployment</option><option>approval</option><option>incident</option><option>incident_link</option><option>release</option><option>verdict</option><option>notification</option><option>acknowledgement</option></select></div>
+    <div><button class="sec" id="evload" type="button">List</button></div> <span id="evmsg" class="mut" aria-live="polite"></span></div>
+  <div id="evout"></div>
+  <h3 style="font-size:13px">Environments</h3>
+  <p><button class="sec" id="envlist" type="button">Show what runs where</button> <span id="envlistmsg" class="mut" aria-live="polite"></span></p>
+  <div id="envlistout"></div>
 </section>
 </main>
 
@@ -404,17 +491,180 @@ $("run").onclick = async () => {
     show(r.report, await api(`/api/v1/impact-analyses/${r.analysis_id}/comment`)); msg("runmsg", "Done", "ok");
   } catch(e) { msg("runmsg", e.message, "err") } busy($("run"), false);
 };
+// ---- findings and their filters (PRD 9.3): the server applies the filters, so the page and the API agree ----
+const FILTERS = ["severity", "service", "reach", "kind", "evidence", "environment", "policy", "issue"];
+let CUR_AID = null;
+function findingRows(list) {
+  return list.map(f => `<tr><td><span class="pill ${esc(f.severity)}">${esc(f.severity)}</span></td><td>${esc(f.component)}<br><span class="mut">${esc(f.repository)}</span></td>
+    <td>${esc(f.evidence_status)}${f.resolution_strategy ? `<br><span class="mut">${esc(f.resolution_strategy)}</span>`:""}${f.runtime ? `<br><span class="mut">observed in ${esc(f.runtime.environments.join(", ") || "telemetry")}: ${esc(f.runtime.calls_observed)} call(s)</span>` : ""}</td><td>${esc(f.reason)}${(f.limitations||[]).map(l=>`<br><span class="mut">- ${esc(l)}</span>`).join("")}</td>
+    <td>${(f.tests||[]).map(t=>esc(t.name)+` <span class="mut">(${esc(t.association)})</span>`).join("<br>") || '<span class="mut">none found</span>'}</td></tr>`).join("");
+}
+async function applyFilters() {
+  if (!CUR_AID) return;
+  const p = new URLSearchParams();
+  FILTERS.forEach(k => { const v = $("f_" + k).value.trim(); if (v) p.set(k, v) });
+  try {
+    const r = await api(`/api/v1/impact-analyses/${encodeURIComponent(CUR_AID)}/findings?${p}`);
+    $("findings").querySelector("tbody").innerHTML = findingRows(r.findings) || `<tr><td colspan="5" class="mut">No finding matches these filters.</td></tr>`;
+    $("fcount").textContent = [...p.keys()].length ? `${r.matched} of ${r.total} finding(s) shown` : "";
+  } catch (e) { $("fcount").textContent = e.message }
+}
+FILTERS.forEach(k => $("f_" + k).addEventListener("change", applyFilters));
+$("fclear").onclick = () => { FILTERS.forEach(k => { $("f_" + k).value = "" }); applyFilters() };
+
+// ---- team coordination and reviewer verdicts (FR-045, FR-044) ----
+async function loadCoordination() {
+  if (!CUR_AID) return;
+  try {
+    const st = await api(`/api/v1/impact-analyses/${encodeURIComponent(CUR_AID)}/coordination`);
+    $("coordtable").querySelector("tbody").innerHTML = st.teams.map(t => `<tr><td>${esc(t.team)}</td><td>${t.components.map(esc).join(", ")}</td>
+      <td>${t.notification ? `${esc(t.notification.channel || "none")}: ${esc(t.notification.status)}<br><span class="mut">${esc(t.notification.detail || "")}</span>` : '<span class="mut">not yet</span>'}</td>
+      <td>${t.acknowledged ? `${esc(t.acknowledged.by)}<br><span class="mut">${esc(t.acknowledged.at)}${t.acknowledged.comment ? " - " + esc(t.acknowledged.comment) : ""}</span>` : '<span class="mut">no</span>'}</td>
+      <td><span class="pill ${t.status === "acknowledged" ? "covered" : t.status === "notification_failed" ? "missing" : "partial"}">${esc(t.status.replace("_", " "))}</span></td></tr>`).join("")
+      || `<tr><td colspan="5" class="mut">No other team owns a materially affected component (owners come from the configuration's ownership or tia-services.yaml).</td></tr>`;
+    $("ackteam").innerHTML = st.teams.map(t => `<option>${esc(t.team)}</option>`).join("");
+    $("coordnotify").disabled = $("ackbtn").disabled = !st.teams.length;
+  } catch (e) { msg("coordmsg", e.message, "err") }
+}
+$("coordnotify").onclick = async () => {
+  busy($("coordnotify"), true);
+  try { const st = await api(`/api/v1/impact-analyses/${encodeURIComponent(CUR_AID)}/notifications`, {method: "POST"});
+        msg("coordmsg", `${st.summary.notified + st.summary.acknowledged} team(s) notified, ${st.summary.notification_failed} failed`, st.summary.notification_failed ? "err" : "ok");
+        loadCoordination(); } catch (e) { msg("coordmsg", e.message, "err") }
+  busy($("coordnotify"), false);
+};
+$("ackbtn").onclick = async () => {
+  try { const r = await api(`/api/v1/impact-analyses/${encodeURIComponent(CUR_AID)}/acknowledgements`, {method: "POST", body: {team: $("ackteam").value, comment: $("ackcomment").value || null}});
+        msg("coordmsg", r.coordination.complete ? "Every affected team has acknowledged" : "Acknowledgement recorded", "ok"); loadCoordination(); } catch (e) { msg("coordmsg", e.message, "err") }
+};
+$("vsave").onclick = async () => {
+  try { await api(`/api/v1/impact-analyses/${encodeURIComponent(CUR_AID)}/verdicts`, {method: "POST", body: {finding_id: $("vfinding").value, verdict: $("vverdict").value, comment: $("vcomment").value || null}});
+        msg("vmsg", "Verdict recorded (the report itself is not changed)", "ok"); } catch (e) { msg("vmsg", e.message, "err") }
+};
+
+// ---- releases, environments, incidents (FR-030 to FR-032) ----
+document.querySelectorAll("[data-rtab]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("[data-rtab]").forEach(x => x.classList.toggle("on", x === b));
+  ["rel", "env", "inc"].forEach(t => $("rtab-" + t).classList.toggle("hidden", t !== b.dataset.rtab));
+});
+const relRow = r => `<tr><td>${esc(r.rel)}</td><td>${esc(r.from_service || r.from)} &rarr; ${esc(r.to_service || "")} <code>${esc(String(r.to).split("::").pop())}</code></td><td>${esc(r.status || (r.before ? r.before.status + " -> " + r.after.status : ""))}</td></tr>`;
+async function loadReleases() {
+  try {
+    const r = await api("/api/v1/releases");
+    $("reltable").querySelector("tbody").innerHTML = r.releases.map(x => `<tr><td>${esc(x.name)}</td><td>${Object.keys(x.revisions).map(esc).join(", ")}</td><td>${esc(x.recorded_at)}</td></tr>`).join("")
+      || `<tr><td colspan="3" class="mut">No release recorded yet.</td></tr>`;
+    const opts = r.releases.map(x => `<option>${esc(x.name)}</option>`).join("");
+    $("relbase").innerHTML = opts; $("relhead").innerHTML = opts;
+    if (r.releases.length > 1) $("relbase").selectedIndex = 1;
+  } catch (e) { msg("relmsg", e.message, "err") }
+}
+$("relload").onclick = loadReleases;
+$("relsave").onclick = async () => {
+  let revs; try { revs = JSON.parse($("relrevs").value || "{}") } catch { return msg("relmsg", "Revisions must be JSON, e.g. {\"orders-service\": \"main\"}", "err") }
+  try { const r = await api("/api/v1/releases", {method: "POST", body: {name: $("relname").value.trim(), revisions: revs}});
+        msg("relmsg", `Release ${r.name} recorded (${r.edges} relationships)`, "ok"); loadReleases(); } catch (e) { msg("relmsg", e.message, "err") }
+};
+$("relcmp").onclick = async () => {
+  try {
+    const d = await api(`/api/v1/releases/compare?base=${encodeURIComponent($("relbase").value)}&head=${encodeURIComponent($("relhead").value)}`);
+    const part = (title, rows) => `<h3 style="font-size:13px">${title} (${rows.length})</h3>` + (rows.length ? `<table><thead><tr><th>Relationship</th><th>From &rarr; to</th><th>Evidence</th></tr></thead><tbody>${rows.map(relRow).join("")}</tbody></table>` : '<p class="mut">None.</p>');
+    $("relout").innerHTML = part("Introduced", d.introduced) + part("Removed", d.removed) + part("Modified", d.modified);
+  } catch (e) { $("relout").innerHTML = `<p class="err">${esc(e.message)}</p>` }
+};
+$("envgo").onclick = async () => {
+  const v = $("envat").value; if (!v) return msg("envmsg", "Choose a date and time", "err");
+  try {
+    const d = await api(`/api/v1/environments/at?at=${encodeURIComponent(v + ":00Z")}`);
+    const rows = Object.entries(d.deployed).flatMap(([repo, envs]) => Object.entries(envs).map(([env, x]) => `<tr><td>${esc(repo)}</td><td>${esc(env)}</td><td><code>${esc(String(x.revision).slice(0, 12))}</code></td><td>${esc(x.deployed_at)}</td></tr>`));
+    $("envout").innerHTML = rows.length ? `<table><thead><tr><th>Repository</th><th>Environment</th><th>Revision</th><th>Deployed</th></tr></thead><tbody>${rows.join("")}</tbody></table>` : '<p class="mut">No deployment recorded before that moment.</p>';
+    msg("envmsg", `as of ${d.at}`);
+  } catch (e) { msg("envmsg", e.message, "err") }
+};
+async function loadIncidents() {
+  try {
+    const r = await api("/api/v1/evidence?kind=incident&limit=200");
+    $("inctable").querySelector("tbody").innerHTML = r.records.map(x => `<tr><td>${esc(x.data.id)}<br><span class="mut">${esc(x.data.title)}</span></td><td>${esc(x.data.service || x.data.repo)}</td><td>${esc(x.data.environment)}</td><td>${esc(x.data.started_at)}</td>
+      <td><button class="sec" type="button" data-inc="${esc(x.data.id)}">Investigate</button></td></tr>`).join("") || `<tr><td colspan="5" class="mut">No incident recorded (push them with POST /api/v1/incidents).</td></tr>`;
+    document.querySelectorAll("[data-inc]").forEach(b => b.onclick = () => investigate(b.dataset.inc));
+  } catch (e) { msg("incmsg", e.message, "err") }
+}
+async function investigate(id) {
+  try {
+    const d = await api(`/api/v1/incidents/${encodeURIComponent(id)}/investigation`);
+    $("incout").innerHTML = `<p class="banner">${esc(d.note)}</p><table><thead><tr><th>Repository</th><th>Revision</th><th>How it is associated</th><th>Evidence</th></tr></thead><tbody>` +
+      (d.candidates.map(c => `<tr><td>${esc(c.repo)}</td><td><code>${esc(String(c.revision || "").slice(0, 12))}</code></td><td>${c.associations.map(a => `<span class="pill">${esc(a.replace("_", " "))}</span>`).join(" ")}</td>
+        <td>${c.evidence.map(e => esc(e.because || (e.deployment ? `deployed to ${e.deployment.environment} ${e.hours_before_incident} h before` : e.by ? `linked by ${e.by}` : "named by the incident record"))).join("<br>")}</td></tr>`).join("")
+        || `<tr><td colspan="4" class="mut">No candidate change in the ${esc(d.window_hours)} h window.</td></tr>`) + "</tbody></table>";
+  } catch (e) { $("incout").innerHTML = `<p class="err">${esc(e.message)}</p>` }
+}
+$("incload").onclick = loadIncidents;
+
+// ---- insights (FR-043, FR-044) ----
+const share = v => v === null || v === undefined ? "-" : Math.round(v * 100) + "%";
+$("trgo").onclick = async () => {
+  try {
+    const t = await api(`/api/v1/trends?group=${$("trgroup").value}&period=${$("trperiod").value}`);
+    $("trout").innerHTML = `<p class="mut">${esc(t.note)}</p><table><thead><tr><th>${esc(t.group)}</th><th>Period</th><th>Changes</th><th>Breaking</th><th>Unresolved dependencies</th><th>Material findings without a test</th><th>Incident associations</th></tr></thead><tbody>` +
+      (t.rows.map(r => `<tr><td>${esc(r[t.group])}</td><td>${esc(r.period)}</td><td>${r.change_volume}</td><td>${r.breaking_changes} (${share(r.breaking_share)})</td><td>${share(r.unresolved_dependency_share)}</td><td>${share(r.missing_verification_share)}</td><td>${r.incident_associations}</td></tr>`).join("")
+       || '<tr><td colspan="7" class="mut">No analysis in this period.</td></tr>') + "</tbody></table>";
+  } catch (e) { msg("insmsg", e.message, "err") }
+};
+$("calgo").onclick = async () => {
+  try {
+    const c = await api("/api/v1/calibration");
+    const rows = Object.entries(c.by.severity_rule).map(([rule, r]) => `<tr><td><code>${esc(rule)}</code></td><td>${r.judged}</td><td>${r.confirmed}</td><td>${r.false_positive}</td><td>${r.irrelevant}</td><td>${share(r.precision)}${r.too_few_to_act_on ? ' <span class="mut">(too few)</span>' : ""}</td></tr>`);
+    $("calout").innerHTML = `<p class="mut">${esc(c.note)}</p><table><thead><tr><th>Severity rule</th><th>Judged</th><th>Confirmed</th><th>False positive</th><th>Irrelevant</th><th>Precision</th></tr></thead><tbody>${rows.join("") || '<tr><td colspan="6" class="mut">No verdict recorded yet.</td></tr>'}</tbody></table>`;
+  } catch (e) { msg("insmsg", e.message, "err") }
+};
+
+// ---- administration additions: usage, catalog import, evidence, environments ----
+$("adusage").onclick = async () => {
+  try { const u = await api("/api/v1/usage");
+        $("adusageout").innerHTML = `<table><thead><tr><th>Measure</th><th>Used this month</th><th>Plan limit</th></tr></thead><tbody>` +
+          Object.entries(u.usage).filter(([k]) => k !== "month").map(([k, v]) => { const lim = {repositories: "max_repositories", users: "max_users", analyses_in_month: "max_analyses_per_month", evidence_records_in_month: "max_evidence_records_per_month"}[k];
+            return `<tr><td>${esc(k.replace(/_/g, " "))}</td><td>${esc(v)}</td><td>${lim ? esc((u.plan || {})[lim] ?? "no limit") : '<span class="mut">-</span>'}</td></tr>` }).join("") +
+          `</tbody></table><p class="mut">Region: ${esc(u.region || "any")} &middot; customer-managed key: ${u.customer_managed_key ? "yes" : "no"}</p>`;
+  } catch (e) { msg("adusagemsg", e.message, "err") }
+};
+$("regimport").onclick = async () => {
+  const r = await tfetch(`/api/v1/registry/import?format=${$("regfmt").value}`, {method: "POST", headers: {"Content-Type": "text/plain", "X-TIA-Actor": "ui"}, body: $("regtext").value});
+  let j = {}; try { j = await r.json() } catch {}
+  msg("regmsg", r.ok ? `Imported ${j.services ?? ""} service(s) as configuration version ${j.version ?? ""}` : (j.detail && (j.detail.problems || j.detail).toString()) || r.statusText, r.ok ? "ok" : "err");
+};
+$("evload").onclick = async () => {
+  try { const r = await api(`/api/v1/evidence?kind=${$("evkind").value}&limit=100`);
+        $("evout").innerHTML = r.records.length ? `<table><thead><tr><th>Id</th><th>Repository / service</th><th>Environment</th><th>Revision</th><th>Ingested</th><th>By</th></tr></thead><tbody>` +
+          r.records.map(x => `<tr><td>${x.id}</td><td>${esc(x.repo || x.service || "")}</td><td>${esc(x.environment || "")}</td><td><code>${esc(String(x.revision || "").slice(0, 12))}</code></td><td>${esc(x.ingested_at)}</td><td>${esc(x.ingested_by || "")}</td></tr>`).join("") + "</tbody></table>"
+          : '<p class="mut">None held.</p>';
+  } catch (e) { msg("evmsg", e.message, "err") }
+};
+$("envlist").onclick = async () => {
+  try { const d = await api("/api/v1/environments");
+        const rows = Object.entries(d.by_repo).map(([repo, envs]) => `<tr><td>${esc(repo)}</td>${d.environments.map(e => `<td>${envs[e] ? `<code>${esc(String(envs[e].revision).slice(0, 12))}</code>` : '<span class="mut">-</span>'}</td>`).join("")}</tr>`);
+        $("envlistout").innerHTML = `<table><thead><tr><th>Repository</th>${d.environments.map(e => `<th>${esc(e)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  } catch (e) { msg("envlistmsg", e.message, "err") }
+};
+// WCAG 1.3.1 / 4.1.2: a label written just before its field is tied to it, so screen readers announce every input by name
+document.querySelectorAll("label").forEach(l => {
+  if (l.htmlFor || l.querySelector("input,select,textarea")) return;
+  const n = l.nextElementSibling;
+  if (n && /^(INPUT|SELECT|TEXTAREA)$/.test(n.tagName)) { if (!n.id) n.id = "f" + Math.random().toString(36).slice(2, 9); l.htmlFor = n.id; }
+});
 function show(rep, comment) {
   $("result").classList.remove("hidden");
   $("status").textContent = rep.status;
   $("warn").innerHTML = rep.status === "complete" ? "" : `<div class="banner">${rep.status === "failed" ? "The analysis failed: " + esc(rep.failure_reason) : "This is not a clean impact assessment: see the unknowns below."}</div>`;
   const s = rep.summary || {};
   $("summary").textContent = rep.status === "failed" ? "" : `${rep.change.repository} ${rep.change.base_revision.slice(0,7)} -> ${rep.change.proposed_revision.slice(0,7)}  |  change type: ${rep.change.change_type}  |  ${s.findings} finding(s), ${s.material_findings} material` + (rep.coverage && rep.coverage.outbound_call_sites ? `  |  ${rep.coverage.outbound_call_sites_resolved}/${rep.coverage.outbound_call_sites} outbound calls resolved` : "") + (s.message ? "  |  " + s.message : "") + (rep.redacted && rep.redacted.note ? "  |  " + rep.redacted.note : "");
-  $("findings").querySelector("tbody").innerHTML = (rep.findings||[]).map(f => `<tr><td><span class="pill ${f.severity}">${f.severity}</span></td><td>${esc(f.component)}<br><span class="mut">${esc(f.repository)}</span></td>
-    <td>${esc(f.evidence_status)}${f.resolution_strategy ? `<br><span class="mut">${esc(f.resolution_strategy)}</span>`:""}</td><td>${esc(f.reason)}${(f.limitations||[]).map(l=>`<br><span class="mut">- ${esc(l)}</span>`).join("")}</td>
-    <td>${(f.tests||[]).map(t=>esc(t.name)+` <span class="mut">(${esc(t.association)})</span>`).join("<br>") || '<span class="mut">none found</span>'}</td></tr>`).join("") || `<tr><td colspan="5" class="mut">No findings.</td></tr>`;
+  CUR_AID = rep.analysis_id;
+  FILTERS.forEach(k => { $("f_" + k).value = "" }); $("fcount").textContent = "";
+  $("findings").querySelector("tbody").innerHTML = findingRows(rep.findings || []) || `<tr><td colspan="5" class="mut">No findings.</td></tr>`;
+  $("vfinding").innerHTML = (rep.findings || []).map(f => `<option value="${esc(f.id)}">${esc(f.id)} ${esc(f.severity)} ${esc(f.component)}</option>`).join("");
+  $("vsave").disabled = !(rep.findings || []).length;
+  loadCoordination();
   $("unknowns").innerHTML = (rep.unknowns||[]).map(u => `<li>${esc(u.reason)}${u.items ? "<ul>" + u.items.slice(0,15).map(i=>`<li class="mut">${i.rule ? esc(i.rule) + " x" + esc(i.count) : `${esc(i.repo||"")} ${esc(i.file||"")}${i.line?":"+i.line:""}${i.service ? " " + esc(i.service) : ""}${i.count && !i.reason ? " x" + esc(i.count) : ""} - ${esc(i.reason||i.error||"")}`}</li>`).join("") + (u.items.length>15?`<li class="mut">... ${u.items.length-15} more in JSON</li>`:"") + "</ul>" : ""}</li>`).join("");
   $("scope").innerHTML = scopeHtml(rep.test_scope);
+  $("evid").innerHTML = evidHtml(rep);
   $("comment").textContent = comment; $("raw").textContent = JSON.stringify(rep, null, 2);
   $("permalink").textContent = rep.analysis_id; $("permalink").href = `/analyses/${encodeURIComponent(rep.analysis_id)}`; $("permalink").target = "_blank";
   $("result").scrollIntoView({behavior:"smooth"});
@@ -432,6 +682,27 @@ function gapHtml(g) {
     g.applied_by.map(a => `<li>applied by <code>${esc(a.label || a.entry_point)}</code> (${esc(a.service)}) in <code>${esc(a.function)}</code> <span class="mut">${esc(a.function_file)}:${esc(a.function_line)}</span>: <code>${esc(a.expr)}</code></li>`).join("") +
     g.missing_in.map(m => `<li>not applied by <code>${esc(m.label || m.entry_point)}</code> (${esc(m.service)})</li>`).join("") + "</ul></div>";
 }
+const RES = {passed: ["covered", "passed"], failed: ["missing", "FAILED"], error: ["missing", "ERROR"], skipped: ["partial", "skipped"], not_in_run: ["partial", "not in CI run"]};
+function resultPill(t) {
+  const r = RES[t.result]; if (!r) return "";
+  return " " + pill(r[0], r[1] + (t.run && !t.run.of_analysed_revision ? " (other revision)" : "")) + (t.states && t.states.includes("executed") ? " " + pill("covered", "executed") : "");
+}
+function evidHtml(rep) {
+  let out = "";
+  const recs = (rep.test_recommendations || {}).tests || [];
+  if (recs.length) out += `<h2 style="margin-top:16px">Recommended tests</h2><table id="rectable"><thead><tr><th>Priority</th><th>Test</th><th>Why</th><th>Last result</th></tr></thead><tbody>` +
+    recs.map(r => `<tr><td>${esc(r.priority)}</td><td><code>${esc(r.test)}</code><br><span class="mut">${esc(r.repo)}: ${esc(r.file)}</span></td><td>${r.why.map(esc).join("<br>")}</td><td>${esc(r.last_result || "")}</td></tr>`).join("") +
+    `</tbody></table><p class="mut">${esc(rep.test_recommendations.note)}</p>`;
+  const gaps = rep.test_gaps || [];
+  if (gaps.length) out += `<p class="err">Without test evidence: ${gaps.map(g => esc(g.entry_point || g.component)).join("; ")}</p>`;
+  const dep = rep.deployments;
+  if (dep) {
+    const rows = Object.entries(dep.by_repo).flatMap(([r, envs]) => Object.entries(envs).map(([env, d]) =>
+      `<tr><td>${esc(r)}</td><td>${esc(env)}</td><td><code>${esc(d.revision.slice(0, 12))}</code></td><td>${d.is_analysed_revision ? "analysed revision" : '<span class="err">not the analysed revision</span>'}${d.is_proposed_revision ? "; the proposed change" : ""}</td></tr>`)).join("");
+    if (rows) out += `<h2 style="margin-top:16px">Deployments</h2><table id="deptable"><thead><tr><th>Repository</th><th>Environment</th><th>Deployed</th><th>Compared</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  return out;
+}
 function scopeHtml(ts) {
   if (!ts) return "";
   const rows = [...ts.entry_points, ...ts.code_without_entry_point];
@@ -440,13 +711,13 @@ function scopeHtml(ts) {
     <table id="scopetable"><thead><tr><th>Entry point</th><th>Service</th><th>Change effect</th><th>Why</th><th>Tests found</th></tr></thead><tbody>` +
     rows.map(e => `<tr><td>${e.label ? `<b>${esc(e.label)}</b><br>` : ""}<code>${esc(e.entry_point)}</code>${e.type !== "endpoint" ? '<br><span class="mut">no analysed API endpoint</span>' : ""}</td>
       <td>${esc(e.service)}</td><td>${pill(e.change_effect, EFFECT[e.change_effect] || e.change_effect)}${["source_confirmed","contract_confirmed","corroborated"].includes(e.evidence_status) ? "" : `<br><span class="mut">${esc(e.evidence_status)}</span>`}</td>
-      <td>${esc(e.why)}</td><td>${e.tests.map(t => `${esc(t.name)} <span class="mut">(${esc(t.file)})</span>`).join("<br>") || '<span class="err">none found</span>'}</td></tr>`).join("") +
+      <td>${esc(e.why)}</td><td>${e.tests.map(t => `${esc(t.name)} <span class="mut">(${esc(t.file)})</span>${resultPill(t)}`).join("<br>") || '<span class="err">none found</span>'}</td></tr>`).join("") +
     `</tbody></table>` + ts.rule_gaps.map(gapHtml).join("") +
     ts.consistency_checks.map(c => `<div class="banner"><b>Consistency check</b>: ${esc(c.check)}</div>`).join("") +
     (ts.redacted ? `<p class="mut">${esc(ts.redacted.note)}</p>` : "");
 }
-document.querySelectorAll(".ttabs button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".ttabs button").forEach(x => x.classList.toggle("on", x === b));
+document.querySelectorAll("[data-ttab]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("[data-ttab]").forEach(x => x.classList.toggle("on", x === b));
   ["shared","cov","api","ui","tc"].forEach(t => $("ttab-" + t).classList.toggle("hidden", t !== b.dataset.ttab));
   const load = {shared: tShared, cov: tCov, api: tApi, ui: tUi}[b.dataset.ttab];
   if (load && !$("t" + b.dataset.ttab + "out").dataset.loaded) load();
@@ -662,7 +933,7 @@ async function adminLoad() {
     <td><button class="sec" data-saveu="${u.id}">Save</button> <button class="sec" data-reset="${u.id}">Use group mapping</button> <button class="sec" data-dis="${u.id}" data-to="${!u.disabled}">${u.disabled ? "Enable" : "Disable"}</button></td></tr>`).join("") || '<tr><td colspan="5" class="mut">Nobody has signed in yet.</td></tr>';
   $("adage").textContent = Math.round(access.freshness_limit_seconds / 60) + " minutes";
   $("adrepos").querySelector("tbody").innerHTML = access.repositories.map(r => `<tr><td><b>${esc(r.name)}</b></td>
-    <td><select data-mode="${esc(r.name)}">${["scm", "tenant", "restricted"].map(m => `<option ${m === r.mode ? "selected" : ""}>${m}</option>`).join("")}</select>${r.explicit ? "" : ' <span class="mut">(default)</span>'}</td>
+    <td><select data-mode="${esc(r.name)}" aria-label="Access mode of ${esc(r.name)}">${["scm", "tenant", "restricted"].map(m => `<option ${m === r.mode ? "selected" : ""}>${m}</option>`).join("")}</select>${r.explicit ? "" : ' <span class="mut">(default)</span>'}</td>
     <td class="mut">${r.mirror ? (r.mirror.ok ? `${r.mirror.collaborators} readers, ${r.mirror.fresh ? "fresh" : "<b>stale</b>"} (${esc(when(r.mirror.synced_at))})` : `<span class="err">${esc(r.mirror.error)}</span>`) : "not synchronised"}</td></tr>`).join("");
   $("adtokens").querySelector("tbody").innerHTML = tokens.map(t => `<tr><td>${esc(t.name)}</td><td>${esc(t.roles.join(", "))}</td><td>${esc(t.repos === "*" ? "all" : t.repos.join(", "))}</td>
     <td class="mut">${t.revoked_at ? "revoked" : esc(t.expires_at ? when(t.expires_at) : "never")}</td><td class="mut">${esc(when(t.last_used_at))}</td>

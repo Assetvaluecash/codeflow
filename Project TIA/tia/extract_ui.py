@@ -25,12 +25,13 @@ VOID = {"input", "img", "br", "hr", "meta", "link"}
 
 
 MAX_UI_FILE = 1_000_000                       # bigger front-end files are bundles or generated code, not pages
-GENERATED_DIRS = ("/node_modules/", "/dist/", "/build/", "/.angular/", "/coverage/", "/vendor/", "/.next/", "/out/")
+GENERATED_DIRS = ("/node_modules/", "/dist/", "/build/", "/.angular/", "/coverage/", "/vendor/", "/.next/", "/out/",
+                  "/bower_components/", "/jspm_packages/", "/lib/", "/libs/", "/static/vendor/", "/webjars/")
 
 
 def is_ui_file(path: str) -> bool:
     p = path.lower()
-    if any(d in "/" + p for d in GENERATED_DIRS) or p.endswith((".d.ts", ".min.js", ".spec.ts", ".test.ts", ".spec.js", ".test.js", ".spec.tsx", ".test.tsx",
+    if any(d in "/" + p for d in GENERATED_DIRS) or ".min." in p or ".bundle." in p or p.endswith((".d.ts", ".min.js", ".spec.ts", ".test.ts", ".spec.js", ".test.js", ".spec.tsx", ".test.tsx",
                                                   ".spec.jsx", ".test.jsx", ".config.js", ".config.ts")):
         return False
     return p.endswith(MARKUP_EXT + SCRIPT_EXT)
@@ -159,32 +160,18 @@ def bound(attrs: dict, *names) -> Optional[str]:
     return None
 
 
+_JS_TOKENS = re.compile(r"""("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|((?<!:)//[^\n]*)|(/\*.*?(?:\*/|\Z))""", re.S)
+
+
 def strip_js_comments(text: str) -> str:
     """Script with // and /* */ comments blanked out (newlines kept, so line numbers do not move). Strings and template literals are
-    skipped; JSX comments {/* ... */} are comments too."""
-    out, i, n = [], 0, len(text)
-    while i < n:
-        c = text[i]
-        if c in "\"'`":
-            j = i + 1
-            while j < n and text[j] != c and not (c != "`" and text[j] == "\n"):
-                j += 2 if text[j] == "\\" else 1
-            out.append(text[i:j + 1])
-            i = j + 1
-        elif text.startswith("//", i) and (i == 0 or text[i - 1] != ":"):
-            j = text.find("\n", i)
-            j = n if j < 0 else j
-            out.append(" " * (j - i))
-            i = j
-        elif text.startswith("/*", i):
-            j = text.find("*/", i + 2)
-            j = n if j < 0 else j + 2
-            out.append(re.sub(r"[^\n]", " ", text[i:j]))
-            i = j
-        else:
-            out.append(c)
-            i += 1
-    return "".join(out)
+    skipped; JSX comments {/* ... */} are comments too. One compiled expression: linear and fast on large files."""
+    def blank(m):
+        if m.group(1):
+            return m.group(1)
+        c = m.group(2) or m.group(3)
+        return re.sub(r"[^\n]", " ", c)
+    return _JS_TOKENS.sub(blank, text)
 
 
 # ---- templates: elements with labels, rules and options ---------------------------------------------------------------------------

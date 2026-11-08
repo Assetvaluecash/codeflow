@@ -85,7 +85,7 @@ python -m tia.worker
 3. `TIA_AUDIT_KEY`: a secret held outside the database makes the audit hash chain tamper-evident even against someone who can edit rows.
 4. `TIA_MASTER_KEY` (or Vault Transit) if tenants will store secrets (identity-provider client secrets, a GitHub token).
 5. `TIA_METRICS_TOKEN` if `/metrics` is scraped from another machine (otherwise it answers only on this machine).
-6. Put a reverse proxy with **rate limiting** in front: TIA does not rate-limit sign-in or token attempts itself (tokens and session secrets are 256-bit random values).
+6. Rate limiting: with authentication on, TIA limits requests per principal (`TIA_RATE_LIMIT_PER_MINUTE`, default 600), per tenant (`TIA_RATE_LIMIT_TENANT_PER_MINUTE`, 6000) and per client address for unauthenticated and failed-authentication requests (`TIA_RATE_LIMIT_ANON_PER_MINUTE`, 120), answering 429 with Retry-After; starting an analysis or pushing evidence costs 10. Limits are per API replica: set `TIA_RATE_LIMIT_REPLICAS` to the replica count. `TIA_RATE_LIMIT=false` turns it off, `true` forces it on. Behind a gateway set `TIA_TRUST_PROXY=true` so the client address comes from `X-Forwarded-For`. Keep a WAF and a global rate limit at the gateway as well (`deploy/terraform/azure`).
 7. Several API instances can run behind a load balancer: sessions and queued work live in PostgreSQL, so any instance can serve any request.
 
 The **default tenant** (`TIA_TENANT_ID`) serves requests that carry no credential: the web page shell, health checks and, when no GitHub App is configured, the GitHub webhook.
@@ -100,7 +100,7 @@ Every secret variable accepts a literal (development only), a file reference `fi
 | Role | May |
 |---|---|
 | `viewer` | read reports, graph, evidence, repositories, jobs, configuration |
-| `engineer` | viewer, plus run/reproduce/cancel analyses, publish to a PR, register/sync/upload repositories, rescan |
+| `engineer` | viewer, plus run/reproduce/cancel analyses, publish to a PR, register/sync/upload repositories, rescan, push evidence (CI results, coverage, telemetry, deployments), record owner approvals, attach to a change record |
 | `release_manager` | engineer, plus change the tenant configuration and refresh the repository-access mirror |
 | `auditor` | viewer, plus read the audit log and verify its chain (cannot run analyses) |
 | `administrator` | everything, plus identity providers, users, tokens, sessions, repository access, GitHub installations, deleting repositories |
@@ -212,6 +212,14 @@ any version can be restored (as a new version), and reports record which configu
 * `comments.audience`: `target` (the default) names only the pull request's own repository in its comment; `readers` also names repositories that every reader of the pull request is provably allowed to read
   (needs the repository-access mirror); `all` shows everything (with authentication on it is treated as `readers`).
 * Validate before saving: `POST /api/v1/tenant/config/validate`, or the **Validate** button.
+* `compatibility.rules` (rule id -> `breaking` | `compatible`) changes how a contract change is classified: REST rules `request_enum_value_removed`,
+  `response_enum_value_added`, `request_constraint_tightened`, `request_param_required`, `response_shape_changed`, `success_status_changed`,
+  `auth_added`, `auth_changed`, `auth_removed`; event rules `event_field_removed`, `event_field_type_changed`, `event_enum_value_added`,
+  `event_enum_value_removed`, `event_field_added`, `event_required_field_added`, `event_schema_removed`, `event_topic_no_longer_produced`.
+* `ownership` (service -> team) and `criticality` can be filled from a service catalog: `POST /api/v1/registry/import?format=backstage|csv|json`
+  (a Backstage `catalog-info.yaml`, a CSV `service,owner,criticality`, or JSON). It saves a new configuration version. A repository's own `catalog-info.yaml`
+  is also read as a fallback for its `tia-services.yaml`.
+* `policies` holds the release policy (section 16) and `itsm` the change-management integration (section 17).
 
 From the command line: `python -m tia.tenants config-show acme-bank` and `python -m tia.tenants config-set acme-bank --file config.json --comment "why" --actor terraform`.
 
@@ -236,6 +244,8 @@ Who may read which repository is decided per repository (`GET /api/v1/admin/repo
 **With a GitHub App (recommended)**
 
 1. Create a GitHub App with a webhook (URL `<TIA_PUBLIC_URL>/api/v1/webhooks/github`, a secret, event *Pull request*) and repository permissions Contents: read, Pull requests: write, Checks: write, Metadata: read.
+   Quicker: `python tools/github_app.py manifest --url <TIA_PUBLIC_URL> --org <org> --out register.html`, open the page, confirm on GitHub, then
+   `python tools/github_app.py convert --code <code from the redirect> --out <secure folder>` writes the App id, key and secrets to files.
    To mirror repository access, GitHub requires more (listing collaborators needs push or administration rights); the sync reports exactly what GitHub refuses.
 2. Give TIA the App: `TIA_GITHUB_APP_ID`, `TIA_GITHUB_APP_PRIVATE_KEY` (a secret reference to the PEM), `TIA_GITHUB_WEBHOOK_SECRET`; for self-service linking also `TIA_GITHUB_APP_CLIENT_ID` and `TIA_GITHUB_APP_CLIENT_SECRET`.
 3. Link each customer's installation to its tenant, either as the operator: `python -m tia.tenants map-installation acme-bank github <installation id> --account acme`,
@@ -311,14 +321,160 @@ No dashboards or alert rules are shipped.
 
 ## 14. What TIA does not do
 
-* No rate limiting, no WAF, no account lockout (use a reverse proxy).
+* No WAF and no account lockout (use the gateway; `deploy/terraform/azure` puts Front Door's WAF in front). Rate limiting is per API replica, not global.
 * No permission mirroring from Azure DevOps (its repositories are restricted until granted); the Azure DevOps connector has only been tested against a stand-in.
-* No container images, Compose file or Helm chart yet; no backup/restore tooling beyond PostgreSQL's.
 * Group changes at the identity provider reach a signed-in person at their next sign-in; an administrator's edits reach bearer-token users within 30 seconds.
-* Policy evaluation, runtime/event evidence, ITSM integration and the other later-release features are not built.
-* Real-world interoperability with specific identity providers (group-overage claims, signed requests, single logout) and with real GitHub Apps is untested.
+* It never queries CI, telemetry or deployment systems during an analysis: evidence is pushed to TIA first (section 15).
+* Events are analysed for Kafka only (code and declarations); other messaging is reported as an unknown.
+* The ServiceNow integration and the MCP server are tested against stand-ins only; real identity-provider, GitHub App and ServiceNow interoperability is untested.
 
-## 15. Environment reference
+## 15. Evidence: CI results, coverage, runtime, deployments
+
+Evidence is **pushed** to TIA (from a CI step, a telemetry export or a deployment pipeline) and kept per tenant; an analysis reads what is held and records
+which records it used, so a reproduction gives the same result. Use a service token with the `engineer` role.
+
+| Endpoint | Body |
+|---|---|
+| `POST /api/v1/evidence/test-results?repo=R&revision=SHA&build_id=B&environment=E` | JUnit XML (`format=junit`, default) or JSON (`format=json`: pytest-json-report, or `[{name, classname, result}]`) |
+| `POST /api/v1/evidence/coverage?repo=R&revision=SHA` | Cobertura XML, JaCoCo XML, or coverage.py JSON (`coverage json --show-contexts` also says which test executed each line) |
+| `POST /api/v1/evidence/runtime?format=otlp` | OpenTelemetry traces as OTLP/JSON (or `format=edges`: `[{from_service, to_service, method, path, environment, from_ts, to_ts, count}]`) |
+| `POST /api/v1/evidence/deployments` | `[{repo or service, environment, revision, artifact, deployed_at}]` |
+
+Bodies are capped at 25 MB; XML with a DOCTYPE is refused. `GET /api/v1/evidence?kind=...` lists records, `DELETE /api/v1/evidence/{rid}` removes one,
+`GET /api/v1/environments` shows what runs where.
+
+## 16. Release policy
+
+`policies` in the tenant configuration (section 7):
+
+```json
+{"policies": {"mode": "enforcing", "rules": [
+  {"id": "no-breaking-critical", "type": "no_breaking_change", "applies_to": {"criticality": ["critical"]}},
+  {"id": "tests-pass", "type": "tests_passed", "params": {"max_priority": 2}},
+  {"id": "owners", "type": "owner_approval", "mandatory": false}]}}
+```
+
+Rule types: `no_breaking_change`, `tests_passed`, `contract_validated`, `owner_approval`, `no_unresolved_dependencies`, `analysis_complete`, `production_evidence`.
+Each yields `pass`, `fail`, `not_evaluated` (a data source is missing: never a pass) or `requires_review`.
+
+* `advisory` (the default) never blocks: the GitHub check is `neutral` and the Azure DevOps status `notApplicable`.
+* `enforcing`: a failed **mandatory** rule makes the check `failure` (Azure DevOps `failed`); `not_evaluated` or `requires_review` on a mandatory rule gives
+  `action_required` (`pending`). Whether that blocks a merge is decided by **your** branch protection: TIA never changes it.
+
+Owners approve with `POST /api/v1/impact-analyses/{aid}/approvals`; `GET /api/v1/impact-analyses/{aid}/policy` re-evaluates with the approvals recorded since.
+
+## 17. ServiceNow change records
+
+Set `"itsm": {"provider": "servicenow", "instance_url": "https://acme.service-now.com"}` and store the credentials as tenant secrets
+`itsm/servicenow/username` and `itsm/servicenow/password` (or `itsm/servicenow/token`). `POST /api/v1/impact-analyses/{aid}/change-record` attaches the
+report summary to the analysis's change record (or the one given). It reads the record and adds ONE attachment per analysis; it never creates,
+updates, approves or transitions a change record. The account needs read access to `change_request` and the right to add attachments.
+`TIA_ALLOW_PRIVATE_ITSM_HOSTS` lets it reach a private address (laboratories only).
+
+## 18. MCP for coding assistants
+
+`POST /mcp` is a read-only Model Context Protocol server (streamable HTTP). Configure the assistant with the URL `https://<tia>/mcp` and a `viewer` service token.
+Tools: `get_impact_report`, `find_impact_report`, `get_test_scope`, `get_policy_outcome`. There is no write tool. The assistant sees only what the token may read.
+
+## 18a. Plans, regions and customer-managed keys
+
+```
+python -m tia.tenants limits-set acme-bank '{"max_repositories": 200, "max_users": 500, "max_analyses_per_month": 20000, "max_evidence_records_per_month": null}'
+python -m tia.tenants region-set acme-bank eu           # or none
+python -m tia.tenants key-set acme-bank aws-kms:arn:aws:kms:eu-west-1:111122223333:key/<id>   # or azure-kv:https://<vault>.vault.azure.net/keys/<name>, vault-transit:<name>, none
+python -m tia.tenants meter acme-bank --month 2026-10 --format csv
+```
+
+* **Limits** (`null` = unlimited): a request over a limit answers `402 plan_limit`; adding a user over `max_users` refuses that sign-in. `GET /api/v1/usage` shows the month's usage.
+* **Region**: each deployment declares its region in `TIA_REGION` (`deploy/helm/tia/values-region-eu.yaml`). A tenant pinned to another region is answered `421 wrong_region` and its jobs
+  are not claimed there, so its data is processed only where it is pinned. Regions: eu, us, apac, uk, ca, au, in, jp, ch, sa.
+* **Customer-managed key**: `key-set` re-wraps the tenant's data keys under the new key; revoking the key at the customer's KMS makes the tenant's secrets unreadable.
+  AWS KMS uses `TIA_AWS_ACCESS_KEY_ID`, `TIA_AWS_SECRET_ACCESS_KEY`, `TIA_AWS_SESSION_TOKEN` (optional), `TIA_AWS_KMS_ENDPOINT` (optional, e.g. a VPC endpoint);
+  Azure Key Vault uses `TIA_AZURE_TENANT_ID`, `TIA_AZURE_CLIENT_ID`, `TIA_AZURE_CLIENT_SECRET` (`TIA_AZURE_LOGIN_URL` and `TIA_AZURE_KEYVAULT_TEST_URL` exist for stand-ins in tests only).
+* **Dedicated deployment**: one tenant per installation with `deploy/helm/tia/values-dedicated.yaml`.
+* **Tenant backup**: `python -m tia.backup export|restore|verify`; exports are encrypted with AES-256-GCM under `TIA_BACKUP_KEY` (base64, 32 bytes) and bound to the tenant id.
+
+## 17a. GitLab and Bitbucket
+
+| | GitLab (gitlab.com or self-managed) | Bitbucket (Cloud or Data Center) |
+|---|---|---|
+| Server URL | `TIA_GITLAB_URL` (default `https://gitlab.com`) | `TIA_BITBUCKET_URL` (default `https://bitbucket.org`) |
+| Webhook | project/group webhook to `https://<tia>/api/v1/webhooks/gitlab`, *Merge request events*, secret token = `TIA_GITLAB_WEBHOOK_SECRET` | repository webhook to `https://<tia>/api/v1/webhooks/bitbucket`, pull request created/updated (Data Center: opened, source branch updated, modified), secret = `TIA_BITBUCKET_WEBHOOK_SECRET` |
+| Token | `TIA_GITLAB_TOKEN` or the tenant secret `gitlab/token` (scopes `api`, `read_repository`) | `TIA_BITBUCKET_TOKEN` or the tenant secret `bitbucket/token` (repository read, pull-request write, repository admin to read permissions) |
+| Published | one merge-request note, updated in place, and a commit status `tia/impact-analysis` | one pull-request comment, updated in place, and a build status `tia-impact-analysis` |
+| Access mirror | project members with Reporter or higher (`POST /api/v1/admin/repo-access/sync`) | repository and project user permissions |
+
+Register repositories by their clone URL; the provider is recognised from the host (gitlab.com, bitbucket.org, or the configured server). People are matched
+by their login on that host: add `"gitlab": "<claim>"` or `"bitbucket": "<claim>"` to `scm_login_claims`. The status is advisory (success) unless the
+policy is enforcing. Tested against stand-ins only.
+
+## 17b. Team coordination
+
+Material findings can be sent to the owning team of each affected component (owners come from `ownership`, `tia-services.yaml` or the registry import):
+
+```json
+{"coordination": {"auto_notify": true,
+  "channels": {"team-payments": {"type": "slack"}, "team-ledger": {"type": "email", "to": "ledger-oncall@bank.example"},
+               "team-cards": {"type": "servicenow_task", "assignment_group": "Cards Engineering"}},
+  "default": {"type": "teams"}}}
+```
+
+* `slack`, `teams`, `webhook`: the incoming-webhook URL is the tenant secret `coordination/<team>/webhook` (or `coordination/default/webhook`).
+* `email`: SMTP from `TIA_SMTP_HOST`, `TIA_SMTP_PORT` (587), `TIA_SMTP_USER`, `TIA_SMTP_PASSWORD`, `TIA_SMTP_FROM`; STARTTLS is required off this machine.
+* `servicenow_task`: a task in the instance of the `itsm` setting, one per analysis and group (this is the only record TIA creates in ServiceNow).
+* `TIA_ALLOW_PRIVATE_NOTIFY_HOSTS` lets webhooks reach a private address (laboratories only).
+
+Each team is notified once per analysis (a failed delivery is retried by the next `POST /api/v1/impact-analyses/{aid}/notifications`); teams acknowledge with
+`POST /api/v1/impact-analyses/{aid}/acknowledgements`; `GET /api/v1/impact-analyses/{aid}/coordination` shows the status. The policy rule type
+`teams_acknowledged` passes when every affected team has acknowledged.
+
+## 17c. Calibration and trends
+
+Reviewers record verdicts on findings (`POST /api/v1/impact-analyses/{aid}/verdicts`: confirmed, false_positive, irrelevant). `GET /api/v1/calibration`
+gives precision per severity rule, inference rule, resolution strategy, evidence status, impact type and configuration version; incidents that name a
+change, or that a person linked to one, confirm the findings about the incident's service. Use it to tune `severity.overrides` and the caps: a
+change applies to new analyses only, stored reports are never re-scored. `GET /api/v1/trends?group=application|team&period=week|month|quarter` reports
+change volume, breaking share, unresolved-dependency share, missing-verification share and incident associations: descriptive figures, not predictions.
+
+## 18b. Retention, backup and audit reporting
+
+Retention is a tenant setting (section 7), applied by a job the operator schedules (daily is enough) with the admin DSN:
+
+```json
+{"retention": {"graph_days": 90, "analysis_days": 730, "runtime_days": 180, "incident_days": 1095, "audit_days": 2555}}
+```
+
+```
+python -m tia.retention enforce                    # every active tenant; --tenant acme-bank for one
+```
+
+A missing or `null` value keeps data forever (the default). Minimums: 30 days for analyses and incidents, 365 for audit. Removing audit entries keeps an
+**anchor** (the last removed entry's sequence number and hash), so `GET /api/v1/audit/verify` still verifies the remaining chain and reports the anchor;
+the purge itself is the first entry written after it. `GET /api/v1/audit/report?start=...&end=...` summarises a period by event and by actor.
+
+Tenant backup (in addition to the database's own point-in-time recovery, see [OPERATIONS.md](OPERATIONS.md)):
+
+```
+python -m tia.backup export acme-bank --out acme.tiabak        # encrypted with TIA_BACKUP_KEY
+python -m tia.backup restore acme.tiabak                       # into the database of --admin-dsn; never merges into an existing tenant
+python -m tia.backup verify acme-bank acme.tiabak              # row counts and digests of every table
+```
+
+## 18c. Air-gapped installations
+
+Set `TIA_AIRGAPPED=true`. Every outbound connection (GitHub, Azure DevOps, git remotes, identity-provider discovery, ServiceNow, cloud KMS,
+trace export) is then refused unless its host is this machine or is listed in `TIA_AIRGAP_ALLOWED_HOSTS` (for example
+`git.bank.internal,*.corp.example`). A refused call fails with an error naming the host; nothing is silently skipped. Register repositories from
+internal remotes or by upload, push evidence to TIA, and use Vault Transit or `TIA_MASTER_KEY` rather than a cloud KMS.
+Install from a wheel bundle built on a connected machine (`pip download . -d bundle/`, copied in, then `pip install --no-index -f bundle/ tia`) or from
+the container image loaded with `docker load`.
+
+## 18d. Language adapters
+
+Built in: Python, Java, Go, C#/.NET, Kotlin, TypeScript/JavaScript (see [ADAPTER-SDK.md](ADAPTER-SDK.md) for what each recognises). Further languages
+are installed as Python packages that declare a `tia.adapters` entry point; install them on the server and the worker and restart both.
+
+## 19. Environment reference
 
 | Variable | Meaning |
 |---|---|
@@ -328,6 +484,18 @@ No dashboards or alert rules are shipped.
 | `TIA_APP_PASSWORD`, `TIA_WORKER_PASSWORD` | passwords `tia.migrate` sets for the two roles |
 | `TIA_ALLOW_INSECURE_DB` | accept a non-TLS database connection off-machine |
 | `TIA_ALLOW_INSECURE_OUTBOUND` | accept plain http for outbound calls that carry credentials |
+| `TIA_ALLOW_PRIVATE_ITSM_HOSTS` | let the ServiceNow integration reach a private address (laboratories only) |
+| `TIA_GITLAB_URL`, `TIA_GITLAB_WEBHOOK_SECRET`, `TIA_GITLAB_TOKEN` | GitLab connector (section 17a) |
+| `TIA_BITBUCKET_URL`, `TIA_BITBUCKET_WEBHOOK_SECRET`, `TIA_BITBUCKET_TOKEN` | Bitbucket connector (section 17a) |
+| `TIA_SMTP_HOST`, `TIA_SMTP_PORT`, `TIA_SMTP_USER`, `TIA_SMTP_PASSWORD`, `TIA_SMTP_FROM` | e-mail notifications (section 17b) |
+| `TIA_ALLOW_PRIVATE_NOTIFY_HOSTS` | let notification webhooks reach a private address (laboratories only) |
+| `TIA_RATE_LIMIT`, `TIA_RATE_LIMIT_PER_MINUTE`, `TIA_RATE_LIMIT_TENANT_PER_MINUTE`, `TIA_RATE_LIMIT_ANON_PER_MINUTE`, `TIA_RATE_LIMIT_REPLICAS` | request rate limits (section 5) |
+| `TIA_TRUST_PROXY` | take the client address from `X-Forwarded-For` (only behind your gateway) |
+| `TIA_AIRGAPPED`, `TIA_AIRGAP_ALLOWED_HOSTS` | refuse every outbound connection except to the listed internal hosts (section 18c) |
+| `TIA_REGION` | this deployment's hosting region (section 18a) |
+| `TIA_BACKUP_KEY` (or `TIA_BACKUP_KEY_FILE`) | key for encrypted tenant backups (section 18a) |
+| `TIA_AWS_ACCESS_KEY_ID`, `TIA_AWS_SECRET_ACCESS_KEY`, `TIA_AWS_SESSION_TOKEN`, `TIA_AWS_KMS_ENDPOINT` | AWS KMS for customer-managed keys |
+| `TIA_AZURE_TENANT_ID`, `TIA_AZURE_CLIENT_ID`, `TIA_AZURE_CLIENT_SECRET`, `TIA_AZURE_LOGIN_URL`, `TIA_AZURE_KEYVAULT_TEST_URL` | Azure Key Vault for customer-managed keys |
 | `TIA_TENANT_ID` | default tenant (unauthenticated routes, webhook without an App) |
 | `TIA_AUTH_REQUIRED` | require a credential on every protected route |
 | `TIA_INSECURE_NO_AUTH` | allow listening on a network address without authentication |

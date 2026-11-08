@@ -20,6 +20,7 @@ from typing import Optional
 
 from psycopg.types.json import Jsonb
 
+from .saas import this_region
 from .db import Database
 from .scrub import scrub_text
 
@@ -128,7 +129,8 @@ class JobQueue:
                 "       using (tenant_id) "
                 "  where j.status='queued' and j.run_after <= now() and (%s::text[] is null or j.kind = any(%s)) "
                 "        and tia_tenant_active(j.tenant_id)"
-                ") x order by running, rn, created_at limit 30", (kinds, kinds)).fetchall()
+                "        and (%s::text is null or tia_tenant_in_region(j.tenant_id, %s))"          # PL-015: another region's tenants are not ours
+                ") x order by running, rn, created_at limit 30", (kinds, kinds, this_region(), this_region())).fetchall()
             for tid, jid in cands:
                 # serialise claims per tenant so the concurrency cap is exact
                 if not conn.execute("select pg_try_advisory_xact_lock(hashtextextended(%s, 1))", (str(tid),)).fetchone()[0]:

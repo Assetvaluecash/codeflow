@@ -22,7 +22,13 @@ from .extract_java import extract_file as extract_java_file, keep_reachable_sche
 from .extract_orm import function_refs, model_entity
 from .extract_ui import assemble_pages, extract_ui_file, is_ui_file
 from .testcases import is_testcase_file, parse_testcases
+from .extract_openapi import extract_openapi, is_openapi_file
+from .registry import catalog_service_map
+from .events import TOPIC as EVENT_TOPIC, assign_topics, is_event_schema_file, parse_event_schema
 from .scrub import scrub_extract
+from .adapters import adapter_for, run as run_adapter
+from .sqllineage import embedded as embedded_sql, is_sql_source, parse_definitions
+from .streams import connector_facts, is_connector_path, stream_facts
 from .models import (CallSite, Endpoint, Function, RepoExtract, Schema, TestCase,
                      normalize_path)
 
@@ -217,6 +223,16 @@ def literal_values(node, limit: int = 60) -> list:
         if len(out) >= limit:
             break
     return out
+
+
+AUTH_NAME = re.compile(r"(auth|user|token|admin|role|permission|scope|login|principal|current|security|api_key|apikey|jwt|oauth)", re.I)
+
+
+def _is_auth_dependency(n) -> bool:
+    """Security(...) always; Depends(x) when x is named like an authentication or authorisation check (Depends(get_db) is not)."""
+    if not isinstance(n, ast.Call) or _call_name(n) not in ("Depends", "Security"):
+        return False
+    return _call_name(n) == "Security" or bool(n.args and AUTH_NAME.search(_unparse(n.args[0])))
 
 
 def _signature(node) -> dict:
@@ -417,7 +433,7 @@ class _FileVisitor:
             self.out.functions.append(Function(id=fid, repo=self.repo, file=self.path, qualname=qual,
                                                line=node.lineno, hash=h, calls=sorted(set(calls)),
                                                signature=_signature(node), body_hash=_body_hash(node), filters=item_filters(node),
-                                               statuses=raised_statuses(node)))
+                                               statuses=raised_statuses(node), end_line=getattr(node, "end_lineno", None)))
             self.maybe_endpoint(node, fid, qual)
             if not self.is_migration:
                 self.out.data_refs += function_refs(node, fid, self.path, scope, self.out)
@@ -425,6 +441,7 @@ class _FileVisitor:
                 for sub in ast.walk(stmt):
                     if isinstance(sub, ast.Call):
                         self.maybe_callsite(sub, fid)
+                        self.maybe_event(sub, fid)
         # nested functions are attributed to the enclosing function (not separately extracted)
 
     # ---- endpoints ------------------------------------------------------------------
@@ -448,10 +465,21 @@ class _FileVisitor:
                 continue
             if isinstance(owner, ast.Name) and owner.id in self.router_prefix:
                 path = self.router_prefix[owner.id] + path
-            resp = None
+            resp, status, auth = None, None, []
             for kw in dec.keywords:
                 if kw.arg == "response_model":
                     resp = _unparse(kw.value)
+                elif kw.arg == "status_code":
+                    status = _status_of(kw.value) or (_literal(kw.value) if isinstance(_literal(kw.value), int) else None)
+                elif kw.arg == "dependencies" and isinstance(kw.value, (ast.List, ast.Tuple)):
+                    auth += [_unparse(d) for d in kw.value.elts if _is_auth_dependency(d)]
+            a_ = node.args
+            for d in list(a_.defaults) + [x for x in a_.kw_defaults if x is not None]:
+                if _is_auth_dependency(d):
+                    auth.append(_unparse(d))
+            shape = None
+            if resp:
+                shape = "list" if re.match(r"(typing\.)?(List|list|Sequence|Set|set|Tuple|tuple)\[", resp) else "object"
             reqs = []
             for a in node.args.args:
                 if a.annotation is not None:
@@ -462,7 +490,8 @@ class _FileVisitor:
                 self.out.endpoints.append(Endpoint(
                     id=f"{self.service}:{m} {np_}", service=self.service, repo=self.repo, method=m,
                     path=path, norm_path=np_, handler=qual, handler_id=fid, file=self.path,
-                    line=node.lineno, response_schema=resp, request_schemas=reqs, params=params))
+                    line=node.lineno, response_schema=resp, request_schemas=reqs, params=params, response_shape=shape,
+                    success_status=status, auth=sorted(set(auth))))
 
     def _params(self, node, path: str) -> list:
         """Path, query and header parameters of a handler with their rules. A parameter typed with a request model is the body: it is
@@ -483,6 +512,28 @@ class _FileVisitor:
                 f["required"] = True
             out.append({"name": arg.arg, "in": where, **f})
         return out
+
+    # ---- event producers and consumers (FR-019) -----------------------------------------
+    def _topic(self, n) -> Optional[str]:
+        if isinstance(n, ast.Name) and n.id in self.consts and self.consts[n.id][0] == "literal":
+            return self.consts[n.id][1]
+        return _const_str(n)
+
+    def maybe_event(self, call: ast.Call, fid: Optional[str]):
+        f, name = call.func, _call_name(call)
+        owner = _unparse(f.value) if isinstance(f, ast.Attribute) else ""
+        topics, kind = [], None
+        if name in ("send", "produce", "send_and_wait") and isinstance(f, ast.Attribute) and re.search(r"produc|kafka|publisher", owner, re.I) and call.args:
+            topics, kind = [self._topic(call.args[0])], "produces"
+        elif name in ("KafkaConsumer", "AIOKafkaConsumer"):
+            topics, kind = [self._topic(a) for a in call.args], "consumes"
+        elif name == "subscribe" and re.search(r"consum|kafka", owner, re.I):
+            arg = call.args[0] if call.args else next((k.value for k in call.keywords if k.arg == "topics"), None)
+            elts = arg.elts if isinstance(arg, (ast.List, ast.Tuple, ast.Set)) else [arg] if arg is not None else []
+            topics, kind = [self._topic(a) for a in elts], "consumes"
+        for t in topics:
+            if t and EVENT_TOPIC.match(t):
+                self.out.events.append({"kind": kind, "topic": t, "function_id": fid, "file": self.path, "line": call.lineno, "via": f"{owner}.{name}".strip(".")})
 
     # ---- outbound call sites ----------------------------------------------------------
     def maybe_callsite(self, call: ast.Call, fid: Optional[str]):
@@ -615,7 +666,8 @@ class _FileVisitor:
 
 BINARY_EXT = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".gz", ".tar", ".jar", ".class", ".exe", ".dll",
               ".so", ".woff", ".woff2", ".ttf", ".pyc", ".bin", ".lock", ".svg")
-TEXT_EXT = (".md", ".txt", ".yaml", ".yml", ".json", ".toml", ".cfg", ".gitignore", ".xml", ".properties", ".gradle", ".sql")
+TEXT_EXT = (".md", ".txt", ".yaml", ".yml", ".json", ".toml", ".cfg", ".gitignore", ".xml", ".properties", ".gradle", ".sql",
+            ".mod", ".sum", ".csproj", ".sln", ".kts.lock", ".editorconfig", ".npmrc")
 
 
 APP_CONFIG_NAMES = ("application.yml", "application.yaml", "bootstrap.yml", "bootstrap.yaml", "application.properties",
@@ -761,6 +813,10 @@ def read_service_map(files: dict) -> dict:
                 smap = {}
             if not isinstance(smap, dict):
                 smap = {}
+    cat = catalog_service_map(files)                      # Backstage catalog-info.yaml: a fallback for what tia-services.yaml does not say
+    for k_from, k_to in (("service", "service"), ("owner", "owner"), ("criticality", "criticality")):
+        if cat.get(k_from) and not smap.get(k_to):
+            smap = {**smap, k_to: cat[k_from]}
     if not smap.get("service"):
         spring = spring_application_name(files)
         if spring:
@@ -785,7 +841,9 @@ SOURCE_EXT = (".py", ".java")
 def is_extractable(path: str) -> bool:
     """Files whose facts are extracted per file and cached: Python and Java source, SQL and Liquibase migrations, front-end templates
     and scripts, written test cases."""
-    return path.endswith(SOURCE_EXT) or is_data_file(path) or is_testcase_file(path) or is_ui_file(path)
+    return (path.endswith(SOURCE_EXT) or adapter_for(path) is not None or is_data_file(path) or is_sql_source(path)
+            or is_connector_path(path) or path.endswith(".scala") or is_testcase_file(path) or is_openapi_file(path) or is_event_schema_file(path)
+            or is_ui_file(path))
 
 
 def extract_source(repo: str, service: str, path: str, text: str, strip_prefixes: tuple = ()) -> RepoExtract:
@@ -794,6 +852,20 @@ def extract_source(repo: str, service: str, path: str, text: str, strip_prefixes
         part = extract_java_file(repo, service, path, text, strip_prefixes)
     elif path.endswith(".py"):
         part = extract_file(repo, service, path, text, strip_prefixes)
+    elif is_connector_path(path) or path.endswith(".scala"):
+        # FR-042: Kafka Connect connector configurations; Scala is read for Spark / Kafka Streams pipelines only
+        part = RepoExtract(repo=repo, service=service, commit="", extractor_version=EXTRACTOR_VERSION)
+        ev, acc, fns, unk = connector_facts(repo, path, text) if is_connector_path(path) else ([], [], [], [])
+        part.events, part.sql_access, part.functions, part.data_unknowns = ev, acc, fns, unk
+        part.files_analysed = 1 if fns else 0
+    elif is_openapi_file(path):
+        part = extract_openapi(repo, service, path, text, strip_prefixes)
+    elif is_event_schema_file(path):
+        part = RepoExtract(repo=repo, service=service, commit="", extractor_version=EXTRACTOR_VERSION)
+        sch = parse_event_schema(path, text)
+        if sch:
+            part.event_schemas.append({"id": f"{service}:eschema:{sch['name']}", **sch, "file": path, "line": 1})
+            part.files_analysed = 1
     elif is_testcase_file(path):
         part = RepoExtract(repo=repo, service=service, commit="", extractor_version=EXTRACTOR_VERSION)
         try:
@@ -801,6 +873,14 @@ def extract_source(repo: str, service: str, path: str, text: str, strip_prefixes
             part.files_analysed = 1
         except ValueError as e:
             part.files_failed.append({"file": path, "error": f"test cases: {e}"})
+    elif adapter_for(path) is not None:
+        # Go / C# / Kotlin / TypeScript-JavaScript (and installed third-party adapters); a front-end script is ALSO read for pages
+        part = run_adapter(adapter_for(path), repo, service, path, text, strip_prefixes)
+        part.extractor_version = EXTRACTOR_VERSION
+        if is_ui_file(path):
+            part.ui_facts = extract_ui_file(path, text)
+            if part.ui_facts:
+                part.files_analysed = 1
     elif is_ui_file(path):
         part = RepoExtract(repo=repo, service=service, commit="", extractor_version=EXTRACTOR_VERSION)
         part.ui_facts = extract_ui_file(path, text)
@@ -808,10 +888,52 @@ def extract_source(repo: str, service: str, path: str, text: str, strip_prefixes
             part.files_analysed = 1
         else:
             part.non_python_files = 1          # a script with no page in it (e.g. Node server code) is still not analysed
+    elif is_sql_source(path) and not is_data_file(path):
+        part = RepoExtract(repo=repo, service=service, commit="", extractor_version=EXTRACTOR_VERSION)
     else:
         part = extract_data_file(repo, service, path, text)
+    _sql_lineage(part, path, text)
+    if path.endswith((".py", ".java", ".kt", ".kts", ".scala")):
+        ev, acc, jobs, unk = stream_facts(repo, path, text, part.functions)
+        part.events += ev
+        part.sql_access += acc
+        part.functions += jobs
+        part.data_unknowns += unk
+        if jobs or ev:
+            part.files_analysed = part.files_analysed or 1
     part.secrets_withheld = scrub_extract(part)          # secrets in source never reach the cache, the graph or a report
     return part
+
+
+def _sql_lineage(part: RepoExtract, path: str, text: str) -> None:
+    """FR-041: stored procedures / views / triggers defined in SQL files, and SQL embedded in the functions of a source file. A statement
+    that is read replaces the generic 'raw SQL not analysed' entry for it; dynamic SQL stays an unknown."""
+    if is_sql_source(path):
+        procs, unk = parse_definitions(path, text)
+        if procs:
+            part.procedures += procs
+            part.files_analysed = part.files_analysed or 1
+        part.data_unknowns += unk
+        return
+    if not part.functions or part.migrations:
+        return
+    acc, unk, covered = embedded_sql(path, text, part.functions)
+    part.sql_access += acc
+    part.data_unknowns += unk
+    if covered:
+        spans = [(f.line, f.end_line or f.line, f.id) for f in part.functions]
+        read_fns = {fid for fid, _ in covered}
+
+        def owner(line):
+            inside = [s for s in spans if s[0] <= line <= s[1]]
+            return min(inside, key=lambda s: s[1] - s[0])[2] if inside else None
+        part.data_unknowns = [u for u in part.data_unknowns if not (u.get("kind") == "raw_sql" and owner(u.get("line") or 0) in read_fns)]
+        # a SQL-text library (JDBC, Spring JDBC, EntityManager native queries) whose every statement in this file was read is analysed now;
+        # one with any dynamic statement, and libraries that do not take SQL text (jOOQ, MyBatis mappers, MongoDB, Redis), stay unknowns
+        if not unk:
+            sql_text_libs = ("JDBC", "Spring JDBC", "JPA EntityManager", "Spring Data JDBC")
+            part.data_unknowns = [u for u in part.data_unknowns if not (u.get("kind") == "data_access_library"
+                                                                        and u["reason"].split(" is used here")[0] in sql_text_libs)]
 
 
 def extract_file(repo: str, service: str, path: str, text: str, strip_prefixes: tuple = ()) -> RepoExtract:
@@ -881,6 +1003,10 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
             out.enums.update(part.enums)
             out.ui_facts += part.ui_facts
             out.manual_tests += part.manual_tests
+            out.events += part.events
+            out.event_schemas += part.event_schemas
+            out.sql_access += part.sql_access
+            out.procedures += part.procedures
         elif path.startswith("contracts/") and path.endswith(".json"):
             try:
                 c = json.loads(small_files[path])
@@ -890,6 +1016,11 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
                 out.files_failed.append({"file": path, "error": "invalid JSON contract"})
         elif not path.endswith(TEXT_EXT + BINARY_EXT):
             out.non_python_files += 1
+    # a specification declares what the code may also declare: the code wins (the specification can be out of date)
+    code_eps = {e.id for e in out.endpoints if e.source == "code"}
+    out.endpoints = [e for e in out.endpoints if e.source == "code" or e.id not in code_eps]
+    code_schemas = {s.name for s in out.schemas if not s.file.lower().endswith((".yaml", ".yml", ".json"))}
+    out.schemas = [s for s in out.schemas if s.name not in code_schemas or not s.file.lower().endswith((".yaml", ".yml", ".json"))]
     resolve_data(out, smap)                    # ORM mappings, repositories and migrations need facts from several files
     resolve_clients(out, smap)                 # Java: Feign / shared-client calls need declarations from other files
     keep_reachable_schemas(out)
@@ -920,6 +1051,7 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
                                 for v, p in t.http_calls]
     out.external_context_paths = external_context_paths(small_files)
     out.ui_pages = assemble_pages(out.ui_facts, repo)
+    assign_topics(out, smap)
     out.endpoints.sort(key=lambda e: e.id)
     out.schemas.sort(key=lambda s: s.id)
     out.callsites.sort(key=lambda c: c.id)

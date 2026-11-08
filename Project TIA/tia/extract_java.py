@@ -27,6 +27,7 @@ from tree_sitter import Language, Node, Parser
 
 from . import EXTRACTOR_VERSION
 from .extract_data import SPRING_DATA_BASES, snake
+from .events import TOPIC as EVENT_TOPIC
 from .models import CallSite, Endpoint, Entity, Function, RepoExtract, Schema, TestCase, normalize_path
 
 _LANG = Language(tree_sitter_java.language())
@@ -83,7 +84,7 @@ def _walk(n: Node) -> Iterator[Node]:
         stack.extend(reversed(cur.children))
 
 
-HTTP_STATUS = {"BAD_REQUEST": 400, "UNAUTHORIZED": 401, "FORBIDDEN": 403, "NOT_FOUND": 404, "METHOD_NOT_ALLOWED": 405, "CONFLICT": 409,
+HTTP_STATUS = {"OK": 200, "CREATED": 201, "ACCEPTED": 202, "NO_CONTENT": 204, "BAD_REQUEST": 400, "UNAUTHORIZED": 401, "FORBIDDEN": 403, "NOT_FOUND": 404, "METHOD_NOT_ALLOWED": 405, "CONFLICT": 409,
                "GONE": 410, "PRECONDITION_FAILED": 412, "PAYLOAD_TOO_LARGE": 413, "UNSUPPORTED_MEDIA_TYPE": 415, "UNPROCESSABLE_ENTITY": 422,
                "TOO_MANY_REQUESTS": 429, "INTERNAL_SERVER_ERROR": 500, "SERVICE_UNAVAILABLE": 503}
 ENTITY_SHORTCUTS = {"notFound": 404, "badRequest": 400, "unprocessableEntity": 422, "internalServerError": 500}
@@ -117,6 +118,9 @@ def _java_statuses(body: Node) -> list:
         if st and st >= 400:
             out.append({"status": st, "line": n.start_point[0] + 1})
     return sorted(out, key=lambda x: (x["line"], x["status"]))
+
+
+AUTH_ANNOTATIONS = {"PreAuthorize", "PostAuthorize", "Secured", "RolesAllowed", "PermitAll", "DenyAll"}
 
 
 def _getter_field(name: str) -> str:
@@ -214,6 +218,7 @@ class _JavaVisitor:
         self.method_returns: dict[str, Optional[Node]] = {}   # no-argument method -> the expression it returns (None when ambiguous)
         self._resolving: set = set()
         self.used_ids: dict[str, int] = {}
+        self.class_auth: list = []                                      # authorisation annotations of the enclosing class
         self.type_names_used: set[str] = set()
 
     # ---- file-level pre-pass ------------------------------------------------------------------------------
@@ -556,6 +561,8 @@ class _JavaVisitor:
         is_interface = node.type == "interface_declaration"
         feign = mods.get("FeignClient")
         class_paths = self._mapping_paths(mods.get("RequestMapping"), [""]) if "RequestMapping" in mods else [""]
+        outer_auth = self.class_auth
+        self.class_auth = sorted({f"@{a}({_t(self._arg(mods[a], 'value'))})" if mods[a] else f"@{a}" for a in mods if a in AUTH_ANNOTATIONS})
         if not self.is_test_file and node.type == "class_declaration" and set(mods) & ENTITY_ANNOTATIONS:
             self._add_entity(node, name, mods)
         elif not self.is_test_file and is_interface and feign is None:
@@ -572,6 +579,7 @@ class _JavaVisitor:
                     self.visit_method(m, qual_scope, class_paths, is_interface)
                 elif m.type in ("class_declaration", "interface_declaration", "record_declaration", "enum_declaration"):
                     self.visit_type(m, qual_scope)
+        self.class_auth = outer_auth
 
     # ---- schemas ---------------------------------------------------------------------------------------------------
     def _required(self, mods: dict, tn: Optional[Node]) -> bool:
@@ -877,9 +885,15 @@ class _JavaVisitor:
         sig = {"params": [{"name": _t(p.child_by_field_name("name")), "kind": "positional",
                            "type": _t(p.child_by_field_name("type")) if p.child_by_field_name("type") is not None else ""} for p in self._params(m)],
                "returns": _t(ret) if ret is not None else None}
+        if "KafkaListener" in mods:
+            node = self._arg(mods["KafkaListener"], "topics", "value")
+            for v in self._values(node):
+                t = self._const_str(v)
+                if t and EVENT_TOPIC.match(t):
+                    self.out.events.append({"kind": "consumes", "topic": t, "function_id": fid, "file": self.path, "line": line, "via": "@KafkaListener"})
         self.out.functions.append(Function(id=fid, repo=self.repo, file=self.path, qualname=qual, line=line, hash=h, calls=calls,
                                            signature=sig, body_hash=h, filters=_stream_filters(body) if body is not None else [],
-                                           statuses=_java_statuses(body) if body is not None else []))
+                                           statuses=_java_statuses(body) if body is not None else [], end_line=m.end_point[0] + 1))
         if mapped:
             self._add_endpoints(m, fid, qual, line, mapped, class_paths)
         if body is not None:
@@ -891,6 +905,13 @@ class _JavaVisitor:
 
     def _add_endpoints(self, m: Node, fid: str, qual: str, line: int, mapped: list, class_paths: list):
         resp = self.unwrap(m.child_by_field_name("type"))
+        rtype = _t(m.child_by_field_name("type"))
+        shape = ("list" if re.search(r"^(ResponseEntity<|Mono<|Flux<)?\s*(List|Set|Collection|Iterable|Flux)\b|\[\]\s*>?$", rtype) or rtype.startswith("Flux<")
+                 else "object" if rtype and rtype not in ("void", "ResponseEntity<Void>") else None)
+        mods = self.annotations(next((c for c in m.children if c.type == "modifiers"), None))
+        status = _status_name(_t(self._arg(mods["ResponseStatus"], "value", "code"))) if "ResponseStatus" in mods else None
+        auth = sorted({f"@{a}({_t(self._arg(mods[a], 'value'))})" if mods[a] else f"@{a}" for a in mods if a in AUTH_ANNOTATIONS}
+                      | set(self.class_auth))
         reqs, params = [], []
         for p in self._params(m):
             pm = self.annotations(next((c for c in p.children if c.type == "modifiers"), None))
@@ -917,7 +938,8 @@ class _JavaVisitor:
                 self.out.endpoints.append(Endpoint(
                     id=f"{self.service}:{verb} {np_}", service=self.service, repo=self.repo, method=verb, path=full,
                     norm_path=np_, handler=qual, handler_id=fid, file=self.path, line=line,
-                    response_schema=resp, request_schemas=sorted(set(reqs)), params=params))
+                    response_schema=resp, request_schemas=sorted(set(reqs)), params=params, response_shape=shape,
+                    success_status=status, auth=auth))
 
     # ---- outbound calls ---------------------------------------------------------------------------------------------------------
     def _scan_body(self, body: Node, fid: str):
@@ -933,6 +955,11 @@ class _JavaVisitor:
             if var is None and obj is not None and obj.type == "method_invocation" and _t(obj.child_by_field_name("name")) == "build":
                 var = self._var_of(obj.child_by_field_name("object"))          # restTemplateBuilder.build().getForObject(...)
             typ = self.types.get(var or "", "")
+            if name == "send" and a and (typ.startswith("KafkaTemplate") or re.search(r"kafkaTemplate|producer", var or "", re.I)):
+                t = self._const_str(a[0])
+                if t and EVENT_TOPIC.match(t):
+                    self.out.events.append({"kind": "produces", "topic": t, "function_id": fid, "file": self.path, "line": line, "via": "KafkaTemplate.send"})
+                continue
             if typ in TEMPLATE_TYPES and name in TEMPLATE_METHODS and a:
                 method = TEMPLATE_METHODS[name]
                 if method is None and len(a) > 1:

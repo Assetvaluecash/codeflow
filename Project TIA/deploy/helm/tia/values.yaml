@@ -1,7 +1,7 @@
 # Every secret is read from a Kubernetes Secret you create (see deploy/README.md); the chart never contains one.
 image:
   repository: registry.example.com/tia
-  tag: "0.1.0"
+  tag: "1.0.0"
   pullPolicy: IfNotPresent
 
 publicUrl: https://tia.example.com          # TIA_PUBLIC_URL: sign-in redirects and links in PR comments
@@ -28,7 +28,7 @@ ingress:
   className: ""
   host: tia.example.com
   tlsSecret: tia-tls
-  annotations: {}                            # put rate limiting here (TIA does not rate-limit itself)
+  annotations: {}                            # gateway rate limits go here (TIA also limits per replica: tia/ratelimit.py)
 
 networkPolicy:
   enabled: true

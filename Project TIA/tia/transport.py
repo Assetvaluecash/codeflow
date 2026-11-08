@@ -14,6 +14,7 @@ from typing import Optional
 import psycopg.conninfo
 
 from .credentials import SecretError, is_loopback, require_secure_url
+from . import airgap
 
 SECURE_SSLMODES = ("require", "verify-ca", "verify-full")
 
@@ -41,6 +42,7 @@ def check_db_tls(dsn: str, allow: Optional[bool] = None) -> str:
 
 def check_outbound(url: str, what: str) -> str:
     try:
+        airgap.guard(url, what)
         return require_secure_url(url, what, allow_insecure("TIA_ALLOW_INSECURE_OUTBOUND"))
     except SecretError as e:
         raise TransportError(str(e))

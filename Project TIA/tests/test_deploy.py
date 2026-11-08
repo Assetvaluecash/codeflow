@@ -124,6 +124,6 @@ def test_the_chart_reads_secrets_only_from_the_mounted_secret():
     assert "defaultMode: 0400" in TEMPLATES
 
 
-def test_the_deploy_readme_says_this_was_never_run():
+def test_the_deploy_readme_states_what_was_and_was_not_run():
     text = (DEPLOY / "README.md").read_text(encoding="utf-8")
-    assert "written and statically checked only" in text and "never" in text
+    assert "run end to end on one machine" in text and "installed on Kubernetes" in text and "Not verified" in text and "never validated or applied" in text

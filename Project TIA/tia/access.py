@@ -25,7 +25,7 @@ from .identity import Principal
 
 MODES = ("scm", "tenant", "restricted")
 READ_PERMS = frozenset(github.ROLE_ORDER)
-HOSTS = {"github": "github"}                  # repository provider -> the host name used on user profiles and in the mirror
+HOSTS = {"github": "github", "gitlab": "gitlab", "bitbucket": "bitbucket"}   # repository provider -> the host name on user profiles and in the mirror
 DEFAULT_MAX_AGE = 3600
 
 
@@ -120,15 +120,22 @@ class AccessStore:
         lister = lister or github.list_collaborators
         describe = describe or (lambda full, tok, api: github._call("GET", f"{api}/repos/{full}", tok))
         results = []
+        from . import scmhosts
         for r in repos:
             host = HOSTS.get(r.provider)
-            full = github_full_name(r.url) if host == "github" else None
+            hcfg = scmhosts.HostConfig.from_env(host) if host in ("gitlab", "bitbucket") else None
+            full = github_full_name(r.url) if host == "github" else scmhosts.full_name(hcfg, r.url) if hcfg else None
             if not full:
                 continue
             try:
                 tok = token(r) if callable(token) else token                 # with a GitHub App the token differs per installation
-                collab = lister(full, tok, api_url)
-                meta = describe(full, tok, api_url) or {}
+                if hcfg is not None:
+                    if not tok:
+                        raise RuntimeError(f"no {host} token is configured (TIA_{host.upper()}_TOKEN, or the tenant's stored {host}/token)")
+                    collab, meta = scmhosts.list_readers(hcfg, full, tok), {}
+                else:
+                    collab = lister(full, tok, api_url)
+                    meta = describe(full, tok, api_url) or {}
                 private = meta.get("private") if isinstance(meta.get("private"), bool) else None
                 with self.db.tx(self.tenant_id) as c:
                     c.execute("delete from scm_permissions where tenant_id = %s and host = %s and repo = %s", (self.tenant_id, host, r.name))
@@ -143,7 +150,7 @@ class AccessStore:
                 results.append({"repo": r.name, "ok": True, "collaborators": len(collab), "private": private})
             except Exception as e:                                           # noqa: BLE001 - recorded, never raised: one bad repository must not hide the rest
                 code = getattr(e, "code", None)
-                msg = str(e) if type(e).__name__ == "AppError" else f"the host answered HTTP {code}" if code else "the host could not be reached"
+                msg = str(e) if type(e).__name__ in ("AppError", "RuntimeError") else f"the host answered HTTP {code}" if code else "the host could not be reached"
                 if code in (403, 404):
                     msg += " (listing collaborators needs a token with push access to the repository)"
                 with self.db.tx(self.tenant_id) as c:

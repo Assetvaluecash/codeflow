@@ -1,0 +1,16 @@
+# Regional deployment for data residency (PRD PL-015, AC-041): one installation per region, each with its own PostgreSQL and workspace in that
+# region. Tenants pinned to another region are refused before any of their data is read or written. Copy this file for us / apac.
+publicUrl: https://eu.tia.example.com
+defaultTenantId: "00000000-0000-0000-0000-000000000000"
+
+existingSecret: tia-secrets-eu                                # DSNs of the eu database only: this region cannot reach another region's data
+
+extraEnv:
+  TIA_REGION: eu
+
+workspace:
+  storageClass: eu-regional-rwx                               # a storage class whose volumes live in the region
+
+networkPolicy:
+  enabled: true
+  databaseCidr: 10.10.0.0/16                                  # the eu database subnet

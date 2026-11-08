@@ -35,7 +35,8 @@ def test_the_empty_configuration_is_the_defaults_and_round_trips():
     assert (DEFAULT.max_depth, DEFAULT.max_results, DEFAULT.time_budget_seconds, DEFAULT.max_concurrent_jobs) == (8, 200, 60, 4)
     full = DEFAULT.to_dict()
     assert parse(full) == DEFAULT and parse(parse(full).to_dict()) == DEFAULT                      # normalised form is a fixed point
-    assert set(full) == {"limits", "paths", "tests", "severity", "materiality", "criticality", "comments"} and full["comments"] == {"audience": None}
+    assert set(full) == {"limits", "paths", "tests", "severity", "materiality", "criticality", "comments",
+                         "compatibility", "ownership", "policies", "itsm", "retention", "incidents", "coordination"} and full["comments"] == {"audience": None}
 
 
 def test_a_full_configuration_is_normalised():

@@ -717,7 +717,8 @@ def test_python_data_access_references():
     assert refs["Order.count_all"] == {("Order", "read")}                                  # cls.objects resolves to the model
     assert "unrelated" not in refs and "raw" not in refs                                   # dict.get / sorted are not data access
     raw = [u for u in e.data_unknowns if u["kind"] == "raw_sql"]
-    assert len(raw) == 2 and all("raw" in u["reason"] for u in raw)                        # raw SQL is reported, never ignored
+    assert raw == []                                                                       # FR-041: raw SQL that can be read is read...
+    assert [(a["function_id"].split("::")[-1], a["op"], a["target"]) for a in e.sql_access] == [("raw", "write", "accounts")]
 
 
 # =====================================================================================================================

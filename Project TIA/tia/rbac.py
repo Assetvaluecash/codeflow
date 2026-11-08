@@ -12,6 +12,7 @@ PERMISSIONS = {
     "analyze": {"engineer", "release_manager", "administrator"},                            # run/reproduce/cancel analyses, publish to the PR
     "repo_write": {"engineer", "release_manager", "administrator"},                         # register, sync, discover, upload, rescan
     "repo_delete": {"administrator"},
+    "evidence_write": {"engineer", "release_manager", "administrator"},                     # push CI results, coverage, telemetry, deployments
     "config_write": {"release_manager", "administrator"},                                    # severity, materiality, limits, criticality, audience
     "audit_read": {"auditor", "administrator"},
     "access_sync": {"release_manager", "administrator"},                                     # refresh the mirror of the source-code host's permissions
@@ -27,6 +28,8 @@ ROUTES = {
     ("GET", "/metrics"): PUBLIC,                                           # has its own token / loopback rule
     ("POST", "/api/v1/webhooks/github"): PUBLIC,                           # authenticated by HMAC signature
     ("POST", "/api/v1/webhooks/ado"): PUBLIC,                              # authenticated by the service hook's basic-auth credentials
+    ("POST", "/api/v1/webhooks/gitlab"): PUBLIC,                           # authenticated by the webhook's secret token
+    ("POST", "/api/v1/webhooks/bitbucket"): PUBLIC,                        # authenticated by HMAC signature
     ("GET", "/auth/options"): PUBLIC, ("GET", "/auth/login"): PUBLIC, ("GET", "/auth/callback"): PUBLIC,
     ("POST", "/auth/saml/acs"): PUBLIC, ("GET", "/auth/saml/metadata"): PUBLIC,
     ("GET", "/auth/me"): PUBLIC,                                           # answers {authenticated: false} instead of 401, for the UI shell
@@ -50,11 +53,30 @@ ROUTES = {
     ("DELETE", "/api/v1/uploads/{uid}"): "repo_write",
     # audit
     ("GET", "/api/v1/audit"): "audit_read", ("GET", "/api/v1/audit/verify"): "audit_read",
+    ("GET", "/api/v1/audit/report"): "audit_read",
+    # releases, temporal views, incidents (FR-011, FR-030 to FR-032)
+    ("POST", "/api/v1/releases"): "evidence_write", ("GET", "/api/v1/releases"): "read", ("GET", "/api/v1/releases/compare"): "read",
+    ("GET", "/api/v1/releases/{name}/consumers"): "read", ("GET", "/api/v1/environments/at"): "read",
+    ("POST", "/api/v1/incidents"): "evidence_write", ("POST", "/api/v1/incidents/{iid}/links"): "evidence_write",
+    ("GET", "/api/v1/incidents/{iid}/investigation"): "read",
+    # calibration, trends, team coordination (FR-043 to FR-045)
+    ("POST", "/api/v1/impact-analyses/{aid}/verdicts"): "evidence_write", ("GET", "/api/v1/calibration"): "read", ("GET", "/api/v1/trends"): "read",
+    ("GET", "/api/v1/impact-analyses/{aid}/coordination"): "read", ("GET", "/api/v1/impact-analyses/{aid}/findings"): "read", ("POST", "/api/v1/impact-analyses/{aid}/notifications"): "evidence_write",
+    ("POST", "/api/v1/impact-analyses/{aid}/acknowledgements"): "evidence_write",
     # graph
     ("GET", "/api/v1/graph"): "read", ("GET", "/api/v1/graph/versions"): "read", ("GET", "/api/v1/graph/versions/{gid}"): "read",
     ("GET", "/api/v1/graph/relationships"): "read", ("GET", "/api/v1/graph/stats"): "read", ("GET", "/api/v1/graph/shared-components"): "read",
     ("GET", "/api/v1/automation/api"): "read", ("GET", "/api/v1/automation/ui"): "read", ("GET", "/api/v1/coverage"): "read",
-    ("POST", "/api/v1/coverage/test-case"): "read", ("POST", "/api/v1/graph/rescan"): "repo_write",
+    ("POST", "/api/v1/coverage/test-case"): "read",
+    # ingested evidence (FR-022 to FR-029)
+    ("POST", "/api/v1/evidence/test-results"): "evidence_write", ("POST", "/api/v1/evidence/coverage"): "evidence_write",
+    ("POST", "/api/v1/evidence/runtime"): "evidence_write", ("POST", "/api/v1/evidence/deployments"): "evidence_write",
+    ("GET", "/api/v1/impact-analyses/{aid}/policy"): "read", ("POST", "/api/v1/impact-analyses/{aid}/approvals"): "analyze",
+    ("POST", "/api/v1/registry/import"): "config_write",
+    ("POST", "/api/v1/impact-analyses/{aid}/change-record"): "analyze",
+    ("POST", "/mcp"): "read",                                              # MCP tools are read-only (FR-037)
+    ("GET", "/api/v1/usage"): "admin",
+    ("GET", "/api/v1/evidence"): "read", ("DELETE", "/api/v1/evidence/{rid}"): "evidence_write", ("GET", "/api/v1/environments"): "read", ("POST", "/api/v1/graph/rescan"): "repo_write",
     # analyses
     ("POST", "/api/v1/impact-analyses"): "analyze", ("GET", "/api/v1/jobs/{job_id}"): "read", ("DELETE", "/api/v1/jobs/{job_id}"): "analyze",
     ("GET", "/api/v1/impact-analyses/{aid}"): "read", ("GET", "/analyses/{aid}"): "read",

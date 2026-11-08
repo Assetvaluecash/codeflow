@@ -22,6 +22,7 @@ from typing import Optional
 
 from . import metrics
 from .scrub import scrub_text
+from . import airgap
 
 TRACEPARENT = re.compile(r"^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$")
 KIND = {"internal": 1, "server": 2, "client": 3, "producer": 4, "consumer": 5}
@@ -113,7 +114,7 @@ class OtlpExporter:
             req = urllib.request.Request(self.url, method="POST", data=json.dumps(self.payload(spans)).encode(),
                                          headers={"Content-Type": "application/json", **self.headers})
             try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                with urllib.request.urlopen(airgap.checked(req, "tracing"), timeout=self.timeout) as r:
                     r.read()
                 metrics.TRACE_EXPORT.labels(outcome="exported").inc(len(spans))
             except (urllib.error.URLError, OSError):

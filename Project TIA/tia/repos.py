@@ -27,6 +27,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 from . import gitutil, metrics, tracing
 from .credentials import is_loopback
+from . import airgap
 
 
 class IngestError(Exception):
@@ -65,6 +66,10 @@ def detect_provider(url: str) -> str:
         return "github"
     if host in ("dev.azure.com", "ssh.dev.azure.com") or host.endswith(".visualstudio.com") or "/_git/" in u.path:
         return "ado"
+    for provider in ("gitlab", "bitbucket"):                      # gitlab.com / bitbucket.org, or the self-hosted server's configured host
+        cfg_host = (urlsplit(os.environ.get(f"TIA_{provider.upper()}_URL") or "").hostname or "").lower()
+        if host == f"{provider}.{'com' if provider == 'gitlab' else 'org'}" or host.split(".")[0] == provider or (cfg_host and host == cfg_host):
+            return provider
     return "git"
 
 
@@ -79,7 +84,7 @@ def derive_name(url: str) -> str:
 def _auth_env(provider: str, token: Optional[str]) -> dict:
     if not token:
         return {}
-    user = {"github": "x-access-token", "ado": "", "git": "oauth2"}.get(provider, "oauth2")
+    user = {"github": "x-access-token", "ado": "", "git": "oauth2", "gitlab": "oauth2", "bitbucket": "x-token-auth"}.get(provider, "oauth2")
     b64 = base64.b64encode(f"{user}:{token}".encode()).decode()
     return {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraheader",
             "GIT_CONFIG_VALUE_0": f"Authorization: Basic {b64}"}
@@ -227,6 +232,7 @@ class RepoService:
         dest = self.workspace / rname
         if dest.exists():
             _rmtree(dest)
+        airgap.guard(url, "git clone")
         _git(["clone", "--bare", "--no-tags", url, str(dest)], provider=provider, token=token)
         repo = Repo(name=rname, url=url, provider=provider, kind="remote", path=str(dest))
         if branch:
@@ -313,7 +319,9 @@ class RepoService:
         if repo.kind != "remote":
             raise IngestError("pull-request refs are only available for remote repositories")
         last = None
-        for src in (f"refs/pull/{number}/head", f"refs/pull/{number}/merge"):
+        refs = {"gitlab": [f"refs/merge-requests/{number}/head"], "bitbucket": [f"refs/pull-requests/{number}/from"]}.get(
+            repo.provider, [f"refs/pull/{number}/head", f"refs/pull/{number}/merge"])
+        for src in refs:
             try:
                 _git(["fetch", "--no-tags", "origin", f"+{src}:refs/tia/pr/{number}"], cwd=repo.path,
                      provider=repo.provider, token=token)
@@ -427,7 +435,7 @@ class RepoService:
 def _http_json(url: str, auth: str):
     req = urllib.request.Request(url, headers={"Authorization": auth, "Accept": "application/json", "User-Agent": "tia"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(airgap.checked(req, "repository download"), timeout=30) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         raise IngestError(f"{url.split('?')[0]} returned HTTP {e.code}")

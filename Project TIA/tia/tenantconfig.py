@@ -38,8 +38,10 @@ MAX_PREFIXES, MAX_SERVICES, MAX_COMMENT = 50, 2000, 500
 SECTIONS = {
     "limits": ("max_depth", "max_results", "time_budget_seconds", "max_concurrent_jobs"),
     "paths": ("strip_prefixes",), "tests": ("naming_convention",), "severity": ("overrides", "inferred_cap", "stale_cap"),
-    "materiality": ("severities", "breaking_on_path"), "comments": ("audience",)}
-TOP_LEVEL = tuple(SECTIONS) + ("criticality",)
+    "materiality": ("severities", "breaking_on_path"), "comments": ("audience",), "compatibility": ("rules",),
+    "itsm": ("provider", "instance_url", "auto_attach"),
+    "retention": ("graph_days", "analysis_days", "runtime_days", "incident_days", "audit_days"), "incidents": ("window_hours",)}
+TOP_LEVEL = tuple(SECTIONS) + ("criticality", "ownership", "policies", "coordination")
 
 
 class ConfigError(Exception):
@@ -65,6 +67,13 @@ class TenantConfig:
     breaking_is_material: bool = True
     criticality: dict = field(default_factory=dict)
     comment_audience: Optional[str] = None
+    compatibility: dict = field(default_factory=dict)      # compatibility rule id -> breaking | compatible (FR-018 full, FR-019)
+    ownership: dict = field(default_factory=dict)          # service -> owning team (wins over tia-services.yaml owner; FR-033, FR-045)
+    itsm: dict = field(default_factory=dict)               # change-management integration (FR-038): provider, instance_url, auto_attach
+    policies: dict = field(default_factory=lambda: {"mode": "advisory", "rules": []})   # release policy (FR-033, FR-036)
+    retention: dict = field(default_factory=dict)          # *_days -> days kept (absent = forever; PRD 11.4, tia.retention)
+    incident_window_hours: float = 72                      # how far before an incident a deployment counts as time-correlated (FR-031)
+    coordination: dict = field(default_factory=lambda: {"auto_notify": False, "channels": {}, "default": None})   # FR-045
     version: int = 0                                      # 0 = nothing stored: the built-in defaults
     digest: str = "default"
 
@@ -91,7 +100,16 @@ class TenantConfig:
                              "stale_cap": self.stale_cap},
                 "materiality": {"severities": list(self.material_severities), "breaking_on_path": self.breaking_is_material},
                 "criticality": dict(sorted(self.criticality.items())),
-                "comments": {"audience": self.comment_audience}}
+                "comments": {"audience": self.comment_audience},
+                "compatibility": {"rules": dict(sorted(self.compatibility.items()))},
+                "ownership": dict(sorted(self.ownership.items())),
+                "itsm": {"provider": self.itsm.get("provider"), "instance_url": self.itsm.get("instance_url"),
+                         "auto_attach": bool(self.itsm.get("auto_attach", False))},
+                "policies": {"mode": self.policies.get("mode", "advisory"), "rules": list(self.policies.get("rules", []))},
+                "retention": {k: self.retention.get(k) for k in SECTIONS["retention"]},
+                "incidents": {"window_hours": self.incident_window_hours},
+                "coordination": {"auto_notify": bool(self.coordination.get("auto_notify")), "channels": dict(sorted((self.coordination.get("channels") or {}).items())),
+                                 "default": self.coordination.get("default")}}
 
     def settings_digest(self) -> str:
         return hashlib.sha256(json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -229,9 +247,89 @@ def parse(raw) -> TenantConfig:
             kw["comment_audience"] = com["audience"]
         else:
             problems.append(f"comments.audience must be one of {', '.join(AUDIENCES)} or null (got {com['audience']!r})")
+    own = raw.get("ownership")
+    if own is not None:
+        if not isinstance(own, dict) or len(own) > MAX_SERVICES:
+            problems.append(f"ownership must be an object of service name -> team (at most {MAX_SERVICES})")
+        else:
+            out = {}
+            for svc, team in own.items():
+                if not SERVICE_NAME.match(str(svc)):
+                    problems.append(f"ownership: '{svc}' is not a valid service name")
+                elif not isinstance(team, str) or not team.strip() or len(team) > 120:
+                    problems.append(f"ownership.{svc} must be a team name")
+                else:
+                    out[svc] = team.strip()
+            kw["ownership"] = out
+    if raw.get("policies") is not None:
+        from .policy import validate as validate_policies
+        pol = validate_policies(raw["policies"], problems)
+        if pol is not None:
+            kw["policies"] = pol
+    it = section("itsm")
+    if it:
+        out = {}
+        if it.get("provider") not in (None, "servicenow"):
+            problems.append(f"itsm.provider must be servicenow or null (got {it.get('provider')!r})")
+        elif it.get("provider"):
+            out["provider"] = "servicenow"
+        url = it.get("instance_url")
+        if url is not None:
+            if not isinstance(url, str) or not re.fullmatch(r"https://[A-Za-z0-9.-]+(:\d+)?/?", url):
+                problems.append("itsm.instance_url must be https://<instance host> (for example https://acme.service-now.com)")
+            else:
+                out["instance_url"] = url.rstrip("/")
+        if "auto_attach" in it:
+            if isinstance(it["auto_attach"], bool):
+                out["auto_attach"] = it["auto_attach"]
+            else:
+                problems.append("itsm.auto_attach must be true or false")
+        if out.get("provider") and not out.get("instance_url"):
+            problems.append("itsm.instance_url is required when itsm.provider is set")
+        kw["itsm"] = {k: v for k, v in out.items() if v}          # canonical: auto_attach false == absent, so to_dict() round-trips
+    ret = section("retention")
+    if ret:
+        from .retention import validate as validate_retention
+        r = validate_retention({k: v for k, v in ret.items() if k in SECTIONS["retention"]}, problems)   # unknown keys: reported above
+        if r is not None:
+            kw["retention"] = {k: v for k, v in r.items() if v is not None}       # canonical: null == absent == keep forever
+    if raw.get("coordination") is not None:
+        from .coordination import validate as validate_coordination
+        co = validate_coordination(raw["coordination"], problems)
+        if co is not None:
+            kw["coordination"] = co
+    inc = section("incidents")
+    if "window_hours" in inc:
+        w = inc["window_hours"]
+        if isinstance(w, bool) or not isinstance(w, (int, float)) or not 1 <= w <= 2160:
+            problems.append("incidents.window_hours must be a number of hours from 1 to 2160")
+        else:
+            kw["incident_window_hours"] = w
+    comp = section("compatibility")
+    if "rules" in comp:
+        rv, out = comp["rules"], {}
+        known = compatibility_rules()
+        if not isinstance(rv, dict):
+            problems.append("compatibility.rules must be an object of rule id -> breaking | compatible")
+        else:
+            for rule, level in rv.items():
+                if rule not in known:
+                    problems.append(f"compatibility.rules: unknown rule '{rule}'{_suggest(rule, known)}; rules are {', '.join(sorted(known))}")
+                elif level not in ("breaking", "compatible"):
+                    problems.append(f"compatibility.rules.{rule} must be breaking or compatible (got {level!r})")
+                else:
+                    out[rule] = level
+            kw["compatibility"] = out
     if problems:
         raise ConfigError(problems)
     return TenantConfig(**kw)
+
+
+def compatibility_rules() -> dict:
+    """Every configurable compatibility rule and its default (REST contracts, event and message contracts)."""
+    from .contracts import RULES
+    from .events import EVENT_RULES
+    return {**RULES, **EVENT_RULES}
 
 
 def diff(a: dict, b: dict) -> list:

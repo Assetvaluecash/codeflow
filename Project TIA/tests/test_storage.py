@@ -92,10 +92,10 @@ def test_audit_chain_verifies_and_is_per_tenant():
     for i in range(5):
         a.audit("ev", n=i, who="x")
     b.audit("other")
-    assert a.verify_audit() == {"ok": True, "entries": 5, "first_bad_seq": None}
+    assert a.verify_audit() == {"ok": True, "entries": 5, "first_bad_seq": None, "anchor": None}
     assert b.verify_audit()["entries"] == 1
     assert [e["seq"] for e in a.audit_events()] == [5, 4, 3, 2, 1]
-    assert fresh_store().verify_audit() == {"ok": True, "entries": 0, "first_bad_seq": None}
+    assert fresh_store().verify_audit() == {"ok": True, "entries": 0, "first_bad_seq": None, "anchor": None}
 
 
 def test_audit_tampering_is_detected():
@@ -104,7 +104,7 @@ def test_audit_tampering_is_detected():
         a.audit("ev", n=i)
     with psycopg.connect(conftest.PG.admin, autocommit=True) as admin:       # an attacker with owner access
         admin.execute("update audit_log set payload = '{\"n\":999}' where tenant_id = %s and seq = 2", (a.tenant_id,))
-    assert a.verify_audit() == {"ok": False, "entries": 4, "first_bad_seq": 2}
+    assert a.verify_audit() == {"ok": False, "entries": 4, "first_bad_seq": 2, "anchor": None}
 
 
 def test_audit_deletion_and_reordering_are_detected():
@@ -142,7 +142,7 @@ def test_concurrent_audit_writes_keep_one_valid_chain():
     ts = [threading.Thread(target=worker, args=(k,)) for k in range(6)]
     [t.start() for t in ts]; [t.join() for t in ts]
     assert not errs
-    assert a.verify_audit() == {"ok": True, "entries": 48, "first_bad_seq": None}
+    assert a.verify_audit() == {"ok": True, "entries": 48, "first_bad_seq": None, "anchor": None}
 
 
 def test_audit_payload_roundtrips_exactly():

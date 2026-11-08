@@ -31,6 +31,23 @@ def redact(report: dict, readable_repos) -> dict:
     r["findings"] = kept
     if r.get("test_scope"):
         redact_scope(r["test_scope"], readable)
+    if r.get("policy_results"):
+        r["policy_results"] = redact_policy({"results": r["policy_results"]}, report, readable)["results"]
+    if r.get("owners"):
+        visible_services = {f["component"] for f in kept} | {r["change"].get("service")}
+        r["owners"] = {k: v for k, v in r["owners"].items() if k in visible_services}
+    # evidence sections (FR-022 to FR-029) name repositories too: only readable ones are kept
+    if r.get("test_recommendations"):
+        r["test_recommendations"]["tests"] = [t for t in r["test_recommendations"]["tests"] if t["repo"] in readable]
+    if "test_gaps" in r:
+        r["test_gaps"] = [g for g in r["test_gaps"] if g["repo"] in readable]
+    if r.get("deployments"):
+        d = r["deployments"]
+        d["by_repo"] = {k: v for k, v in d["by_repo"].items() if k in readable}
+        d["incomplete"] = [x for x in d["incomplete"] if x["repo"] in readable]
+    for c in r["change"]["changed_components"]:
+        if c.get("coverage"):
+            c["coverage"]["tests_executing"] = c["coverage"]["tests_executing"] if r["change"]["repository"] in readable else []
     for u in r["unknowns"]:
         if "items" in u:
             n = len(u["items"])
@@ -65,6 +82,24 @@ def redact(report: dict, readable_repos) -> dict:
     for f in kept:
         s["by_evidence_status"][f["evidence_status"]] = s["by_evidence_status"].get(f["evidence_status"], 0) + 1
     return r
+
+
+def redact_policy(pol: dict, report: dict, readable) -> dict:
+    """Policy outcomes are computed on the whole report (a reader cannot make a rule pass by not seeing it); the evidence behind them is
+    shown only for repositories the reader can see."""
+    if readable is None:
+        return pol
+    ok = set(readable)
+    repo_of = {f["id"]: f["repository"] for f in report.get("findings", [])}
+    out = copy.deepcopy(pol)
+    for r in out["results"]:
+        keep = [e for e in r["evidence"] if (e.get("repo") or repo_of.get(e.get("finding"), "")) in ok
+                or not (e.get("repo") or e.get("finding"))]
+        if len(keep) != len(r["evidence"]):
+            r["withheld_evidence"] = len(r["evidence"]) - len(keep)
+            r["reason"] = r["reason"].split(":")[0] + f" ({r['withheld_evidence']} item(s) in repositories you cannot access withheld)."
+        r["evidence"] = keep
+    return out
 
 
 def redact_snapshot(snap: dict, readable_repos) -> dict:
@@ -141,7 +176,7 @@ def render_comment(report: dict, max_rows: int = 12, link: str | None = None) ->
     elif not s["findings"]:
         L += [f"**{withheld} finding(s) in other repositories are withheld from this comment** (visibility policy). "
               "This is not a clean result: open the TIA report for the full impact.", ""]
-    L += _test_scope_md(report.get("test_scope"), max_rows)
+    L += _test_scope_md(report.get("test_scope"), max_rows, report)
     mat = [f for f in report["findings"] if f["material"]]
     if mat:
         L += ["| Severity | Component | Evidence | Why |", "|---|---|---|---|"]
@@ -174,6 +209,11 @@ def render_comment(report: dict, max_rows: int = 12, link: str | None = None) ->
         L += ["", "**Data changes**"]
         for c in dc:
             L.append(f"- {'BREAKING' if c.get('breaking') else 'non-breaking'}: {c['detail']} (`{c['file']}`)")
+    if report.get("policy_results"):
+        pol = report["policy"]
+        L += ["", f"**Release policy ({pol['mode']}): {pol['outcome']}**" + (" - a mandatory policy failed" if pol.get("blocking") else "")]
+        for r in report["policy_results"]:
+            L.append(f"- {r['outcome'].upper()} `{_md(r['id'])}`{'' if r['mandatory'] else ' (optional)'}: {_md(r['reason'])}")
     cov = report["coverage"]
     if cov.get("outbound_call_sites"):
         L += ["", f"**Coverage:** {len(cov['repositories_analysed'])} repo(s) analysed; "
@@ -198,7 +238,44 @@ def _md(text) -> str:
     return str(text).replace("|", "\\|").replace("\n", " ")
 
 
-def _test_scope_md(ts: dict | None, max_rows: int) -> list:
+RESULT_TEXT = {"passed": " (passed)", "failed": " (**FAILED**)", "error": " (**ERROR**)", "skipped": " (skipped)", "not_in_run": " (not in the CI run)"}
+
+
+def _result(t: dict) -> str:
+    r = RESULT_TEXT.get(t.get("result") or "", "")
+    if r and t.get("run") and not t["run"].get("of_analysed_revision"):
+        r = r[:-1] + ", other revision)"
+    return r
+
+
+def _evidence_md(report: dict) -> list:
+    """CI results, recommended tests and runtime/deployment facts (FR-022 to FR-029), only when the evidence exists."""
+    L = []
+    ts = report.get("test_scope") or {}
+    tests = {(t["repo"], t["file"], t["name"]): t for e in ts.get("entry_points", []) + ts.get("code_without_entry_point", []) for t in e["tests"]}
+    if any(t.get("result") not in (None, "no_ci_results") for t in tests.values()):
+        n = {k: sum(1 for t in tests.values() if t.get("result") == k) for k in ("passed", "failed", "error", "skipped", "not_in_run", "no_ci_results")}
+        L.append("**Test evidence (CI):** " + ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in n.items() if v) + ".")
+    recs = (report.get("test_recommendations") or {}).get("tests") or []
+    if recs:
+        L += ["", "<details><summary>Recommended tests</summary>", ""]
+        for r in recs[:15]:
+            L.append(f"- `{_md(r['test'])}` ({_md(r['repo'])}) - {_md(r['why'][0])}{_result({'result': r.get('last_result')})}")
+        L += ["", f"_{report['test_recommendations']['note']}_", "", "</details>", ""]
+    rt = [f for f in report.get("findings", []) if f.get("runtime")]
+    if rt:
+        L.append(f"**Runtime:** {len(rt)} finding(s) confirmed by calls observed in " +
+                 ", ".join(sorted({e for f in rt for e in f["runtime"]["environments"]}) or ["telemetry"]) + ".")
+    dep = report.get("deployments")
+    if dep:
+        drift = [f"{r} in {env} ({d['revision'][:7]})" for r, envs in dep["by_repo"].items() for env, d in envs.items() if not d["is_analysed_revision"]
+                 and r != report["change"]["repository"]]
+        if drift:
+            L.append("**Deployed consumers differ from the analysed revision:** " + "; ".join(drift[:6]) + ("; ..." if len(drift) > 6 else "") + ".")
+    return L + ([""] if L else [])
+
+
+def _test_scope_md(ts: dict | None, max_rows: int, report: dict) -> list:
     """The tester's view first: which entry points to test because of this change, and the rule gaps and consistency checks it touches."""
     if not ts or not (ts["entry_points"] or ts["code_without_entry_point"] or ts["rule_gaps"]):
         return []
@@ -210,7 +287,7 @@ def _test_scope_md(ts: dict | None, max_rows: int) -> list:
             name = f"{e['label']} (`{_md(e['entry_point'])}`)" if e.get("label") else f"`{_md(e['entry_point'])}`"
             if e["type"] != "endpoint":
                 name += " - no analysed API endpoint"
-            tests = ", ".join(f"`{_md(t['name'])}`" for t in e["tests"][:3]) + (" ..." if len(e["tests"]) > 3 else "") or "none found"
+            tests = ", ".join(f"`{_md(t['name'])}`{_result(t)}" for t in e["tests"][:3]) + (" ..." if len(e["tests"]) > 3 else "") or "none found"
             ev = "" if e["evidence_status"] in ("source_confirmed", "contract_confirmed", "corroborated") else f" ({e['evidence_status']})"
             L.append(f"| {name} | {_md(e['service'])} | {EFFECT_TEXT[e['change_effect']]}{ev} | {tests} |")
         if len(rows) > max_rows:
@@ -222,6 +299,7 @@ def _test_scope_md(ts: dict | None, max_rows: int) -> list:
         L.append(f"- **Consistency check** - {_md(c['check'])}")
     if ts["rule_gaps"] or ts["consistency_checks"]:
         L.append("")
+    L += _evidence_md(report)
     if (ts.get("redacted") or {}).get("items"):
         L += [f"_{ts['redacted']['note']}_", ""]
     return L

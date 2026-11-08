@@ -1,6 +1,6 @@
 """Support script (not production code): run TIA locally on an embedded PostgreSQL.
 
-    python tools/run_dev.py [--data demo-data/dev] [--port 8080] [--demo] [--landscape payments|lanes]
+    python tools/run_dev.py [--data demo-data/dev] [--port 8080] [--demo] [--landscape payments|lanes|polyglot]
 
 Creates/starts a PostgreSQL under --data, applies migrations, ensures the tenant "dev", then serves the app
 (local paths enabled, single tenant, no authentication - development only). --demo also registers the 6-repo
@@ -42,7 +42,7 @@ def main():
     ap.add_argument("--data", default=str(ROOT / "demo-data" / "dev"))
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--demo", action="store_true")
-    ap.add_argument("--landscape", choices=["payments", "lanes"], default="payments")
+    ap.add_argument("--landscape", choices=["payments", "lanes", "polyglot"], default="payments")
     a = ap.parse_args()
     data = Path(a.data); data.mkdir(parents=True, exist_ok=True)
     srv = pgserver.get_server(str(data / "pg"), cleanup_mode="stop")
@@ -55,9 +55,11 @@ def main():
     if a.demo:
         if a.landscape == "lanes":
             from fixtures.build_lanes_fixture import build
+        elif a.landscape == "polyglot":
+            from fixtures.build_polyglot_fixture import build
         else:
             from fixtures.build_fixture import build
-        land = data / ("landscape" if a.landscape == "payments" else "landscape-lanes")
+        land = data / {"payments": "landscape", "lanes": "landscape-lanes", "polyglot": "landscape-polyglot"}[a.landscape]
         fx = build(str(land)) if not land.exists() else {"paths": {p.name: str(p) for p in land.iterdir() if (p / ".git").exists()}}
         svc = RepoService(Store(db, tenant, audit_key), str(data / "repos"), allow_local=True)
         for name, path in fx["paths"].items():

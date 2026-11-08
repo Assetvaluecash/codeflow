@@ -27,6 +27,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 from . import github, jwtverify
 from .webhooks import ScmConfig, github_full_name
+from . import airgap
 
 REFRESH_BEFORE = 300.0
 
@@ -152,7 +153,7 @@ class GitHubApp:
     def _default_oauth_post(self, url: str, form: dict) -> dict:
         req = urllib.request.Request(url, method="POST", data=urllib.parse.urlencode(form).encode(),
                                      headers={"Accept": "application/json", "User-Agent": "tia"})
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(airgap.checked(req, "githubapp"), timeout=20) as r:
             return json.loads(r.read() or b"{}")
 
     def user_sees_installation(self, oauth_code: str, installation_id, account: Optional[str] = None, account_type: str = "Organization") -> bool:

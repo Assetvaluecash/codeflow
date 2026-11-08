@@ -26,7 +26,8 @@ def git(cwd, *a):
     ("https://acme.visualstudio.com/proj/_git/pay", "ado"),
     ("https://tfs.bank.local/tfs/Col/proj/_git/pay", "ado"),
     ("git@github.com:acme/pay.git", "github"),
-    ("https://gitlab.example.com/acme/pay.git", "git")])
+    ("https://gitlab.example.com/acme/pay.git", "gitlab"), ("https://bitbucket.org/acme/pay.git", "bitbucket"),
+    ("https://git.bank.example/acme/pay.git", "git")])
 def test_detect_provider(url, prov):
     assert R.detect_provider(url) == prov
 

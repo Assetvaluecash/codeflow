@@ -1,0 +1,5795 @@
+{
+ "components": {
+  "schemas": {
+   "AccessIn": {
+    "properties": {
+     "grants": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Grants"
+     },
+     "mode": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mode"
+     }
+    },
+    "title": "AccessIn",
+    "type": "object"
+   },
+   "AckIn": {
+    "properties": {
+     "comment": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Comment"
+     },
+     "team": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Team",
+      "type": "string"
+     }
+    },
+    "required": [
+     "team"
+    ],
+    "title": "AckIn",
+    "type": "object"
+   },
+   "AnalysisIn": {
+    "properties": {
+     "base": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Base"
+     },
+     "change_record": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Change Record"
+     },
+     "head": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Head"
+     },
+     "max_depth": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Depth"
+     },
+     "max_results": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Results"
+     },
+     "pr": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pr"
+     },
+     "repos": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Repos"
+     },
+     "revisions": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "default": {},
+      "title": "Revisions",
+      "type": "object"
+     },
+     "target": {
+      "title": "Target",
+      "type": "string"
+     },
+     "token": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Token"
+     }
+    },
+    "required": [
+     "target"
+    ],
+    "title": "AnalysisIn",
+    "type": "object"
+   },
+   "ApprovalIn": {
+    "properties": {
+     "comment": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Comment"
+     },
+     "decision": {
+      "pattern": "^(approve|reject)$",
+      "title": "Decision",
+      "type": "string"
+     },
+     "owner": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Owner",
+      "type": "string"
+     }
+    },
+    "required": [
+     "owner",
+     "decision"
+    ],
+    "title": "ApprovalIn",
+    "type": "object"
+   },
+   "ChangeRecordIn": {
+    "properties": {
+     "change_record": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Change Record"
+     }
+    },
+    "title": "ChangeRecordIn",
+    "type": "object"
+   },
+   "ChunkItem": {
+    "additionalProperties": false,
+    "properties": {
+     "block_id": {
+      "title": "Block Id",
+      "type": "string"
+     },
+     "block_index": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Block Index"
+     },
+     "block_type": {
+      "title": "Block Type",
+      "type": "string"
+     },
+     "category": {
+      "title": "Category",
+      "type": "string"
+     },
+     "domain": {
+      "title": "Domain",
+      "type": "string"
+     },
+     "extracted_fields": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Extracted Fields"
+     },
+     "extracted_knowledge": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Extracted Knowledge"
+     },
+     "kg_node_type": {
+      "title": "Kg Node Type",
+      "type": "string"
+     },
+     "page_number": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Page Number"
+     },
+     "score": {
+      "title": "Score",
+      "type": "number"
+     },
+     "source_file": {
+      "title": "Source File",
+      "type": "string"
+     },
+     "text": {
+      "title": "Text",
+      "type": "string"
+     },
+     "weaviate_uuid": {
+      "title": "Weaviate Uuid",
+      "type": "string"
+     }
+    },
+    "required": [
+     "text",
+     "source_file",
+     "category",
+     "score",
+     "weaviate_uuid",
+     "block_id",
+     "page_number",
+     "block_index",
+     "block_type",
+     "kg_node_type",
+     "domain",
+     "extracted_fields",
+     "extracted_knowledge"
+    ],
+    "title": "ChunkItem",
+    "type": "object"
+   },
+   "ConfigIn": {
+    "properties": {
+     "comment": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Comment"
+     },
+     "config": {
+      "additionalProperties": true,
+      "title": "Config",
+      "type": "object"
+     }
+    },
+    "required": [
+     "config"
+    ],
+    "title": "ConfigIn",
+    "type": "object"
+   },
+   "DetectedDomain": {
+    "additionalProperties": false,
+    "properties": {
+     "confidence": {
+      "title": "Confidence",
+      "type": "number"
+     },
+     "domain": {
+      "title": "Domain",
+      "type": "string"
+     }
+    },
+    "required": [
+     "domain",
+     "confidence"
+    ],
+    "title": "DetectedDomain",
+    "type": "object"
+   },
+   "DiscoverIn": {
+    "properties": {
+     "api_base": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Api Base"
+     },
+     "ingest": {
+      "default": true,
+      "title": "Ingest",
+      "type": "boolean"
+     },
+     "names": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Names"
+     },
+     "org": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Org"
+     },
+     "project": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Project"
+     },
+     "provider": {
+      "title": "Provider",
+      "type": "string"
+     },
+     "token": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Token"
+     }
+    },
+    "required": [
+     "provider"
+    ],
+    "title": "DiscoverIn",
+    "type": "object"
+   },
+   "EntityRef": {
+    "additionalProperties": false,
+    "properties": {
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "type"
+    ],
+    "title": "EntityRef",
+    "type": "object"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "title": "Detail",
+      "type": "array"
+     }
+    },
+    "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "IdpIn": {
+    "properties": {
+     "client_secret": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Client Secret"
+     },
+     "client_secret_ref": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Client Secret Ref"
+     },
+     "config": {
+      "additionalProperties": true,
+      "title": "Config",
+      "type": "object"
+     },
+     "enabled": {
+      "default": true,
+      "title": "Enabled",
+      "type": "boolean"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "protocol": {
+      "default": "oidc",
+      "title": "Protocol",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "config"
+    ],
+    "title": "IdpIn",
+    "type": "object"
+   },
+   "InstallationIn": {
+    "properties": {
+     "code": {
+      "title": "Code",
+      "type": "string"
+     },
+     "installation_id": {
+      "title": "Installation Id",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "installation_id",
+     "code"
+    ],
+    "title": "InstallationIn",
+    "type": "object"
+   },
+   "PathItem": {
+    "additionalProperties": false,
+    "properties": {
+     "from_entity": {
+      "$ref": "#/components/schemas/EntityRef"
+     },
+     "path_text": {
+      "title": "Path Text",
+      "type": "string"
+     },
+     "relationship_type": {
+      "title": "Relationship Type",
+      "type": "string"
+     },
+     "score": {
+      "title": "Score",
+      "type": "number"
+     },
+     "source_block_id": {
+      "title": "Source Block Id",
+      "type": "string"
+     },
+     "source_evidence": {
+      "title": "Source Evidence",
+      "type": "string"
+     },
+     "source_file": {
+      "title": "Source File",
+      "type": "string"
+     },
+     "source_page": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Source Page"
+     },
+     "to_entity": {
+      "$ref": "#/components/schemas/EntityRef"
+     }
+    },
+    "required": [
+     "path_text",
+     "score",
+     "from_entity",
+     "relationship_type",
+     "to_entity",
+     "source_block_id",
+     "source_file",
+     "source_page",
+     "source_evidence"
+    ],
+    "title": "PathItem",
+    "type": "object"
+   },
+   "PublishIn": {
+    "properties": {
+     "check_run": {
+      "default": true,
+      "title": "Check Run",
+      "type": "boolean"
+     },
+     "comment": {
+      "default": true,
+      "title": "Comment",
+      "type": "boolean"
+     },
+     "head_sha": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Head Sha"
+     },
+     "pr": {
+      "title": "Pr",
+      "type": "integer"
+     },
+     "repository": {
+      "title": "Repository",
+      "type": "string"
+     }
+    },
+    "required": [
+     "repository",
+     "pr"
+    ],
+    "title": "PublishIn",
+    "type": "object"
+   },
+   "QueryRequest": {
+    "additionalProperties": false,
+    "properties": {
+     "analysis_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Analysis Id"
+     },
+     "domain": {
+      "default": "",
+      "title": "Domain",
+      "type": "string"
+     },
+     "intent": {
+      "default": "software_tia",
+      "title": "Intent",
+      "type": "string"
+     },
+     "pull_request": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pull Request"
+     },
+     "query": {
+      "default": "",
+      "title": "Query",
+      "type": "string"
+     },
+     "repository": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Repository"
+     },
+     "revision": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Revision"
+     },
+     "top_k_graph": {
+      "default": 10,
+      "maximum": 100.0,
+      "minimum": 1.0,
+      "title": "Top K Graph",
+      "type": "integer"
+     },
+     "top_k_semantic": {
+      "default": 10,
+      "maximum": 100.0,
+      "minimum": 1.0,
+      "title": "Top K Semantic",
+      "type": "integer"
+     }
+    },
+    "title": "QueryRequest",
+    "type": "object"
+   },
+   "QueryResponse": {
+    "additionalProperties": false,
+    "properties": {
+     "chunks": {
+      "items": {
+       "$ref": "#/components/schemas/ChunkItem"
+      },
+      "title": "Chunks",
+      "type": "array"
+     },
+     "detected_domains": {
+      "items": {
+       "$ref": "#/components/schemas/DetectedDomain"
+      },
+      "title": "Detected Domains",
+      "type": "array"
+     },
+     "domain": {
+      "title": "Domain",
+      "type": "string"
+     },
+     "metadata": {
+      "$ref": "#/components/schemas/RetrievalMetadata"
+     },
+     "paths": {
+      "items": {
+       "$ref": "#/components/schemas/PathItem"
+      },
+      "title": "Paths",
+      "type": "array"
+     },
+     "query": {
+      "title": "Query",
+      "type": "string"
+     },
+     "reranked_chunks": {
+      "items": {
+       "$ref": "#/components/schemas/ChunkItem"
+      },
+      "title": "Reranked Chunks",
+      "type": "array"
+     },
+     "reranked_paths": {
+      "items": {
+       "$ref": "#/components/schemas/PathItem"
+      },
+      "title": "Reranked Paths",
+      "type": "array"
+     }
+    },
+    "required": [
+     "query",
+     "domain",
+     "detected_domains",
+     "chunks",
+     "reranked_chunks",
+     "paths",
+     "reranked_paths",
+     "metadata"
+    ],
+    "title": "QueryResponse",
+    "type": "object"
+   },
+   "RepoIn": {
+    "properties": {
+     "branch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Branch"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Path"
+     },
+     "token": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Token"
+     },
+     "url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Url"
+     }
+    },
+    "title": "RepoIn",
+    "type": "object"
+   },
+   "RetrievalMetadata": {
+    "additionalProperties": false,
+    "properties": {
+     "chunks_considered": {
+      "title": "Chunks Considered",
+      "type": "integer"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Errors",
+      "type": "array"
+     },
+     "intent": {
+      "title": "Intent",
+      "type": "string"
+     },
+     "latency_ms": {
+      "title": "Latency Ms",
+      "type": "number"
+     },
+     "max_depth": {
+      "title": "Max Depth",
+      "type": "integer"
+     },
+     "paths_considered": {
+      "title": "Paths Considered",
+      "type": "integer"
+     },
+     "pattern": {
+      "title": "Pattern",
+      "type": "string"
+     }
+    },
+    "required": [
+     "intent",
+     "pattern",
+     "max_depth",
+     "latency_ms",
+     "chunks_considered",
+     "paths_considered",
+     "errors"
+    ],
+    "title": "RetrievalMetadata",
+    "type": "object"
+   },
+   "SyncIn": {
+    "properties": {
+     "token": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Token"
+     }
+    },
+    "title": "SyncIn",
+    "type": "object"
+   },
+   "TestCaseIn": {
+    "properties": {
+     "entry_point": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Entry Point",
+      "type": "string"
+     },
+     "expected": {
+      "default": "",
+      "maxLength": 5000,
+      "title": "Expected",
+      "type": "string"
+     },
+     "id": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Id"
+     },
+     "steps": {
+      "default": "",
+      "maxLength": 20000,
+      "title": "Steps",
+      "type": "string"
+     },
+     "title": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Title",
+      "type": "string"
+     }
+    },
+    "title": "TestCaseIn",
+    "type": "object"
+   },
+   "TokenIn": {
+    "properties": {
+     "expires_in_days": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": 90,
+      "title": "Expires In Days"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "repos": {
+      "default": "*",
+      "title": "Repos"
+     },
+     "roles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Roles",
+      "type": "array"
+     }
+    },
+    "required": [
+     "name",
+     "roles"
+    ],
+    "title": "TokenIn",
+    "type": "object"
+   },
+   "UploadIn": {
+    "properties": {
+     "name": {
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "title": "UploadIn",
+    "type": "object"
+   },
+   "UserIn": {
+    "properties": {
+     "disabled": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Disabled"
+     },
+     "roles": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Roles"
+     },
+     "scm_logins": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Scm Logins"
+     }
+    },
+    "title": "UserIn",
+    "type": "object"
+   },
+   "ValidationError": {
+    "properties": {
+     "ctx": {
+      "title": "Context",
+      "type": "object"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "title": "Location",
+      "type": "array"
+     },
+     "msg": {
+      "title": "Message",
+      "type": "string"
+     },
+     "type": {
+      "title": "Error Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError",
+    "type": "object"
+   },
+   "VerdictIn": {
+    "properties": {
+     "comment": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Comment"
+     },
+     "finding_id": {
+      "pattern": "^F\\d{1,6}$",
+      "title": "Finding Id",
+      "type": "string"
+     },
+     "verdict": {
+      "pattern": "^(confirmed|false_positive|irrelevant)$",
+      "title": "Verdict",
+      "type": "string"
+     }
+    },
+    "required": [
+     "finding_id",
+     "verdict"
+    ],
+    "title": "VerdictIn",
+    "type": "object"
+   }
+  },
+  "securitySchemes": {
+   "bearer": {
+    "scheme": "bearer",
+    "type": "http"
+   }
+  }
+ },
+ "info": {
+  "description": "Generated by tools/gen_docs.py from the application's route table. Authenticate with a service token: Authorization: Bearer <token>. Each operation's x-tia-permission names the permission it needs.",
+  "title": "TIA - Technical Impact Analysis API",
+  "version": "1.0.0"
+ },
+ "openapi": "3.1.0",
+ "paths": {
+  "/api/v1/admin/github/installations": {
+   "get": {
+    "operationId": "installations_list_api_v1_admin_github_installations_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Installations List",
+    "x-tia-permission": "admin"
+   },
+   "post": {
+    "description": "Link a GitHub App installation to this organisation. The caller must prove, through GitHub's own user authorisation, that they\ncan see the installation: knowing its id is not enough.",
+    "operationId": "installations_link_api_v1_admin_github_installations_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/InstallationIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Installations Link",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/github/installations/{iid}": {
+   "delete": {
+    "operationId": "installations_unlink_api_v1_admin_github_installations__iid__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "iid",
+      "required": true,
+      "schema": {
+       "title": "Iid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Installations Unlink",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/idps": {
+   "get": {
+    "operationId": "idps_list_api_v1_admin_idps_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Idps List",
+    "x-tia-permission": "admin"
+   },
+   "post": {
+    "operationId": "idps_create_api_v1_admin_idps_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/IdpIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Idps Create",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/idps/{iid}": {
+   "delete": {
+    "operationId": "idps_delete_api_v1_admin_idps__iid__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "iid",
+      "required": true,
+      "schema": {
+       "title": "Iid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Idps Delete",
+    "x-tia-permission": "admin"
+   },
+   "put": {
+    "operationId": "idps_update_api_v1_admin_idps__iid__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "iid",
+      "required": true,
+      "schema": {
+       "title": "Iid",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/IdpIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Idps Update",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/repo-access": {
+   "get": {
+    "description": "How every repository is governed, who is granted, and how fresh the mirror of the source-code host's permissions is.",
+    "operationId": "repo_access_list_api_v1_admin_repo_access_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Repo Access List",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/repo-access/sync": {
+   "post": {
+    "description": "Refresh the mirror of who the source-code host says can read each hosted repository. Needs a token with push access to them.",
+    "operationId": "repo_access_sync_api_v1_admin_repo_access_sync_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Repo Access Sync",
+    "x-tia-permission": "access_sync"
+   }
+  },
+  "/api/v1/admin/repo-access/{name}": {
+   "put": {
+    "operationId": "repo_access_set_api_v1_admin_repo_access__name__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AccessIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Repo Access Set",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/sessions": {
+   "get": {
+    "operationId": "sessions_list_api_v1_admin_sessions_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Sessions List",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/sessions/{sid}": {
+   "delete": {
+    "operationId": "sessions_revoke_api_v1_admin_sessions__sid__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "sid",
+      "required": true,
+      "schema": {
+       "title": "Sid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Sessions Revoke",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/tokens": {
+   "get": {
+    "operationId": "tokens_list_api_v1_admin_tokens_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Tokens List",
+    "x-tia-permission": "admin"
+   },
+   "post": {
+    "operationId": "tokens_create_api_v1_admin_tokens_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TokenIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Tokens Create",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/tokens/{tid}": {
+   "delete": {
+    "operationId": "tokens_revoke_api_v1_admin_tokens__tid__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tid",
+      "required": true,
+      "schema": {
+       "title": "Tid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Tokens Revoke",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/users": {
+   "get": {
+    "operationId": "users_list_api_v1_admin_users_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Users List",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/admin/users/{uid}": {
+   "put": {
+    "operationId": "users_update_api_v1_admin_users__uid__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "uid",
+      "required": true,
+      "schema": {
+       "title": "Uid",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UserIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Users Update",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/audit": {
+   "get": {
+    "operationId": "audit_api_v1_audit_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 100,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Audit",
+    "x-tia-permission": "audit_read"
+   }
+  },
+  "/api/v1/audit/report": {
+   "get": {
+    "description": "Who did what in a period, by event and by actor (auditors).",
+    "operationId": "audit_report_route_api_v1_audit_report_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "start",
+      "required": true,
+      "schema": {
+       "title": "Start",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "end",
+      "required": true,
+      "schema": {
+       "title": "End",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Audit Report Route",
+    "x-tia-permission": "audit_read"
+   }
+  },
+  "/api/v1/audit/verify": {
+   "get": {
+    "operationId": "audit_verify_api_v1_audit_verify_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Audit Verify",
+    "x-tia-permission": "audit_read"
+   }
+  },
+  "/api/v1/automation/api": {
+   "get": {
+    "description": "Every endpoint with its inputs (mandatory, multi-valued, allowed values, limits), generated valid and invalid values, a test\nmatrix with expected outcomes, and the error statuses its handler answers with.",
+    "operationId": "automation_api_api_v1_automation_api_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Repos"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Automation Api",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/automation/ui": {
+   "get": {
+    "description": "Every page (route) with its elements: a unique locator for each, mandatory flags, input rules, dropdown values, and the APIs\nthe page calls.",
+    "operationId": "automation_ui_api_v1_automation_ui_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Repos"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Automation Ui",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/calibration": {
+   "get": {
+    "description": "FR-044: per-rule precision from reviewer verdicts and incident outcomes.",
+    "operationId": "calibration_report_api_v1_calibration_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "since",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Since"
+      }
+     },
+     {
+      "in": "query",
+      "name": "until",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Until"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Calibration Report",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/config": {
+   "get": {
+    "operationId": "config_api_v1_config_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [],
+    "summary": "Config",
+    "x-tia-permission": "public"
+   }
+  },
+  "/api/v1/coverage": {
+   "get": {
+    "description": "The technical aspects of every entry point and page, and which automated tests and written test cases address each.",
+    "operationId": "coverage_api_v1_coverage_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Repos"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Coverage",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/coverage/test-case": {
+   "post": {
+    "description": "One test case as a query: the entry points it addresses, which of their technical aspects it covers and which it misses.",
+    "operationId": "coverage_test_case_api_v1_coverage_test_case_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Repos"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TestCaseIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Coverage Test Case",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/environments": {
+   "get": {
+    "description": "FR-029: per repository and environment, the revision deployed; per environment, the runtime observations held.",
+    "operationId": "environments_api_v1_environments_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Environments",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/environments/at": {
+   "get": {
+    "description": "FR-011: which revision of each repository was running in each environment at a point in time (from deployment records).",
+    "operationId": "environments_at_api_v1_environments_at_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "at",
+      "required": true,
+      "schema": {
+       "title": "At",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "repo",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Repo"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Environments At",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/evidence": {
+   "get": {
+    "operationId": "evidence_list_api_v1_evidence_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "kind",
+      "required": true,
+      "schema": {
+       "title": "Kind",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "repo",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Repo"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Evidence List",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/evidence-snapshots/{sid}": {
+   "get": {
+    "operationId": "snapshot_api_v1_evidence_snapshots__sid__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "sid",
+      "required": true,
+      "schema": {
+       "title": "Sid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Snapshot",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/evidence/coverage": {
+   "post": {
+    "description": "Coverage of one run (Cobertura XML, JaCoCo XML, or coverage.py JSON with --show-contexts for per-test execution).",
+    "operationId": "evidence_coverage_api_v1_evidence_coverage_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "repo",
+      "required": true,
+      "schema": {
+       "title": "Repo",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "revision",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Revision"
+      }
+     },
+     {
+      "in": "query",
+      "name": "format",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Format"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Evidence Coverage",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/evidence/deployments": {
+   "post": {
+    "description": "Deployments: [{repo or service, environment, revision, artifact, deployed_at}].",
+    "operationId": "evidence_deployments_api_v1_evidence_deployments_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "source",
+      "required": false,
+      "schema": {
+       "default": "pipeline",
+       "title": "Source",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Evidence Deployments",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/evidence/runtime": {
+   "post": {
+    "description": "Observed service-to-service calls: OpenTelemetry traces (OTLP/JSON) or pre-aggregated edges. One record per observed edge.",
+    "operationId": "evidence_runtime_api_v1_evidence_runtime_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "format",
+      "required": false,
+      "schema": {
+       "default": "otlp",
+       "title": "Format",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "source",
+      "required": false,
+      "schema": {
+       "default": "telemetry",
+       "title": "Source",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Evidence Runtime",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/evidence/test-results": {
+   "post": {
+    "description": "CI test results for one run of a repository (JUnit XML, or JSON: pytest-json-report or a list of {name, classname, result}).",
+    "operationId": "evidence_tests_api_v1_evidence_test_results_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "repo",
+      "required": true,
+      "schema": {
+       "title": "Repo",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "revision",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Revision"
+      }
+     },
+     {
+      "in": "query",
+      "name": "build_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Build Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "environment",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Environment"
+      }
+     },
+     {
+      "in": "query",
+      "name": "report_ref",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Report Ref"
+      }
+     },
+     {
+      "in": "query",
+      "name": "format",
+      "required": false,
+      "schema": {
+       "default": "junit",
+       "title": "Format",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Evidence Tests",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/evidence/{rid}": {
+   "delete": {
+    "operationId": "evidence_delete_api_v1_evidence__rid__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rid",
+      "required": true,
+      "schema": {
+       "title": "Rid",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Evidence Delete",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/graph": {
+   "get": {
+    "operationId": "graph_api_v1_graph_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "level",
+      "required": false,
+      "schema": {
+       "default": "service",
+       "title": "Level",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Repos"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Q"
+      }
+     },
+     {
+      "in": "query",
+      "name": "focus",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Focus"
+      }
+     },
+     {
+      "in": "query",
+      "name": "depth",
+      "required": false,
+      "schema": {
+       "default": 1,
+       "title": "Depth",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 600,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Graph",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/graph/relationships": {
+   "get": {
+    "description": "Cross-repository relationships with their state: current, or stale with the reason (AC-011).",
+    "operationId": "graph_relationships_api_v1_graph_relationships_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "state",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "State"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Graph Relationships",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/graph/rescan": {
+   "post": {
+    "description": "Full rescan of every repository (ignores caches), with drift detection against the incremental result.",
+    "operationId": "graph_rescan_api_v1_graph_rescan_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Graph Rescan",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/graph/shared-components": {
+   "get": {
+    "description": "The landscape seen by a tester before any change: endpoints and functions that many entry points depend on (a change to them needs\nthe widest testing), and rules on a shared endpoint's data that some consumers apply and others do not. Confirmed relationships only.",
+    "operationId": "graph_shared_components_api_v1_graph_shared_components_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "min_entry_points",
+      "required": false,
+      "schema": {
+       "default": 2,
+       "title": "Min Entry Points",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 100,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Graph Shared Components",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/graph/stats": {
+   "get": {
+    "operationId": "graph_stats_api_v1_graph_stats_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Graph Stats",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/graph/versions": {
+   "get": {
+    "operationId": "graph_versions_api_v1_graph_versions_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Graph Versions",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/graph/versions/{gid}": {
+   "get": {
+    "operationId": "graph_version_api_v1_graph_versions__gid__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "gid",
+      "required": true,
+      "schema": {
+       "title": "Gid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Graph Version",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/health": {
+   "get": {
+    "operationId": "health_api_v1_health_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [],
+    "summary": "Health",
+    "x-tia-permission": "public"
+   }
+  },
+  "/api/v1/impact-analyses": {
+   "post": {
+    "description": "Synchronous by default. With ?async=true the analysis is queued and a job is returned (HTTP 202);\nqueued analyses never accept tokens (nothing secret is stored in the queue).",
+    "operationId": "create_api_v1_impact_analyses_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "async",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Async",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AnalysisIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create",
+    "x-tia-permission": "analyze"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}": {
+   "get": {
+    "operationId": "report_api_v1_impact_analyses__aid__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Report",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/acknowledgements": {
+   "post": {
+    "description": "An affected team acknowledges that it has seen the change (recorded with who and when).",
+    "operationId": "analysis_acknowledge_api_v1_impact_analyses__aid__acknowledgements_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AckIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Acknowledge",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/approvals": {
+   "post": {
+    "description": "An owning team's approval (or rejection) of a change that materially affects it.",
+    "operationId": "analysis_approval_api_v1_impact_analyses__aid__approvals_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ApprovalIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Approval",
+    "x-tia-permission": "analyze"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/change-record": {
+   "post": {
+    "description": "Attach the report summary and its link to a change record (the PR's change record when none is given). Nothing else is modified.",
+    "operationId": "analysis_change_record_api_v1_impact_analyses__aid__change_record_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChangeRecordIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Change Record",
+    "x-tia-permission": "analyze"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/comment": {
+   "get": {
+    "operationId": "comment_api_v1_impact_analyses__aid__comment_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "text/plain": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Comment",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/coordination": {
+   "get": {
+    "description": "FR-045: per affected team, the notification sent and the acknowledgement received.",
+    "operationId": "analysis_coordination_api_v1_impact_analyses__aid__coordination_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Coordination",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/evidence": {
+   "get": {
+    "description": "AC-015: the evidence snapshot and the exact evidence path behind every material finding.",
+    "operationId": "evidence_api_v1_impact_analyses__aid__evidence_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Evidence",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/findings": {
+   "get": {
+    "description": "PRD 9.3: the findings that match every filter given (comma-separated values are alternatives). reach: direct|transitive; kind:\ncontract|data|test|runtime|operational; issue: unresolved|stale|inferred.",
+    "operationId": "analysis_findings_api_v1_impact_analyses__aid__findings_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "severity",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Severity"
+      }
+     },
+     {
+      "in": "query",
+      "name": "service",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Service"
+      }
+     },
+     {
+      "in": "query",
+      "name": "reach",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Reach"
+      }
+     },
+     {
+      "in": "query",
+      "name": "kind",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Kind"
+      }
+     },
+     {
+      "in": "query",
+      "name": "evidence",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Evidence"
+      }
+     },
+     {
+      "in": "query",
+      "name": "environment",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Environment"
+      }
+     },
+     {
+      "in": "query",
+      "name": "policy",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Policy"
+      }
+     },
+     {
+      "in": "query",
+      "name": "issue",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Issue"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Findings",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/graph": {
+   "get": {
+    "operationId": "analysis_graph_api_v1_impact_analyses__aid__graph_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Graph",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/notifications": {
+   "post": {
+    "description": "Notify the owning teams of materially affected components (once per team; a failed delivery is retried).",
+    "operationId": "analysis_notify_api_v1_impact_analyses__aid__notifications_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Notify",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/paths": {
+   "get": {
+    "operationId": "paths_api_v1_impact_analyses__aid__paths_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Paths",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/policy": {
+   "get": {
+    "description": "The release-policy outcome of an analysis with the approvals recorded so far (the stored report is never changed).",
+    "operationId": "analysis_policy_api_v1_impact_analyses__aid__policy_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Policy",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/publish": {
+   "post": {
+    "description": "Post (or update in place) the advisory comment and check run for a stored analysis on a GitHub pull request.",
+    "operationId": "publish_api_v1_impact_analyses__aid__publish_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PublishIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Publish",
+    "x-tia-permission": "analyze"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/reproduce": {
+   "post": {
+    "description": "Re-run the analysis on its pinned snapshot; the result must be identical (AC-015).",
+    "operationId": "reproduce_analysis_api_v1_impact_analyses__aid__reproduce_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Reproduce Analysis",
+    "x-tia-permission": "analyze"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/unknowns": {
+   "get": {
+    "operationId": "unknowns_api_v1_impact_analyses__aid__unknowns_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Unknowns",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/verdicts": {
+   "post": {
+    "description": "A reviewer's verdict on one finding: confirmed, false_positive or irrelevant. The report is never changed.",
+    "operationId": "analysis_verdict_api_v1_impact_analyses__aid__verdicts_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/VerdictIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Analysis Verdict",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/incidents": {
+   "post": {
+    "description": "FR-031: an incident record {id, title, service or repo, environment, started_at, ended_at, severity, changes: [{repo, revision,\npull_request, change_record}]}.",
+    "operationId": "incident_ingest_api_v1_incidents_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "source",
+      "required": false,
+      "schema": {
+       "default": "itsm",
+       "title": "Source",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Incident Ingest",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/incidents/{iid}/investigation": {
+   "get": {
+    "description": "FR-032, AC-034: candidate changes with how each is associated (never a root cause).",
+    "operationId": "incident_investigation_api_v1_incidents__iid__investigation_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "iid",
+      "required": true,
+      "schema": {
+       "title": "Iid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "window_hours",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Window Hours"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Incident Investigation",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/incidents/{iid}/links": {
+   "post": {
+    "description": "A person's validated link between an incident and a change: {repo, revision, note}. Recorded with who and when.",
+    "operationId": "incident_link_api_v1_incidents__iid__links_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "iid",
+      "required": true,
+      "schema": {
+       "title": "Iid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Incident Link",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/jobs/{job_id}": {
+   "delete": {
+    "operationId": "job_cancel_api_v1_jobs__job_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "job_id",
+      "required": true,
+      "schema": {
+       "title": "Job Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Job Cancel",
+    "x-tia-permission": "analyze"
+   },
+   "get": {
+    "operationId": "job_status_api_v1_jobs__job_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "job_id",
+      "required": true,
+      "schema": {
+       "title": "Job Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Job Status",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/me": {
+   "get": {
+    "operationId": "api_me_api_v1_me_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Me",
+    "x-tia-permission": "authenticated"
+   }
+  },
+  "/api/v1/registry/import": {
+   "post": {
+    "description": "Owners and criticalities from the organisation's service catalog, saved as a new configuration version.",
+    "operationId": "registry_import_api_v1_registry_import_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "format",
+      "required": false,
+      "schema": {
+       "default": "backstage",
+       "title": "Format",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-actor",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Actor"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Registry Import",
+    "x-tia-permission": "config_write"
+   }
+  },
+  "/api/v1/releases": {
+   "get": {
+    "operationId": "release_list_api_v1_releases_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Release List",
+    "x-tia-permission": "read"
+   },
+   "post": {
+    "description": "A named release: {name, revisions: {repo: commit, tag or branch}, description}. The graph at exactly those revisions is built and kept.",
+    "operationId": "release_create_api_v1_releases_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Release Create",
+    "x-tia-permission": "evidence_write"
+   }
+  },
+  "/api/v1/releases/compare": {
+   "get": {
+    "description": "AC-033: dependencies introduced, removed and modified between two releases.",
+    "operationId": "release_compare_api_v1_releases_compare_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "base",
+      "required": true,
+      "schema": {
+       "title": "Base",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "head",
+      "required": true,
+      "schema": {
+       "title": "Head",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "cross_service_only",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Cross Service Only",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Release Compare",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/releases/{name}/consumers": {
+   "get": {
+    "description": "Who was known to depend on an endpoint, schema or topic in that release (component: a node id, or 'METHOD /path' of an endpoint).",
+    "operationId": "release_consumers_api_v1_releases__name__consumers_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "component",
+      "required": true,
+      "schema": {
+       "title": "Component",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Release Consumers",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/repositories": {
+   "get": {
+    "operationId": "list_repos_api_v1_repositories_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "List Repos",
+    "x-tia-permission": "read"
+   },
+   "post": {
+    "operationId": "add_repo_api_v1_repositories_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RepoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Add Repo",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/repositories/discover": {
+   "post": {
+    "operationId": "discover_api_v1_repositories_discover_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DiscoverIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Discover",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/repositories/{name}": {
+   "delete": {
+    "operationId": "delete_api_v1_repositories__name__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Delete",
+    "x-tia-permission": "repo_delete"
+   }
+  },
+  "/api/v1/repositories/{name}/revisions": {
+   "get": {
+    "operationId": "repo_revisions_api_v1_repositories__name__revisions_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Repo Revisions",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/repositories/{name}/sync": {
+   "post": {
+    "operationId": "sync_api_v1_repositories__name__sync_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SyncIn",
+        "default": {}
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Sync",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/repositories/{name}/upload": {
+   "put": {
+    "description": "One call for scripts: PUT the zip as the body; creates (or adds a revision to) the repository `name`.",
+    "operationId": "upload_zip_once_api_v1_repositories__name__upload_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "strip_root",
+      "required": false,
+      "schema": {
+       "default": "auto",
+       "title": "Strip Root",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upload Zip Once",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/tenant": {
+   "get": {
+    "description": "This tenant's own lifecycle status and storage use against its quota (approximate: row sizes plus workspace bytes).",
+    "operationId": "tenant_state_api_v1_tenant_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Tenant State",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/tenant/config": {
+   "get": {
+    "description": "The configuration in force (defaults filled in), the built-in defaults, and who set it.",
+    "operationId": "get_tenant_config_api_v1_tenant_config_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Get Tenant Config",
+    "x-tia-permission": "read"
+   },
+   "put": {
+    "description": "Save a new version (a no-op when identical to the current one). Invalid configurations are refused with every problem listed.",
+    "operationId": "put_tenant_config_api_v1_tenant_config_put",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-tia-actor",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Actor"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ConfigIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Put Tenant Config",
+    "x-tia-permission": "config_write"
+   }
+  },
+  "/api/v1/tenant/config/diff": {
+   "get": {
+    "description": "Setting-by-setting differences between two versions (0 = the built-in defaults).",
+    "operationId": "tenant_config_diff_api_v1_tenant_config_diff_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "from_version",
+      "required": true,
+      "schema": {
+       "title": "From Version",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "to_version",
+      "required": true,
+      "schema": {
+       "title": "To Version",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Tenant Config Diff",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/tenant/config/validate": {
+   "post": {
+    "description": "Dry run: every problem with a configuration, or what it would change. Saves nothing.",
+    "operationId": "validate_tenant_config_api_v1_tenant_config_validate_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ConfigIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Validate Tenant Config",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/tenant/config/versions": {
+   "get": {
+    "operationId": "tenant_config_versions_api_v1_tenant_config_versions_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Tenant Config Versions",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/tenant/config/versions/{n}": {
+   "get": {
+    "operationId": "tenant_config_version_api_v1_tenant_config_versions__n__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "n",
+      "required": true,
+      "schema": {
+       "title": "N",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Tenant Config Version",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/tenant/config/versions/{n}/restore": {
+   "post": {
+    "description": "Roll back by saving an old version's settings as a NEW version: history is never rewritten.",
+    "operationId": "tenant_config_restore_api_v1_tenant_config_versions__n__restore_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "n",
+      "required": true,
+      "schema": {
+       "title": "N",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-actor",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Actor"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Tenant Config Restore",
+    "x-tia-permission": "config_write"
+   }
+  },
+  "/api/v1/trends": {
+   "get": {
+    "description": "FR-043: descriptive change-risk figures per application or team and period (never probabilities).",
+    "operationId": "change_trends_api_v1_trends_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "group",
+      "required": false,
+      "schema": {
+       "default": "application",
+       "title": "Group",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "period",
+      "required": false,
+      "schema": {
+       "default": "month",
+       "title": "Period",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "since",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Since"
+      }
+     },
+     {
+      "in": "query",
+      "name": "until",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Until"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Change Trends",
+    "x-tia-permission": "read"
+   }
+  },
+  "/api/v1/uploads": {
+   "post": {
+    "operationId": "upload_start_api_v1_uploads_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UploadIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upload Start",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/uploads/{uid}": {
+   "delete": {
+    "operationId": "upload_cancel_api_v1_uploads__uid__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "uid",
+      "required": true,
+      "schema": {
+       "title": "Uid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upload Cancel",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/uploads/{uid}/archive": {
+   "put": {
+    "description": "The whole zip as the raw request body (streamed to disk, never held in memory).",
+    "operationId": "upload_archive_api_v1_uploads__uid__archive_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "uid",
+      "required": true,
+      "schema": {
+       "title": "Uid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "strip_root",
+      "required": false,
+      "schema": {
+       "default": "auto",
+       "title": "Strip Root",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upload Archive",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/uploads/{uid}/commit": {
+   "post": {
+    "operationId": "upload_commit_api_v1_uploads__uid__commit_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "uid",
+      "required": true,
+      "schema": {
+       "title": "Uid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upload Commit",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/uploads/{uid}/files": {
+   "post": {
+    "description": "A batch of folder files: parts named 'files' (and, in the same order, 'paths' with each relative path).",
+    "operationId": "upload_files_api_v1_uploads__uid__files_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "uid",
+      "required": true,
+      "schema": {
+       "title": "Uid",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Upload Files",
+    "x-tia-permission": "repo_write"
+   }
+  },
+  "/api/v1/usage": {
+   "get": {
+    "description": "PL-014: this organisation's metered usage and its plan (administrators).",
+    "operationId": "tenant_usage_api_v1_usage_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "month",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Month"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Tenant Usage",
+    "x-tia-permission": "admin"
+   }
+  },
+  "/api/v1/webhooks/ado": {
+   "post": {
+    "description": "Azure DevOps service hooks (pull request created / updated). Answers at once; the analysis is queued.",
+    "operationId": "ado_webhook_api_v1_webhooks_ado_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [],
+    "summary": "Ado Webhook",
+    "x-tia-permission": "public"
+   }
+  },
+  "/api/v1/webhooks/bitbucket": {
+   "post": {
+    "description": "Bitbucket Cloud and Data Center pull-request events (HMAC signature). Answers at once; the analysis is queued.",
+    "operationId": "bitbucket_webhook_api_v1_webhooks_bitbucket_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [],
+    "summary": "Bitbucket Webhook",
+    "x-tia-permission": "public"
+   }
+  },
+  "/api/v1/webhooks/github": {
+   "post": {
+    "description": "GitHub pull_request events. Returns quickly: verification and matching happen here, the work is queued.",
+    "operationId": "github_webhook_api_v1_webhooks_github_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-hub-signature-256",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Hub-Signature-256"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-github-event",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Github-Event"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-github-delivery",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Github-Delivery"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [],
+    "summary": "Github Webhook",
+    "x-tia-permission": "public"
+   }
+  },
+  "/api/v1/webhooks/gitlab": {
+   "post": {
+    "description": "GitLab merge request events (secret token). Answers at once; the analysis is queued.",
+    "operationId": "gitlab_webhook_api_v1_webhooks_gitlab_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [],
+    "summary": "Gitlab Webhook",
+    "x-tia-permission": "public"
+   }
+  },
+  "/auth/logout": {
+   "post": {
+    "operationId": "logout_auth_logout_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Logout",
+    "x-tia-permission": "authenticated"
+   }
+  },
+  "/mcp": {
+   "post": {
+    "operationId": "mcp_endpoint_mcp_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Mcp Endpoint",
+    "x-tia-permission": "read"
+   }
+  },
+  "/query/tia": {
+   "post": {
+    "description": "A finished Change Impact Report in Knowledge Fabric's QueryResponse shape. The analysis is named (analysis_id, or repository plus\npull_request/revision for the newest such report); the question text is never parsed and no analysis is started here.",
+    "operationId": "kf_query_query_tia_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/QueryRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/QueryResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Kf Query",
+    "x-tia-permission": "read"
+   }
+  }
+ },
+ "security": [
+  {
+   "bearer": []
+  }
+ ]
+}

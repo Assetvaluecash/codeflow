@@ -378,3 +378,91 @@ config mgmt (UC1-24); then accuracy harness (UC1-25), performance (UC1-26), secu
 - **Real-Chrome check** (puppeteer-core driving installed Chrome against `tools/run_dev.py --demo --landscape lanes`): **27/27 checks passed**, 0 console errors, 0 px horizontal overflow at 390 px. Screenshots in the session scratchpad `ui/shots/tester-*.png`.
 - **Tests:** new UI test `test_the_web_ui_shows_the_three_use_cases`. UI-related test files: 141 passed.
 - A dev data folder was damaged by temp clean-up (`pg_notify` missing); a fresh folder was used.
+
+## 2026-11-04 to 2026-11-06: "/goal complete the whole PRD" - Releases 2, 3 and 4 built
+Verification labels: **Verified (simulated)** = automated tests on real PostgreSQL + real git, external systems replaced by stand-ins.
+- **Release 2 fixes:** ITSM config round-trip; Kafka sends no longer reported as unresolved HTTP calls; changed event-schema files no longer double-counted as file-level changes.
+- **Release 3:**
+  - Releases and comparisons: `tia/temporal.py`, `/api/v1/releases*`.
+  - What ran where: `/api/v1/environments/at`.
+  - Incidents with labelled associations, never a root cause: `tia/incidents.py`, `/api/v1/incidents*`.
+  - Retention with audit anchors: `tia/retention.py`, migration 0017; the anchored chain still verifies and tampering is still detected.
+  - Encrypted tenant backup/restore/verify: `tia/backup.py`.
+  - Air-gapped mode: `tia/airgap.py`, a guard on every outbound path.
+  - Docs: OPERATIONS (HA/DR/RPO/RTO), COMPLIANCE (SOC 2 / ISO mapping).
+  - Public `docs/openapi.json` and a Python client: `sdk/python/tia_client`.
+  - Tests: `test_release3` (8), `test_airgap` (4), `test_sdk` (4).
+- **Release 4:**
+  - Adapter registry and SDK: `tia/adapters.py`, `docs/ADAPTER-SDK.md`.
+  - Language adapters: Go, C# (with Entity Framework), Kotlin, TypeScript/JavaScript. A polyglot landscape proves impact crosses all four languages (`test_adapters`, 12).
+  - SQL / stored-procedure lineage across 4 dialects, plus embedded SQL in any language: `tia/sqllineage.py` (`test_sql_lineage`, 28; AC-037).
+  - Event-stream lineage, multi-hop, with Kafka Streams, Spark and Kafka Connect: `tia/streams.py` (`test_streams`, 6).
+  - Calibration verdicts with per-rule precision (AC-038) and descriptive trends: `tia/calibration.py`.
+  - Team coordination (Slack, Teams, webhook, e-mail, ServiceNow task), acknowledgements and the `teams_acknowledged` policy rule: `tia/coordination.py` (`test_release4`, 6).
+  - GitLab and Bitbucket connectors (webhooks, MR/PR comment and status, permission mirror): `tia/scmhosts.py` (`test_scmhosts`, 8; AC-036).
+- **UI:**
+  - PRD 9.3 filters, served by `GET .../findings` (`tia/findingfilter.py`, `test_filters`, 20).
+  - New views: coordination and verdicts in the report; Releases/environments/incidents; Insights; admin usage, catalog import, evidence and environments.
+  - Real Chrome: **21/21**.
+  - axe-core WCAG 2.1 A+AA: **0 violations**, light and dark, on the web UI and the report page. Fixes: button contrast in dark mode, labels, focusable `<pre>`, select names.
+- **Graph store decision:** PostgreSQL only (`docs/GRAPH-STORE.md`, `tools/graphbench.py`). Traversal is 1-2 ms up to 1.2 M nodes; memory and load time set the limit near 1 M nodes.
+- **Tracker:** patch 22 brings it to 100/108 tasks completed.
+  - In progress: HA (no failover drill), SOC 2/ISO (no audit or penetration test), and the R2/R3/R4 gates.
+  - Not started (needs the user): the live GitHub App, the SaaS production environment, and the R1 gate.
+- **Still needs the user:**
+  - Revoke the GitHub PAT pasted earlier, and delete the `tia-sandbox-*` repositories.
+  - Real credentials for GitHub App, GitLab, Bitbucket, ServiceNow, KMS and SMTP for live trials.
+  - A cluster for HA, DR and the SaaS environment.
+- **Final full suite (2026-11-06): 1168 passed, 1 skipped, 0 failed (21 min).** The last runs before it found a real bug: the retention job writes its audit entry with admin rights, so `Store.audit` read another tenant's last sequence number and broke the purged tenant's chain. Fixed: every audit query in `tia/store.py` names its tenant. A regression test (another tenant with a longer chain) fails without the fix.
+
+## 2026-11-06 (later): Release 1 delivery items pushed as far as possible without the user's accounts
+- **Rate limiting** (`tia/ratelimit.py`, SECURITY T17):
+  - Token buckets per principal, per tenant and per client address; failed authentications are charged to the address.
+  - Starting analyses and pushing evidence cost more; refusals are 429 with Retry-After.
+  - On whenever authentication is required.
+  - Tests: `test_ratelimit` (4).
+- **Azure workload identity** for Key Vault in `tia/kms.py`, so pods need no client secret. Also fixed: the Azure access token was cached forever; it now renews before expiry.
+- **SaaS region as Terraform:** `deploy/terraform/azure`.
+  - AKS across 3 zones; PostgreSQL 16 with zone-redundant HA and private access; Key Vault HSM key; Azure Files; Front Door WAF with a rate limit; Log Analytics.
+  - NOT validated or applied: downloading Terraform was not permitted here, and there is no Azure subscription.
+- **GitHub App registration helper:** `tools/github_app.py` builds the manifest page and exchanges the one-time code for credentials (`test_github_app_setup`).
+- **Security scan:** `pip-audit` flagged only setuptools 65.5 (9 advisories). Now `>= 84.1` in the build system, the image and the venv; no known vulnerabilities.
+- **`docs/RELEASE-GATES.md`:** per-gate evidence and gaps, plus a sign-off table.
+  - Functional and Documentation: met (simulated for external systems).
+  - Accuracy and Performance for R2-R4: not met (no labelled reference landscape, no rerun benchmark).
+  - Security: partly met (no independent review or penetration test).
+  - Operability: not met (image never built, because the Docker engine was not running; chart and Terraform never applied).
+- **Tracker** (patch 23): 100 completed, 8 in progress, 0 not started.
+- **Full suite: 1175 passed, 1 skipped, 0 failed.**
+
+## 2026-11-08: operability on Docker, performance with R2-R4 on, PRD v3.2
+- **Docker** (Docker Desktop started on this machine):
+  - Image `tia:1.0.0` built (480 MB).
+  - Compose run end to end: 17 migrations; tenant created; API and worker ready; an authenticated upload of 6 repositories plus a breaking-change analysis (5 findings); audit chain verified; upgrade re-run (nothing to apply); encrypted backup restored into a second database and verified (26 tables).
+  - Fixed by the first real run:
+    - Compose could not start: TIA refuses a non-TLS database. The database is now on an internal-only network, with `TIA_ALLOW_INSECURE_DB` for that hop only.
+    - The admin CLIs (`tia.backup`, `tia.retention`, `tia.tenants`) ignored the `_FILE` secret convention.
+    - A broken Dockerfile line.
+  - Helm chart renders for all value sets. Never installed on Kubernetes.
+- **Performance with R2-R4 switched on** (`benchmark.py --enterprise`): 500 repositories, 3,000 evidence records, enforcing policy, owners and notification. PR P95 8.9 s, report P95 0.19 s, 50-PR burst P95 147.5 s: all PRD 12 targets met (PERFORMANCE.md).
+- **PRD v3.2:** tester persona; TIA as Lane 0 of Pulse; FR-046/047/048 (UC-1/2/3); AC-042/043/044. PRD.pdf not regenerated.
+- **RELEASE-GATES.md updated:**
+  - Performance R2-R4: met at the size measured.
+  - Operability: partly met (Compose verified; Kubernetes and Azure not).
+  - Accuracy R2-R4: still not met (needs a labelled real-code landscape).
+  - Security: partly met (no independent review or penetration test).
+- **Tracker:** patch 24.
+- **Full suite: 1175 passed, 1 skipped, 0 failed.**
+
+## 2026-11-08 (later): Helm chart on Kubernetes
+The user turned on Kubernetes in Docker Desktop. The kind cluster could not see locally built images; after switching to kubeadm it could.
+- **Verified on one node** (Kubernetes 1.36):
+  - chart installed: migration pre-install hook, 2 API and 2 worker replicas ready;
+  - tenant created from a pod;
+  - `helm upgrade` rolled the pods and re-ran the hook;
+  - through the service: `/readyz` ready, upload of 6 repositories plus an analysis (5 findings), audit chain verified;
+  - deleted API and worker pods were replaced with 0 failed health checks.
+- **Fixed:** the chart's migration job ignored `extraEnv` and had no `imagePullPolicy`.
+- **Note:** on Docker Desktop's 2-CPU VM, CPU requests had to be lowered to fit 2 workers.
+- **Not verified:** multi-node cluster, node failure, ReadWriteMany workspace, ingress, network-policy enforcement, Azure Terraform (Terraform not installed).
+- The test release and namespace were removed afterwards.

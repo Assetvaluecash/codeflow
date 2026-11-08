@@ -1,0 +1,23 @@
+# Dedicated SaaS deployment (one customer, isolated infrastructure): helm install tia ./deploy/helm/tia -f values-dedicated.yaml
+# The SAME image and chart as multi-tenant SaaS; the customer's organisation is the only tenant, and its database, workspace volume,
+# keys and network are its own. Pair it with a values-region-*.yaml file to pin it to the customer's region (PRD PL-015).
+publicUrl: https://acme-bank.tia.example.com
+defaultTenantId: "00000000-0000-0000-0000-000000000000"      # the customer's tenant id (python -m tia.tenants create ...)
+
+existingSecret: acme-bank-tia-secrets                         # app/worker DSNs point at the customer's own PostgreSQL
+
+extraEnv:
+  TIA_AUTH_REQUIRED: "true"
+  TIA_REGION: eu                                              # this deployment serves region eu only
+
+api:
+  replicas: 2
+worker:
+  replicas: 2
+
+workspace:
+  size: 100Gi
+
+networkPolicy:
+  enabled: true
+  databaseCidr: 10.20.0.0/16                                  # the customer's database subnet only

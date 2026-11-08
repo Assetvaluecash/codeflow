@@ -29,7 +29,7 @@ def extract_commit(repo: str, path: str, commit: str, store: Optional[Store], st
 
 def _extract_commit(repo: str, path: str, commit: str, store: Optional[Store], strip: tuple, force: bool):
     tree = gitutil.list_tree(path, commit)
-    wanted = [p for p in tree if p in ("tia-services.yaml", "tia-services.yml") or is_service_config(p) or is_shared_config(p)
+    wanted = [p for p in tree if p in ("tia-services.yaml", "tia-services.yml", "catalog-info.yaml", "catalog-info.yml") or is_service_config(p) or is_shared_config(p)
               or (p.startswith("contracts/") and p.endswith(".json"))]
     raw = gitutil.read_blobs(path, [tree[p] for p in wanted])
     small = {p: raw[tree[p]].decode("utf-8", "replace") for p in wanted}

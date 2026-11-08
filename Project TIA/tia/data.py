@@ -175,6 +175,87 @@ def add_data_layer(g, extracts: dict) -> None:
                                             None, ev(m.file, o["line"])))
 
 
+def proc_id(db: str, name: str) -> str:
+    return f"proc:{db}:{name}"
+
+
+def add_sql_lineage(g, extracts: dict) -> None:
+    """FR-041: procedures/views/triggers as nodes; READS/WRITES from procedures and from functions with embedded SQL to tables (and to the
+    columns the SQL names); CALLS from functions and procedures to the procedures they call. A call resolves to a procedure of the caller's
+    own database (source_confirmed), else to the only procedure of that name in the landscape (inferred, INF-PROC-NAME); otherwise it is
+    recorded in g.sql_unresolved."""
+    from .models import INFERRED
+    cols_of: dict = defaultdict(set)
+    for n, a in g.nodes.items():
+        if a.get("type") == "column":
+            cols_of[(a["database"], a["table"])].add(a["column"])
+    procs, by_short = {}, defaultdict(list)
+    for repo, ex in sorted(extracts.items()):
+        db = database_of(ex)
+        for p in ex.procedures:
+            nid = proc_id(db, p["name"])
+            g.add_node(nid, type="procedure", repo=repo, service=ex.service, file=p["file"], line=p["line"], name=p["name"], kind=p["kind"],
+                       database=db, signature=p.get("signature"))
+            procs[(db, p["name"])] = nid
+            by_short[p["name"].split(".")[-1]].append(nid)
+
+    def resolve(db, name):
+        short = name.split(".")[-1]
+        if (db, name) in procs:
+            return procs[(db, name)], SOURCE_CONFIRMED, None
+        same_db = [n for n in by_short.get(short, []) if g.nodes[n]["database"] == db]
+        if len(same_db) == 1:
+            return same_db[0], SOURCE_CONFIRMED, None
+        if len(set(by_short.get(short, []))) == 1:
+            return by_short[short][0], INFERRED, "INF-PROC-NAME"
+        return None, None, None
+
+    def table(db, t, repo, file, line):
+        nid = table_id(db, t)
+        if nid not in g.nodes:
+            g.add_node(nid, type="table", repo=repo, service=None, file=file, line=line, name=t, database=db)
+        return nid
+
+    def link(src, op, db, t, cols, ev, repo):
+        rel = "READS" if op == "read" else "WRITES"
+        g.add_edge(Edge(src, rel, table(db, t, repo, ev["file"], ev["line"]), SOURCE_CONFIRMED, "sql", None, ev))
+        known = cols_of.get((db, t), set())
+        for c in sorted(known if "*" in cols else known & set(cols)):
+            g.add_edge(Edge(src, rel, col_id(db, t, c), SOURCE_CONFIRMED, "sql", None, ev))
+    unresolved = []
+    for repo, ex in sorted(extracts.items()):
+        db = database_of(ex)
+        ev = lambda file, line, sql=None: {"repo": repo, "file": file, "line": line, "commit": ex.commit, **({"sql": sql} if sql else {})}  # noqa: E731
+        for p in ex.procedures:
+            nid = procs[(db, p["name"])]
+            for t in p["reads"]:
+                link(nid, "read", db, t, p.get("columns", []), ev(p["file"], p["line"]), repo)
+            for t in p["writes"]:
+                link(nid, "write", db, t, p.get("columns", []), ev(p["file"], p["line"]), repo)
+            if p.get("on_table"):
+                link(nid, "read", db, p["on_table"], [], ev(p["file"], p["line"]), repo)
+            for c in p["calls"]:
+                target, status, rule = resolve(db, c)
+                if target:
+                    g.add_edge(Edge(nid, "CALLS", target, status, "sql", rule, ev(p["file"], p["line"])))
+                else:
+                    unresolved.append({"repo": repo, "file": p["file"], "line": p["line"], "procedure": c, "caller": p["name"]})
+        for a in ex.sql_access:
+            if a["function_id"] not in g.nodes:
+                continue
+            e = ev(a["file"], a["line"], a.get("sql"))
+            if a["op"] == "call":
+                target, status, rule = resolve(db, a["target"])
+                if target:
+                    g.add_edge(Edge(a["function_id"], "CALLS", target, status, "sql", rule, e))
+                else:
+                    unresolved.append({"repo": repo, "file": a["file"], "line": a["line"], "procedure": a["target"],
+                                       "caller": a["function_id"].split("::")[-1]})
+            else:
+                link(a["function_id"], a["op"], db, a["target"], a.get("columns", []), e, repo)
+    g.sql_unresolved = unresolved
+
+
 def data_summary(extracts: dict) -> dict:
     """Coverage figures for the report; empty when no repository has a data layer."""
     ents = sum(len(e.entities) for e in extracts.values())

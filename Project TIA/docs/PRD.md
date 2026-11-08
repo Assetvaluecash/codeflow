@@ -5,14 +5,14 @@
 | | |
 |---|---|
 | **Product** | TIA — Technical Impact Analysis |
-| **Version** | 3.1 |
+| **Version** | 3.2 |
 | **Target market** | Banks and financial-services engineering organisations |
 | **Product category** | Enterprise software change intelligence |
 | **Primary integration** | GitHub Enterprise |
 | **Delivery model** | Multi-tenant SaaS operated by the TIA vendor, plus a dedicated deployment option (vendor-hosted single-tenant or customer-hosted) built from the same code |
 | **Document status** | Enterprise product specification — every requirement is mandatory for General Availability (GA) |
-| **Document set** | PRD.md v3.1 · ARCHITECTURE.md v1.3 · TECHNICAL-FRAMEWORK.md v1.3 |
-| **Last updated** | 2026-10-28 |
+| **Document set** | PRD.md v3.2 · ARCHITECTURE.md v1.3 · TECHNICAL-FRAMEWORK.md v1.3 · CASE-STUDY.md (tester use cases) |
+| **Last updated** | 2026-11-08 |
 
 > **Scope statement.** This is the specification for the complete enterprise product, not an MVP or pilot. All functional (FR), platform (PL), and acceptance (AC) requirements are mandatory for GA. Priority tags only say *which release* delivers a requirement (section 13).
 >
@@ -224,6 +224,13 @@ These are prerequisites for onboarding a customer landscape. They are not limits
 **Release manager / change manager.** Needs evidence that the required checks and approvals have been completed before release, in a form that can be attached to the change record reviewed by the change advisory board (CAB).
 
 **Technology risk and compliance.** Needs a reproducible, auditable record of how the impact of a change was assessed, to support change-control obligations. *This persona is frequently the budget holder in banks and must sign off customer acceptance.*
+
+**Tester (manual and automation).** Works black-box, from requirements and documentation. Needs what only the code shows, stated in testing terms, not in code terms:
+- what to retest when something changes, and whether the change is breaking;
+- whether the existing test cases cover what is implemented;
+- the inputs, rules and screen elements needed to automate tests.
+
+TIA serves this persona as **Lane 0 (code ingestion)** of the organisation's testing platform (Pulse, with the Knowledge Fabric retriever). Pulse reads documentation and maps business requirements; TIA adds the implementation facts. See CASE-STUDY.md.
 
 **Platform engineering team.** Needs to integrate repository, CI/CD, deployment, and observability data into a consistent technical model.
 
@@ -725,7 +732,32 @@ TIA shall record reviewer verdicts on findings (confirmed / false positive / irr
 
 For material findings, TIA shall notify the owning team of each affected component (chat, email, or ITSM task, as configured), track acknowledgement, and show coordination status in the report and policy evaluation.
 
-### 6.10 Platform requirements
+### 6.10 Tester outputs (Lane 0)
+
+These requirements come from the stakeholder review of 2026-11-02 (CASE-STUDY.md). They reuse the same extraction and graph as the change impact report; what is new is the output, stated for testers. A result that only says "this function is called in three places" does not meet them: a developer's IDE already shows that.
+
+#### FR-046 — What to test for a change (P1)
+
+For a proposed change, TIA shall list the tester-visible entry points it reaches (API endpoints, screens, reports, event consumers). For each one it shall give: why it is reached, the change effect (breaking, behaviour change, compatible change, or no functional change), and the existing tests associated with it. It shall also report:
+- the components shared by many entry points (a change to them needs the widest testing);
+- rules that one consumer of a shared component applies and another does not (rule gaps);
+- reached code with no analysed entry point, listed separately instead of dropped.
+
+The result shall be available in the report, the PR comment, the report page and the Knowledge Fabric answer.
+
+#### FR-047 — Technical coverage of a test repository (P1)
+
+With no change, TIA shall list the technical aspects each entry point and screen should be tested for (inputs, rules and constraints, error answers, screen elements). It shall show, for each aspect, whether the automated tests and the written test cases (CSV, YAML or JSON) address it: covered, partial or missing. Given one test case as a query, TIA shall say which aspects it covers and which it misses. Coverage here means "a test addresses it", not "a test passes"; functional coverage against requirements is Pulse's.
+
+#### FR-048 — Test automation inventory (P1)
+
+TIA shall list:
+- for every API endpoint, its request fields: type, mandatory or optional, single or multiple value, and constraints (length, range, pattern, format, allowed values). From these it shall derive valid and invalid example values and a test matrix with expected outcomes, plus the error statuses each handler answers with;
+- for every screen in Angular, React, Vue or plain HTML front ends, its elements: mandatory or optional, a locator that uniquely identifies the element on the page (fragile locators flagged), the possible values of each dropdown (values loaded at run time reported as dynamic), and the API calls the screen makes, linked to the endpoints.
+
+Mapping code to business nodes (features, requirements, rules) is not part of these requirements: Pulse owns it.
+
+### 6.11 Platform requirements
 
 | ID | Requirement | Release |
 |---|---|---|
@@ -1214,6 +1246,9 @@ The product is not complete merely because it can build a graph or list API endp
 | AC-039 Tenant lifecycle | Given an offboarded tenant, all its rows and stored evidence are deleted and the deletion is recorded in the audit trail. | 1 |
 | AC-040 Fair scheduling | Given one tenant submitting 1,000 analyses, another tenant's analysis still starts within its configured latency target. | 1 |
 | AC-041 Data residency | Given a tenant pinned to a region, no tenant data is written to storage outside that region. | 2 |
+| AC-042 What to test | Given a change to a component shared by two consumers, of which only one applies a rule on its data, the report lists both entry points with the change effect and their tests, and reports the rule gap. | 1 |
+| AC-043 Technical coverage | Given an endpoint whose request fields carry constraints, and a test repository that exercises only some of them, each constraint is reported as covered or missing. A written test case given as a query is matched to the aspects it covers. | 1 |
+| AC-044 Automation inventory | Given an API with constrained request fields and a front-end form with a dropdown, TIA lists each field's constraints with valid and invalid values, and each form element with a unique locator, its mandatory flag and the dropdown values. | 1 |
 
 ---
 
@@ -1389,4 +1424,6 @@ The long-term opportunity is to become a trusted intelligence layer between soft
 | 3.0 | 2026-10-29 | Enterprise scope: removed MVP/pilot framing; every requirement mandatory for GA; priorities now map to Releases 1–4; both Java and Python required; Phase 4 items made requirements FR-039–FR-045; platform requirements PL-001–PL-012; enterprise performance/availability targets; acceptance criteria AC-021–AC-038; gates replaced by release quality gates; onboarding replaces pilot qualification |
 | 3.1 | 2026-10-29 | Delivery model decided: multi-tenant SaaS (shared schema + PostgreSQL row-level security) with dedicated and customer-hosted options from the same code; PL-003 moved to Release 1; new PL-013–PL-018 (tenant lifecycle, metering, residency, per-tenant keys, fair scheduling, SaaS compliance); AC-035 moved to Release 1; AC-039–AC-041; risk 13 |
 
-*End of PRD v3.1*
+| 3.2 | 2026-11-08 | Tester persona and TIA's role as Lane 0 of the testing platform (stakeholder review of 2026-11-02, CASE-STUDY.md); new section 6.10 with FR-046 (what to test for a change), FR-047 (technical coverage of a test repository) and FR-048 (test automation inventory); AC-042–AC-044; platform requirements renumbered to 6.11 |
+
+*End of PRD v3.2*

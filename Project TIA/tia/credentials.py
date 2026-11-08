@@ -25,6 +25,7 @@ import urllib.request
 from typing import Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from . import airgap
 
 
 class SecretError(Exception):
@@ -90,7 +91,7 @@ class VaultClient:
         req = urllib.request.Request(f"{self.addr}/v1/{path.lstrip('/')}", method=method, headers=headers,
                                      data=json.dumps(payload).encode() if payload is not None else None)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as r:
+            with urllib.request.urlopen(airgap.checked(req, "vault"), timeout=self.timeout, context=self._ctx) as r:
                 body = r.read()
         except urllib.error.HTTPError as e:
             raise SecretError(f"Vault {method} {path} failed (HTTP {e.code})")

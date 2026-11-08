@@ -21,7 +21,7 @@ from .models import INFERRED, normalize_path
 
 EFFECTS = ("breaking", "behaviour_change", "compatible_change", "no_functional_change", "unknown")
 EFFECT_RANK = {"breaking": 4, "behaviour_change": 3, "unknown": 2, "compatible_change": 1, "no_functional_change": 0}
-WALK = ("function", "endpoint", "callsite", "contract_ref")      # node types a business path runs through (not tests, schemas or data)
+WALK = ("function", "endpoint", "callsite", "contract_ref", "runtime_ref", "listener", "topic")      # node types a business path runs through (not tests, schemas or data)
 
 
 def strongest(effects) -> str:
@@ -289,7 +289,7 @@ def test_scope(g, extracts: dict, reached: dict, seeds: list, tests_for, path_st
         own = [i for i, s in enumerate(seeds) if s["node"] == n]           # the entry point itself changed (e.g. its contract)
         if a["type"] == "endpoint":
             r = reached.get(n) or {"path": [n], "edges": [], "seeds": []}
-        elif a["type"] in ("function", "contract_ref") and n in reached and not any(
+        elif a["type"] in ("function", "contract_ref", "runtime_ref") and n in reached and not any(
                 g.nodes[x]["type"] in ("function", "endpoint", "callsite") for x, _ in g.impacted_by(n)):
             r = reached[n]                                    # the top of a reached chain with no analysed entry point above it
         else:
@@ -307,6 +307,13 @@ def test_scope(g, extracts: dict, reached: dict, seeds: list, tests_for, path_st
                "path_edges": [{"rel": e.rel, "status": e.status, "strategy": e.strategy} for e in r["edges"]]}
         chain = " -> ".join(v["name"] for v in reversed(via))
         changed = "; ".join(row["changes"][:2]) + ("; ..." if len(row["changes"]) > 2 else "")
+        if a["type"] == "runtime_ref":
+            row["entry_point"] = f"{a['service']} (observed at runtime)"
+            row["repo"] = a["repo"] or "(outside the analysed repositories)"
+            row["why"] = (f"{a['service']} was observed calling the changed provider at runtime"
+                          + ("" if a["repo"] else ", from outside the analysed repositories") + f". Change: {changed}.")
+            top.append(row)
+            continue
         if a["type"] == "contract_ref":
             row["entry_point"] = f"declared contract in {a['repo']}"
             row["why"] = (f"{a['service']} declares a contract with the changed provider ({a.get('file')}) but no analysed code of it calls the "

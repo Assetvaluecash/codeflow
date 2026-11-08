@@ -17,12 +17,14 @@ from typing import Optional
 from . import CONFIG_VERSION, EXTRACTOR_VERSION, EXTRACTOR_VERSIONS
 from . import gitutil
 from .contracts import NOT_EVALUATED, diff_contracts
-from .data import data_summary, database_declared, database_of, diff_data
+from .events import diff_events
+from .policy import evaluate as evaluate_policy
+from .data import data_summary, database_declared, database_of, diff_data, proc_id
 from .extraction import extract_commit
 from .graph import Graph
 from .graphstore import get_or_build
 from .models import (CONFIRMED, COMPLETE, COMPLETE_WITH_GAPS, CONTRACT_CONFIRMED, CORROBORATED, FAILED,
-                     INFERRED, PARTIAL, SEVERITY_ORDER, SOURCE_CONFIRMED, STALE, RepoExtract)
+                     INFERRED, PARTIAL, RUNTIME_OBSERVED, SEVERITY_ORDER, SOURCE_CONFIRMED, STALE, RepoExtract)
 from .resolve import merged_service_map
 from .severity import apply_override, compute, compute_data, is_material
 from . import telemetry, tracing
@@ -30,6 +32,7 @@ from .scrub import scrub_json
 from .tenantconfig import DEFAULT, TenantConfig, diff as config_diff
 from .store import Store
 from .testscope import classify_function, test_scope
+from .enrich import TestEvidence, apply_runtime, deployment_limitations, deployment_view, enrich_tests, runtime_of
 
 
 @dataclass
@@ -49,6 +52,7 @@ class AnalysisRequest:
     freshness: dict = field(default_factory=dict)             # repo -> scan state at analysis time (FR-005)
     config: Optional[TenantConfig] = None                     # the tenant's configuration the analysis runs under (None = defaults)
     stale_relationships: list = field(default_factory=list)   # unverifiable stale relationships (relationships.UNVERIFIABLE)
+    evidence: dict = field(default_factory=dict)              # ingested evidence by kind (tia.evidence): test runs, coverage, runtime, deployments
 
 
 def _now() -> str:
@@ -77,6 +81,8 @@ def _path_status(edges, is_stale=lambda e: False) -> str:
     sts = [e.status for e in edges]
     if INFERRED in sts:
         return INFERRED
+    if RUNTIME_OBSERVED in sts:                          # a hop seen only in telemetry: the path is no stronger than that hop
+        return RUNTIME_OBSERVED
     if CORROBORATED in sts:
         return CORROBORATED
     if CONTRACT_CONFIRMED in sts:
@@ -174,7 +180,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     cmp_base = _without_files(base_ex, unparsed)
     unevaluated = {k: len(getattr(base_ex, k)) - len(getattr(cmp_base, k)) for k in ("endpoints", "schemas", "functions", "entities", "migrations")}
     unevaluated = {k: v for k, v in unevaluated.items() if v}
-    contract_changes = diff_contracts(cmp_base, head_ex)
+    contract_changes = diff_contracts(cmp_base, head_ex, cfg.compatibility)
+    event_changes = diff_events(cmp_base, head_ex, cfg.compatibility)
     data_changes, changed_migrations = diff_data(cmp_base, head_ex)
     base_fn = {f.id: f for f in cmp_base.functions}
     head_fn = {f.id: f for f in head_ex.functions}
@@ -182,7 +189,7 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
                   for fid, f in sorted(base_fn.items()) if fid not in head_fn or head_fn[fid].hash != f.hash]
     added_fns = sorted(set(head_fn) - set(base_fn))
 
-    covered_files = {base_fn[i].file for i, _ in fn_changes} | {c["file"] for c in contract_changes}
+    covered_files = {base_fn[i].file for i, _ in fn_changes} | {c["file"] for c in contract_changes + event_changes}
     covered_files |= {head_fn[i].file for i in added_fns}
     covered_files |= {m.file for m in cmp_base.migrations + head_ex.migrations}      # migrations are analysed as data changes
     test_files = {t.file for t in cmp_base.tests} | {t.file for t in head_ex.tests}
@@ -196,10 +203,19 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         changed_components.append({"type": "api_schema" if "schema" in c["kind"] or "field" in c["kind"] else "api_endpoint",
                                    "name": c["element"], "change": c["kind"], "breaking": c["breaking"],
                                    "effect": "breaking" if c["breaking"] else "compatible_change",
-                                   "detail": c["detail"], "file": c["file"], "line": c["line"]})
+                                   "detail": c["detail"], "file": c["file"], "line": c["line"],
+                                   **({"rule": c["rule"]} if c.get("rule") else {}), **({"security_review": True} if c.get("security_review") else {})})
         for s in c["seeds"]:
             seeds.append({"node": s, "kind": "breaking" if c["breaking"] else "nonbreaking",
                           "breaking": c["breaking"], "label": c["detail"],
+                          "effect": "breaking" if c["breaking"] else "compatible_change"})
+    for c in event_changes:
+        changed_components.append({"type": "event_schema" if c["seeds"][0].startswith(cmp_base.service + ":eschema:") else "event_topic",
+                                   "name": c["element"], "change": c["kind"], "breaking": c["breaking"], "rule": c["rule"],
+                                   "effect": "breaking" if c["breaking"] else "compatible_change", "detail": c["detail"], "file": c["file"],
+                                   "line": c["line"], **({"topic": c["topic"]} if c.get("topic") else {})})
+        for s in c["seeds"]:
+            seeds.append({"node": s, "kind": "breaking" if c["breaking"] else "nonbreaking", "breaking": c["breaking"], "label": c["detail"],
                           "effect": "breaking" if c["breaking"] else "compatible_change"})
     data_components = []
     for c in data_changes:
@@ -212,6 +228,33 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
             seeds.append({"node": s["node"], "kind": "breaking" if c["breaking"] else "nonbreaking", "breaking": c["breaking"],
                           "label": c["detail"], "access": s["access"], "effect": "breaking" if c["breaking"] else "compatible_change",
                           "data": {"table": c["table"], "column": c["column"], "kind": c["kind"], "database": c["database"]}})
+    # FR-041: a stored procedure / view / trigger whose definition changed reaches everything that calls or reads it
+    base_procs, head_procs = {p["name"]: p for p in cmp_base.procedures}, {p["name"]: p for p in head_ex.procedures}
+    proc_db = database_of(head_ex)
+    for name in sorted(set(base_procs) | set(head_procs)):
+        b, h = base_procs.get(name), head_procs.get(name)
+        if b and h and b["digest"] == h["digest"]:
+            continue
+        p = h or b
+        if b is None:
+            kind, breaking, detail = "procedure_added", False, f"{p['kind']} {name} added"
+        elif h is None:
+            kind, breaking, detail = "procedure_removed", True, f"{p['kind']} {name} removed"
+        elif b["signature"] != h["signature"]:
+            kind, breaking, detail = "procedure_signature_changed", True, f"{p['kind']} {name} signature changed: {h['signature'][:120]}"
+        else:
+            moved = [f"now writes {', '.join(sorted(set(h['writes']) - set(b['writes'])))}" if set(h["writes"]) - set(b["writes"]) else "",
+                     f"no longer writes {', '.join(sorted(set(b['writes']) - set(h['writes'])))}" if set(b["writes"]) - set(h["writes"]) else ""]
+            kind, breaking = "procedure_body_changed", False
+            detail = f"{p['kind']} {name} body changed" + "".join(f"; {m}" for m in moved if m)
+        covered_files.add(p["file"])
+        changed_components.append({"type": "db_procedure", "name": name, "change": kind, "breaking": breaking,
+                                   "effect": "breaking" if breaking else "compatible_change", "detail": detail, "file": p["file"],
+                                   "line": p["line"], "database": proc_db})
+        if kind != "procedure_added":
+            seeds.append({"node": proc_id(proc_db, name), "kind": "breaking" if breaking else "nonbreaking", "breaking": breaking,
+                          "label": detail, "effect": "breaking" if breaking else "compatible_change"})
+            data_changes.append({"kind": kind, "breaking": breaking, "procedure": name})
     for fid, how in fn_changes:
         effect, why = classify_function(fid, base_fn, head_fn)
         changed_components.append({"type": "function", "name": fid, "change": how, "effect": effect, "detail": f"{base_fn[fid].qualname}: {why}"})
@@ -244,6 +287,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         change_type = "no_functional_change"
     elif any(c["type"].startswith("api") for c in changed_components):
         change_type = "api_change"
+    elif any(c["type"].startswith("event") for c in changed_components):
+        change_type = "event_change"
     elif data_changes:
         change_type = "data_change"
     elif file_level:
@@ -254,6 +299,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     # ---- 3. graph + evidence snapshot ---------------------------------------------------------------------
     g, graph_version, _ = get_or_build(store, extracts, req.strip_prefixes, req.test_naming)
     telemetry.record_graph(g)
+    ev = req.evidence or {}
+    runtime_labels = apply_runtime(g, extracts, ev.get("runtime_edge", []))      # this analysis's copy of the graph only
     smap = merged_service_map(extracts)
     smap["criticality"] = {**smap["criticality"], **cfg.criticality}      # the tenant's registry wins over a service's own file
     stale_by_key = {r["key"]: r for r in req.stale_relationships}
@@ -268,7 +315,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     snap_src = sorted((r, e.commit, e.extractor_version) for r, e in extracts.items()) + [("head", req.target, head_sha)]
     snap_src += [("graph", graph_version),
                  ("stale", sorted((r["key"], r["stale_reason"], r.get("stale_since")) for r in req.stale_relationships)),
-                 ("freshness", sorted((r, sorted(f.items())) for r, f in req.freshness.items() if r in extracts))]
+                 ("freshness", sorted((r, sorted(f.items())) for r, f in req.freshness.items() if r in extracts)),
+                 ("evidence", sorted((k, sorted(x["id"] for x in v)) for k, v in ev.items() if v))]
     snapshot_id = "snap-" + hashlib.sha256(repr((snap_src, cfg.ident(CONFIG_VERSION))).encode()).hexdigest()[:12]
     seeds = [s for s in seeds if s["node"] in g.nodes]
 
@@ -431,7 +479,9 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
             if ef:
                 findings.append(ef)
             continue
-        if typ in ("callsite", "contract_ref"):
+        if typ == "listener":
+            impact = "event"
+        elif typ in ("callsite", "contract_ref", "runtime_ref"):
             seed_types = {g.nodes[seeds[i]["node"]]["type"] for i in r["seeds"] if seeds[i]["node"] in g.nodes}
             impact = ("contract" if seed_types & {"schema", "endpoint"} else
                       "transitive" if seed_types & {"table", "column"} else "direct")
@@ -439,6 +489,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
             impact = "transitive"
         elif typ == "function" and not cross:
             impact = "direct"
+        elif typ == "procedure" or (typ == "function" and any(e.strategy == "sql" for e in r["edges"])):
+            impact = "data"                                           # FR-041: reached through SQL (a procedure, embedded SQL)
         else:
             continue
         sds = [seeds[i] for i in r["seeds"]]
@@ -448,7 +500,7 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         comp_service = nd["service"]
         crit = smap["criticality"].get(comp_service)
         sev, rule = compute(kind, status, cross, crit, cfg)
-        cons = next((e for e in r["edges"] if e.rel == "CONSUMES_API"), None)
+        cons = next((e for e in r["edges"] if e.rel in ("CONSUMES_API", "CONSUMES_EVENT")), None)
         tests = tests_for(node)
         limitations = []
         if status == INFERRED:
@@ -466,14 +518,37 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
             limitations.append("Service criticality not configured")
         label = "; ".join(sorted({s["label"] for s in sds}))
         ev0 = cons.evidence if cons else {"repo": nd["repo"], "file": nd.get("file"), "line": nd.get("line")}
-        where = f"{nd['repo']}:{nd.get('file')}:{nd.get('line')}"
-        if typ in ("callsite", "contract_ref"):
+        where = f"{nd['repo']}:{nd.get('file')}:{nd.get('line')}" if typ != "runtime_ref" else "runtime telemetry"
+        if typ in ("callsite", "contract_ref", "runtime_ref"):
             how = {"R1": "through a generated client", "R2": "through a fully resolved HTTP call",
-                   "R3": "through a declared contract", "R5": "through a unique path match"}
+                   "R3": "through a declared contract", "R5": "through a unique path match", "R6": "through calls observed at runtime"}
             strat = (cons.strategy or "").split("+")[0] if cons else ""
             reason = (f"{comp_service} depends on the changed provider {how.get(strat, 'via a resolved call')} at {where}. "
                       f"Change: {label}." + (" The relationship is stale: it could not be verified against the latest source."
                                               if status == STALE else ""))
+        elif typ == "listener":
+            consumed = [e for e in r["edges"] if e.rel == "CONSUMES_EVENT"]
+            last = consumed[-1] if consumed else cons
+            topic_node = last.dst if last else ""
+            how_e = "declares in tia-services.yaml that it consumes" if last and last.strategy == "E2" else "consumes"
+            # FR-042: an event reached through other consumers that re-publish (topic -> consumer -> topic ...) names each hop
+            hops = [g.nodes.get(n, {}).get("name", n) for n in r["path"] if g.nodes.get(n, {}).get("type") == "topic"]
+            via_hops = (" (reached through " + " -> ".join(hops) + ", each consumer re-publishing)") if len(hops) > 1 else ""
+            reason = (f"{comp_service} {how_e} topic {g.nodes.get(topic_node, {}).get('name', topic_node)} at {where}{via_hops}. "
+                      f"Change: {label}.")
+            ev0 = last.evidence if last else ev0
+        elif impact == "data":
+            steps = []
+            for e in r["edges"]:
+                if e.strategy == "sql":
+                    s_, d_ = g.nodes[e.src], g.nodes[e.dst]
+                    verb = {"READS": "reads", "WRITES": "writes", "CALLS": "calls"}[e.rel]
+                    what = {"table": "table", "column": "column", "procedure": d_.get("kind", "procedure")}.get(d_["type"], d_["type"])
+                    steps.append(f"{s_.get('name')} {verb} {what} {d_.get('name')} ({e.evidence.get('file')}:{e.evidence.get('line')})")
+            sql_ev = next((e.evidence for e in reversed(r["edges"]) if e.strategy == "sql"), None)
+            ev0 = sql_ev or ev0
+            reason = (f"{comp_service}: " + "; ".join(reversed(steps)) + f". SQL evidence: {sql_ev.get('sql') or 'definition'}. Change: {label}."
+                      if steps else f"{nd.get('name')} in {where} depends on the changed data. Change: {label}.")
         elif typ == "endpoint":
             reason = f"{comp_service} endpoint {nd['method']} {nd['path']} depends on the changed component transitively ({where}). Change: {label}."
         else:
@@ -485,12 +560,14 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
             verification.append(f"Identify and run consumer tests for {comp_service} (none found in analysed sources)")
         if cross:
             verification.append("Verify compatibility with the deployed consumer version")
+        if typ == "runtime_ref" and nd["repo"] is None:
+            limitations.append("The caller is outside the analysed repositories: it is known only from runtime telemetry")
         findings.append({
-            "component": comp_service, "repository": nd["repo"], "node": node, "node_type": typ,
+            "component": comp_service, "repository": nd["repo"] or "(outside the analysed repositories)", "node": node, "node_type": typ,
             "impact_type": impact, "severity": sev, "severity_rule": rule,
             "material": is_material(sev, kind == "breaking"),
             "evidence_status": status,
-            **({"resolution_strategy": cons.strategy} if cons else {}),
+            **({"resolution_strategy": cons.strategy} if cons else {"resolution_strategy": "sql"} if impact == "data" else {}),
             **({"inference_rule": sorted({e.rule for e in r["edges"] if e.rule})[0]} if status == INFERRED else {}),
             "reason": reason, "change_nature": kind, "depth": len(r["edges"]),
             "path": [{"node": n, "type": g.nodes[n]["type"], "repo": g.nodes[n]["repo"],
@@ -548,6 +625,17 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     for i, f in enumerate(findings, 1):
         f["id"] = f"F{i}"
     scope = test_scope(g, extracts, reached, seeds, tests_for, _path_status, req.target, head_ex, is_stale)
+    for f in findings:
+        rt = runtime_of(f, runtime_labels)
+        if rt:
+            f["runtime"] = rt
+    deploy = (deployment_view(extracts, ev.get("deployment", []), {r: e.commit for r, e in extracts.items()}, req.target, base_sha, head_sha)
+              if ev.get("deployment") else None)
+    if deploy:
+        for f in findings:
+            if f["repository"] != req.target:
+                f["deployed"] = deploy["by_repo"].get(f["repository"], {})
+                f["limitations"] = list(f.get("limitations", [])) + deployment_limitations(f, deploy)
 
     # ---- 6. unknowns, coverage, status ----------------------------------------------------------------------------
     unknowns = []
@@ -563,9 +651,18 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         g.nodes[n]["type"] == "endpoint" and g.nodes[n]["repo"] == req.target for n in reached) or any(
         g.nodes[s["node"]]["type"] == "function" and any(
             e.rel == "HANDLES" for e in [x for _, x in g.impacted_by(s["node"])]) for s in seeds)
+    topics_hit = sorted({n for n in set(reached) | {s["node"] for s in seeds} if g.nodes.get(n, {}).get("type") == "topic"}
+                        | {e.dst for s in seeds for _, e in g.impacted_by(s["node"]) if e.rel == "USES_SCHEMA" and g.nodes.get(e.dst, {}).get("type") == "topic"}
+                        | {n for s in seeds for n, e in g.impacted_by(s["node"]) if g.nodes.get(n, {}).get("type") == "topic"})
+    no_consumer = [g.nodes[t]["name"] for t in topics_hit if not any(e.rel == "CONSUMES_EVENT" for _, e in g.impacted_by(t))]
+    if no_consumer:
+        unknowns.append({"area": "event_consumers_unknown", "affects_confidence": True, "count": len(no_consumer),
+                         "reason": "No analysed repository consumes " + ", ".join(no_consumer) + ": consumers outside the analysed repositories "
+                                   "cannot be seen.", "items": [{"topic": t} for t in no_consumer]})
     if contract_or_endpoint_involved:
         unknowns.append({"area": "event_consumers", "affects_confidence": True,
-                         "reason": "Event consumers are not analysed in this release."})
+                         "reason": "Event consumers are analysed for Kafka (code and tia-services.yaml declarations) only; consumers over other "
+                                   "messaging (AMQP, JMS, cloud queues) are not seen."})
         unknowns.append({"area": "external_consumers", "affects_confidence": True,
                          "reason": f"Consumers outside the {len(extracts)} analysed repositories cannot be seen; "
                                    "no external consumer inventory is connected."})
@@ -581,7 +678,7 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         mapped_by: dict = {}
         for s in seeds:
             if g.nodes[s["node"]]["type"] in ("table", "column"):
-                mapped_by.setdefault(s["node"], sorted({n for n, e in g.impacted_by(s["node"]) if e.rel in ("MAPS_TO", "MAPS_COLUMN")}))
+                mapped_by.setdefault(s["node"], sorted({n for n, e in g.impacted_by(s["node"]) if e.rel in ("MAPS_TO", "MAPS_COLUMN") or (e.rel in ("READS", "WRITES") and e.strategy == "sql")}))
         unmapped = []
         for comp, c in data_components:
             ents = sorted({n for s in c["seeds"] for n in mapped_by.get(s["node"], [])})
@@ -612,6 +709,15 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         unknowns.append({"area": "unparsed_migration_statements", "affects_confidence": True, "count": len(bad_mig),
                          "reason": f"{len(bad_mig)} statement(s) in the changed migrations could not be analysed, so their "
                                    "effect on the schema is unknown.", "items": bad_mig})
+    if getattr(g, "sql_unresolved", None) and (data_changes or any(s["node"].startswith("proc:") for s in seeds)):
+        unknowns.append({"area": "procedures_not_found", "affects_confidence": True, "count": len(g.sql_unresolved),
+                         "reason": f"{len(g.sql_unresolved)} stored-procedure call(s) name a procedure whose definition is not in the analysed "
+                                   "repositories, so the tables it reads and writes are unknown.", "items": g.sql_unresolved[:100]})
+    if not data_changes and any(u.get("kind") == "dynamic_sql" for e in extracts.values() for u in e.data_unknowns):
+        dyn = [{"repo": r, **u} for r, e in sorted(extracts.items()) for u in e.data_unknowns if u.get("kind") == "dynamic_sql"]
+        unknowns.append({"area": "dynamic_sql", "affects_confidence": False, "count": len(dyn),
+                         "reason": f"{len(dyn)} SQL statement(s) build a table or procedure name at run time and cannot be read.",
+                         "items": dyn[:100]})
     overridden = [f for f in findings if f.get("severity_override")]
     if overridden:
         by_rule: dict = {}
@@ -729,6 +835,41 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         "findings": findings, "test_scope": scope, "unknowns": unknowns, "policy_results": [],
         "generated_at": _now(), "configuration_version": cfg.ident(CONFIG_VERSION),
         "extractor_versions": dict(EXTRACTOR_VERSIONS)}
+    # FR-022 to FR-029: what the ingested evidence says about the tests, the runtime and the deployments (informational unknowns only:
+    # missing evidence limits what the report can say, it does not make the static analysis less complete)
+    te = TestEvidence(extracts, ev.get("test_run", []), ev.get("coverage", []),
+                      {r: ([head_sha, base_sha] if r == req.target else [e.commit]) for r, e in extracts.items()})
+    no_ci = enrich_tests(g, report, te, base_fn, req.target)
+    if no_ci:
+        report["unknowns"].append({"area": "ci_results_unavailable", "affects_confidence": False, "count": len(no_ci),
+                                   "reason": f"No CI test results have been ingested for {len(no_ci)} repository(ies) with relevant tests: their tests "
+                                             "are listed as associated, not as passed or failed.", "items": [{"repo": r} for r in no_ci]})
+    if not ev.get("coverage"):
+        report["unknowns"].append({"area": "coverage_unavailable", "affects_confidence": False,
+                                   "reason": "No coverage has been ingested: whether a test executes a component is unknown, not 'no'."})
+    if ev.get("runtime_edge"):
+        envs = sorted({x["data"].get("environment") or "unspecified" for x in ev["runtime_edge"]})
+        report["unknowns"].append({"area": "runtime_evidence_scope", "affects_confidence": False,
+                                   "reason": f"Runtime observations cover {', '.join(envs)}; a dependency not observed in that window may still exist."})
+    else:
+        report["unknowns"].append({"area": "runtime_evidence_absent", "affects_confidence": False,
+                                   "reason": "No runtime evidence has been ingested: relationships come from source and contracts only, and a "
+                                             "dependency not seen in them is not excluded."})
+    if deploy:
+        report["deployments"] = deploy
+        if deploy["incomplete"]:
+            report["unknowns"].append({"area": "environment_mapping_incomplete", "affects_confidence": False, "count": len(deploy["incomplete"]),
+                                       "reason": "Deployment records are missing for some environments, so what runs there is unknown.",
+                                       "items": [{"repo": x["repo"], "environments": x["environments_without_record"]} for x in deploy["incomplete"]]})
+    else:
+        report["unknowns"].append({"area": "deployment_evidence_absent", "affects_confidence": False,
+                                   "reason": "No deployment records have been ingested: the revision running in each environment is unknown."})
+    # FR-033/034/036: the tenant's release policy, evaluated on this report (owners: the tenant registry wins over tia-services.yaml)
+    owners = {**{e.service: str(e.service_map["owner"]) for e in extracts.values() if (e.service_map or {}).get("owner")}, **cfg.ownership}
+    report["owners"] = {s: owners[s] for s in sorted({f["component"] for f in report["findings"]} | {target_service}) if s in owners}
+    pol = evaluate_policy(report, cfg.policies, smap["criticality"], owners, [{**x["data"], "evidence_id": x["id"]} for x in ev.get("approval", [])])
+    report["policy"] = {k: pol[k] for k in ("mode", "outcome", "blocking")}
+    report["policy_results"] = pol["results"]
     # PL-011: nothing that looks like a credential may leave in a report, whatever the source code contained
     report, in_report = scrub_json(report)
     in_source = {r: e.secrets_withheld for r, e in sorted(extracts.items()) if e.secrets_withheld}
@@ -749,7 +890,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
             "strip_prefixes": list(req.strip_prefixes), "test_naming": req.test_naming,
             "max_depth": req.max_depth, "max_results": req.max_results,
             "freshness": {r: f for r, f in sorted(req.freshness.items()) if r in extracts},
-            "stale_relationships": req.stale_relationships})
+            "stale_relationships": req.stale_relationships,
+            "evidence_ids": {k: sorted(x["id"] for x in v) for k, v in ev.items() if v}})
         rec.put_analysis(report)
         rec.audit("analysis_completed", analysis_id=aid, status=status, snapshot=snapshot_id, findings=len(findings))
     return report

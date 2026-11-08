@@ -182,6 +182,7 @@ HTTP_REQUESTS = C("tia_http_requests_total", "HTTP requests by method, route tem
 HTTP_DURATION = H("tia_http_request_duration_seconds", "HTTP request duration by method and route template.", ("method", "route"))
 HTTP_IN_FLIGHT = G("tia_http_requests_in_flight", "HTTP requests being served.")
 GATE_DENIALS = C("tia_gate_denials_total", "Requests refused by the tenant lifecycle or storage quota.", ("code",))
+RATE_LIMITED = C("tia_rate_limited_total", "Requests refused with 429 by the rate limiter.", ("caller",))
 JOB_RUNS = C("tia_jobs_runs_total", "Job executions by kind and outcome (succeeded, failed, retried).", ("kind", "outcome"))
 JOB_DURATION = H("tia_jobs_duration_seconds", "Job execution time by kind.", ("kind",), buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 900))
 WORKER_POLL = G("tia_worker_last_poll_timestamp_seconds", "Unix time the worker last polled the queue (liveness).")

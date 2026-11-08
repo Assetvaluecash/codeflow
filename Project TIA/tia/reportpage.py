@@ -68,6 +68,11 @@ def _finding_row(f: dict) -> str:
             f"<li>{_e(v)}</li>" for v in f["required_verification"]) + "</ul></details>")
     if path:
         extra.append(f"<details><summary>Evidence path</summary><div>{path}</div></details>")
+    rt = f.get("runtime")
+    if rt:
+        extra.append(f"<details><summary>Observed at runtime</summary><div>{_e(', '.join(rt['environments']) or 'environment not reported')}: "
+                     f"{_e(str(rt['calls_observed']))} call(s) between {_e(str(rt['window'][0]))} and {_e(str(rt['window'][1]))}"
+                     f"{'; caller versions ' + _e(', '.join(rt['caller_versions'])) if rt['caller_versions'] else ''}</div></details>")
     lims = "".join(f"<li class=\"mut\">{_e(x)}</li>" for x in f.get("limitations", []))
     ev = _e(f["evidence_status"]) + (f"<br><span class=\"mut\">{_e(f['resolution_strategy'])}</span>" if f.get("resolution_strategy") else "")
     return (f"<tr id=\"{_e(f['id'])}\"><td data-label=\"Severity\">{_sev(f['severity'])}<br><span class=\"mut\">{_e(f['severity_rule'])}</span></td>"
@@ -81,6 +86,40 @@ EFFECT_TEXT = {"breaking": "breaking", "behaviour_change": "behaviour change", "
 EFFECT_CLASS = {"breaking": "s-high", "behaviour_change": "s-medium", "compatible_change": "s-low", "no_functional_change": "s-low", "unknown": "s-unknown"}
 
 
+def _states(t: dict) -> str:
+    """The distinct evidence states of a test (FR-023): exists, associated, run result, executed, validated."""
+    st = t.get("states")
+    if not st:
+        return ""
+    run = t.get("run") or {}
+    where = f" in build {_e(str(run.get('build')))}" + ("" if run.get("of_analysed_revision") else " of another revision") if run else ""
+    return f' <span class="badge">{_e(" / ".join(st))}</span><span class="mut">{where}</span>'
+
+
+def _evidence_sections(report: dict) -> str:
+    out = ""
+    recs = report.get("test_recommendations") or {}
+    if recs.get("tests"):
+        rows = "".join(f"<tr><td data-label=\"Priority\">{_e(str(r['priority']))}</td><td data-label=\"Test\"><code>{_e(r['test'])}</code><br>"
+                       f"<span class=\"mut\">{_e(r['repo'])}:{_e(r['file'])}</span></td><td data-label=\"Why\">{'<br>'.join(_e(w) for w in r['why'])}</td>"
+                       f"<td data-label=\"Last result\">{_e(str(r.get('last_result') or ''))}</td></tr>" for r in recs["tests"])
+        out += ("<h2>Recommended tests</h2><div class=\"wrap\"><table class=\"stack\"><tr><th>Priority</th><th>Test</th><th>Why</th><th>Last result</th></tr>"
+                f"{rows}</table></div><p class=\"mut\">{_e(recs['note'])}</p>")
+    gaps = report.get("test_gaps") or []
+    if gaps:
+        out += "<h3>Without test evidence</h3><ul>" + "".join(f"<li>{_e(g.get('entry_point') or g.get('component'))}: {_e(g['text'])}</li>" for g in gaps) + "</ul>"
+    dep = report.get("deployments")
+    if dep:
+        rows = "".join(f"<tr><td data-label=\"Repository\">{_e(r)}</td><td data-label=\"Environment\">{_e(env)}</td>"
+                       f"<td data-label=\"Deployed\"><code>{_e(d['revision'][:12])}</code></td>"
+                       f"<td data-label=\"Compared\">{'analysed revision' if d['is_analysed_revision'] else '<b>not the analysed revision</b>'}"
+                       f"{'; the proposed change' if d.get('is_proposed_revision') else ''}</td></tr>"
+                       for r, envs in sorted(dep["by_repo"].items()) for env, d in sorted(envs.items()))
+        out += ("<h2>Deployments</h2><div class=\"wrap\"><table class=\"stack\"><tr><th>Repository</th><th>Environment</th><th>Deployed</th><th>Compared</th></tr>"
+                f"{rows}</table></div>") if rows else ""
+    return out
+
+
 def _test_scope(report: dict) -> str:
     ts = report.get("test_scope")
     if not ts:
@@ -90,7 +129,7 @@ def _test_scope(report: dict) -> str:
         name = (f"{_e(e['label'])}<br><code>{_e(e['entry_point'])}</code>" if e.get("label") else f"<code>{_e(e['entry_point'])}</code>")
         if e["type"] != "endpoint":
             name += '<br><span class="mut">no analysed API endpoint</span>'
-        tests = "".join(f"<li><code>{_e(t['name'])}</code> <span class=\"mut\">({_e(t['file'])}, {_e(t['association'])})</span></li>" for t in e["tests"])
+        tests = "".join(f"<li><code>{_e(t['name'])}</code> <span class=\"mut\">({_e(t['file'])}, {_e(t['association'])})</span>{_states(t)}</li>" for t in e["tests"])
         ev = "" if e["evidence_status"] in ("source_confirmed", "contract_confirmed", "corroborated") else f"<br><span class=\"mut\">{_e(e['evidence_status'])}</span>"
         rows.append(f"<tr><td data-label=\"Entry point\">{name}</td><td data-label=\"Service\">{_e(e['service'])}<br><span class=\"mut\">{_e(e['repo'])}</span></td>"
                     f"<td data-label=\"Change effect\"><span class=\"sev {EFFECT_CLASS[e['change_effect']]}\">{_e(EFFECT_TEXT[e['change_effect']])}</span>{ev}</td>"
@@ -203,6 +242,7 @@ def render_page(report: dict, analysis_url: str = "") -> str:
 &middot; analysis <code>{_e(report['analysis_id'])}</code></p>
 {note}{cards}{links}
 <h2>What to test</h2>{_test_scope(report) if st != "failed" else '<p class="mut">The analysis failed.</p>'}
+{_evidence_sections(report) if st != "failed" else ""}
 <h2>Findings</h2>{table}
 <h2>Changes analysed</h2>{_components(report)}
 <h2>Unknowns</h2>{_unknowns(report)}

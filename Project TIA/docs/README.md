@@ -13,6 +13,10 @@ This folder contains the **Architecture Diagram** and **Interactive Codebase Min
 | 📄 [**PRD (Product Requirements Document)**](PRD.md) ([PDF](PRD.pdf)) | Markdown & PDF | Complete product specification, user journeys, release phases, and acceptance criteria. |
 | 🏛️ [**Architecture Specification**](ARCHITECTURE.md) ([PDF](ARCHITECTURE.pdf)) | Markdown & PDF | High-level system design, multi-tenant isolation, data flows, and component models. |
 | ⚙️ [**Technical Framework**](TECHNICAL-FRAMEWORK.md) ([PDF](TECHNICAL-FRAMEWORK.pdf)) | Markdown & PDF | Technical implementation framework, algorithm specifications, and integration requirements. |
+| [Administrator guide](ADMIN-GUIDE.md) · [User guide](USER-GUIDE.md) | Markdown | Installing, configuring and operating TIA; using its reports and views. |
+| [API reference](API.md) · [OpenAPI](openapi.json) · [Python client](../sdk/python/tia_client/__init__.py) | Markdown, JSON | Every route with its permission (generated). |
+| [Operations: HA, backup, DR](OPERATIONS.md) · [Compliance mapping](COMPLIANCE.md) · [Security](SECURITY.md) | Markdown | RPO/RTO runbook, SOC 2 / ISO 27001 control mapping, threat model. |
+| [Language adapter SDK](ADAPTER-SDK.md) · [Graph store decision](GRAPH-STORE.md) · [Performance](PERFORMANCE.md) · [Release gates](RELEASE-GATES.md) | Markdown | Adding languages; why PostgreSQL holds the graph; benchmark results; gate assessment. |
 
 > **Tip:** You can double-click either `.html` file in Windows Explorer or open them in any browser (Chrome, Edge, etc.) for full pan/zoom, interactive filtering, and styled Mermaid visualisations.
 

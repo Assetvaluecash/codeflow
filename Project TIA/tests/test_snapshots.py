@@ -44,7 +44,7 @@ def test_snapshot_is_materialised_with_everything_needed_to_audit_the_result(lan
     heads = {n: git(p, "rev-parse", "HEAD") for n, p in landscape.items()}
     assert snap["revisions"]["mobile-bff"] == heads["mobile-bff"]                         # every repository, pinned to a commit
     assert set(snap["revisions"]) == set(landscape) and snap["revisions"]["payments-service"] == snap["target_base"]
-    assert snap["config_version"] and snap["extractor_versions"] == rep["extractor_versions"] and set(rep["extractor_versions"]) == {"python", "java", "data"}
+    assert snap["config_version"] and snap["extractor_versions"] == rep["extractor_versions"] and set(rep["extractor_versions"]) == {"python", "java", "data", "go", "csharp", "kotlin", "typescript"}
     assert snap["freshness"]["payments-service"]["scan_status"] == "ok" and snap["stale_relationships"] == []
     assert c.get("/api/v1/evidence-snapshots/snap-nope").status_code == 404
 

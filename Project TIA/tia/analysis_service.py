@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+from .evidence import EvidenceStore
 from . import CONFIG_VERSION, EXTRACTOR_VERSION, EXTRACTOR_VERSIONS, gitutil
 from .extraction import extract_commit
 from .graph import Graph
@@ -95,7 +96,56 @@ def freshness_of(svc: RepoService, scope: list, repos: Optional[dict] = None) ->
     return out
 
 
-def execute(svc: RepoService, store: Store, c: dict) -> dict:
+def notify_owners(store: Store, rep: dict, secrets=None, link: Optional[str] = None, actor: Optional[str] = None) -> dict:
+    """FR-045: notify each owning team of a materially affected component once per analysis (a team whose last notification failed is
+    tried again) and record every attempt as evidence. -> coordination status."""
+    from .coordination import channel_for, message, send, teams_to_notify
+    from .itsm import ItsmError, client_for
+    snap = store.get_snapshot(rep.get("evidence_snapshot_id", "")) or {}
+    cfg = _snapshot_config(snap) if snap else store.effective_config()
+    live = store.effective_config()                      # channels are delivery settings: the current ones apply
+    owners = {**(rep.get("owners") or {}), **cfg.ownership}
+    es = EvidenceStore(store.db, store.tenant_id)
+    ch_ = rep["change"]
+    previous = [r["data"] for r in es.list("notification", repo=ch_["repository"], limit=5000) if r["data"].get("analysis_id") == rep["analysis_id"]]
+    itsm, itsm_error = None, None
+    for team, fs in teams_to_notify(rep, owners).items():
+        if any(n.get("team") == team and n.get("status") == "sent" for n in previous):
+            continue                                       # once delivered, never sent again; only failed deliveries are retried
+        ch = channel_for(live.coordination, team)
+        subject, text = message(rep, team, fs, link)
+        if ch is None:
+            outcome = {"channel": None, "status": "failed", "detail": "no notification channel is configured for this team (coordination.channels)"}
+        elif ch["type"] == "servicenow_task" and itsm_error is not None:
+            outcome = {"channel": ch["type"], "status": "failed", "detail": itsm_error}
+        else:
+            if ch["type"] == "servicenow_task" and itsm is None:
+                try:
+                    itsm = client_for(live.itsm, secrets)
+                except ItsmError as e:
+                    itsm_error = str(e)
+            outcome = ({"channel": ch["type"], "status": "failed", "detail": itsm_error} if ch["type"] == "servicenow_task" and itsm_error
+                       else send(ch, team, subject, text, rep, fs, secrets, itsm))
+        data = {"analysis_id": rep["analysis_id"], "team": team, "components": sorted({f["component"] for f in fs}), **outcome,
+                "by": actor or "tia", "at": datetime.now(timezone.utc).isoformat(timespec="microseconds")}
+        es.put("notification", outcome["channel"] or "none", data, repo=ch_["repository"], revision=ch_.get("proposed_revision"), actor=actor or "tia")
+        store.audit("team_notified", analysis=rep["analysis_id"], team=team, channel=outcome["channel"], status=outcome["status"])
+    return coordination_status(store, rep)
+
+
+def coordination_status(store: Store, rep: dict) -> dict:
+    from .coordination import status
+    snap = store.get_snapshot(rep.get("evidence_snapshot_id", "")) or {}
+    cfg = _snapshot_config(snap) if snap else store.effective_config()
+    owners = {**(rep.get("owners") or {}), **cfg.ownership}
+    es = EvidenceStore(store.db, store.tenant_id)
+    repo = rep["change"]["repository"]
+    pick = lambda kind: [{**r["data"], "evidence_id": r["id"]} for r in es.list(kind, repo=repo, limit=5000)        # noqa: E731
+                         if r["data"].get("analysis_id") == rep["analysis_id"]]
+    return status(rep, owners, pick("notification"), pick("acknowledgement"))
+
+
+def execute(svc: RepoService, store: Store, c: dict, secrets=None) -> dict:
     repos = {r.name: r for r in svc.list()}                     # one query, not three per repository
     paths = {n: (repos[n] if n in repos else svc.get(n)).path for n in c["scope"]}
     scope = set(c["scope"])
@@ -106,9 +156,15 @@ def execute(svc: RepoService, store: Store, c: dict) -> dict:
                                   revisions=c["revisions"], pull_request=c.get("pr"), change_record=c.get("change_record"),
                                   max_depth=c["max_depth"], max_results=c["max_results"], time_budget_s=c.get("time_budget_s", 60.0),
                                   strip_prefixes=tuple(c.get("strip_prefixes", ())), test_naming=c.get("test_naming", True),
-                                  freshness=freshness_of(svc, c["scope"], repos), stale_relationships=stale, config=cfg), store)
+                                  freshness=freshness_of(svc, c["scope"], repos), stale_relationships=stale, config=cfg,
+                                  evidence=EvidenceStore(store.db, store.tenant_id).for_analysis(paths, c["target"], c["head"])), store)
     if rep["status"] != "failed":
         pin_analysis(svc, rep)
+        if cfg.coordination.get("auto_notify") and rep.get("findings"):
+            try:
+                notify_owners(store, rep, secrets)
+            except Exception as e:                       # noqa: BLE001 - a notification problem never fails the analysis
+                store.audit("team_notification_failed", analysis=rep["analysis_id"], error=str(e)[:200])
     return rep
 
 
@@ -150,7 +206,8 @@ def reproduce(svc: RepoService, store: Store, analysis_id: str) -> dict:
         change_record=orig["change"].get("change_record"), max_depth=snap["max_depth"], max_results=snap["max_results"],
         test_naming=snap["test_naming"], strip_prefixes=tuple(snap["strip_prefixes"]), freshness=snap["freshness"],
         stale_relationships=snap["stale_relationships"], time_budget_s=snap.get("time_budget_s", 60.0),
-        config=_snapshot_config(snap)), store, persist=False)
+        config=_snapshot_config(snap), evidence=EvidenceStore(store.db, store.tenant_id).pinned(snap.get("evidence_ids") or {})),
+        store, persist=False)
     diff = differences(orig, new)
     versions_match = (snap["config_version"] == CONFIG_VERSION and snap["extractor_versions"] == EXTRACTOR_VERSIONS)
     store.audit("analysis_reproduced", analysis=analysis_id, snapshot=snap["id"], identical=not diff, versions_match=versions_match)
@@ -287,7 +344,7 @@ def make_handlers(db, allow_local: bool = False, allowed_hosts: Optional[list] =
             refresh_landscape(svc, store)
             cfg = store.effective_config()
             concrete = resolve(svc, {"target": p["repo"], "pr": p["pr"], "base": p["base_ref"], "token": scm.github_token}, cfg=cfg)
-            rep = execute(svc, store, concrete)
+            rep = execute(svc, store, concrete, SecretStore(db, job.tenant_id, keywrapper) if keywrapper else None)
         except IngestError as e:
             refresh_landscape(svc, store)          # a failed fetch makes this repository's relationships stale
             if _transient(str(e)):
@@ -314,7 +371,7 @@ def make_handlers(db, allow_local: bool = False, allowed_hosts: Optional[list] =
             return {"skipped": "superseded by a newer submission"}      # newest wins: do not do stale work
         svc = RepoService(store, workspace, allow_local=allow_local, allowed_hosts=allowed_hosts)
         try:
-            rep = execute(svc, store, job.payload)
+            rep = execute(svc, store, job.payload, SecretStore(db, job.tenant_id, keywrapper) if keywrapper else None)
         except IngestError as e:
             raise PermanentError(str(e))
         return {"analysis_id": rep["analysis_id"], "status": rep["status"]}
@@ -345,7 +402,7 @@ def make_handlers(db, allow_local: bool = False, allowed_hosts: Optional[list] =
             cfg = store.effective_config()
             concrete = resolve(svc, {"target": p["repo"], "head": head, "base": p["base_ref"]}, cfg=cfg)
             concrete["pr"] = p["pr"]
-            rep = execute(svc, store, concrete)
+            rep = execute(svc, store, concrete, SecretStore(db, job.tenant_id, keywrapper) if keywrapper else None)
         except IngestError as e:
             refresh_landscape(svc, store)
             if _transient(str(e)):
@@ -365,4 +422,53 @@ def make_handlers(db, allow_local: bool = False, allowed_hosts: Optional[list] =
                           result={"comment": res["comment"], "check_run": res["status"]})
         return {"analysis_id": rep["analysis_id"], "status": rep["status"], "comment": res["comment"], "pr_status": res["status"]}
 
-    return {"impact_analysis": impact_analysis, "github_pull_request": github_pull_request, "ado_pull_request": ado_pull_request}
+    def scm_pull_request(job):
+        """A GitLab merge request or Bitbucket pull request event: sync, fetch it, analyse against its target branch, upsert comment and status."""
+        from . import scmhosts
+        from .publish import audience_view
+        p = job.payload
+        if cancelled(job):
+            return {"skipped": "superseded by a newer push"}
+        hcfg = scmhosts.HostConfig.from_env(p["provider"])
+        secrets = SecretStore(db, job.tenant_id, keywrapper) if keywrapper else None
+        token = hcfg.token or (secrets.get_text(f"{p['provider']}/token") if secrets else None)
+        if not token:
+            raise PermanentError(f"no {p['provider']} token is configured on the worker (TIA_{p['provider'].upper()}_TOKEN or the tenant's stored {p['provider']}/token)")
+        store = Store(db, job.tenant_id, audit_key)
+        svc = RepoService(store, workspace, allow_local=allow_local, allowed_hosts=allowed_hosts)
+        try:
+            svc.sync(p["repo"], token)
+            head = p.get("head_sha")
+            try:
+                merged = svc.fetch_pull_request(p["repo"], p["pr"], token)
+            except IngestError:
+                merged = None                                      # Bitbucket Cloud has no pull-request refs: the source branch was synced
+            try:
+                gitutil.resolve_rev(svc.get(p["repo"]).path, head or "")
+            except gitutil.GitError:
+                head = merged or svc.resolve(p["repo"], p["host"].get("source_ref"))
+            refresh_landscape(svc, store)
+            cfg = store.effective_config()
+            concrete = resolve(svc, {"target": p["repo"], "head": head, "base": p["base_ref"]}, cfg=cfg)
+            concrete["pr"] = p["pr"]
+            rep = execute(svc, store, concrete, secrets)
+        except IngestError as e:
+            refresh_landscape(svc, store)
+            if _transient(str(e)):
+                raise
+            raise PermanentError(str(e))
+        if cancelled(job):
+            return {"analysis_id": rep["analysis_id"], "skipped_publish": "superseded by a newer push"}
+        scm_t = with_tenant_config(base_scm, store.effective_config())
+        view = audience_view(rep, p["repo"], scm_t, [p["repo"]] if os.environ.get("TIA_AUTH_REQUIRED", "").lower() in ("1", "true", "yes") else None)
+        try:
+            res = scmhosts.publish(hcfg, token, rep, view, p["host"]["full_name"], p["pr"], head, scm_t.public_url, p["host"].get("project_id"))
+        except scmhosts.ScmHostError as e:
+            if e.permanent:
+                raise PermanentError(str(e))
+            raise
+        audit_publication(store, provider=p["provider"], full_name=p["host"]["full_name"], pr=p["pr"], analysis_id=rep["analysis_id"], result=res)
+        return {"analysis_id": rep["analysis_id"], "status": rep["status"], "comment": res["comment"], "commit_status": res["status"]}
+
+    return {"impact_analysis": impact_analysis, "github_pull_request": github_pull_request, "ado_pull_request": ado_pull_request,
+            "scm_pull_request": scm_pull_request}

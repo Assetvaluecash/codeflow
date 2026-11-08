@@ -177,6 +177,68 @@ class Tenants:
             self._event(c, t["id"], "quota_changed", old=t["storage_quota_bytes"], new=storage_quota_bytes)
             return self._resolve(c, t["id"])
 
+    # ---- plan limits, region, customer-managed key (PL-014, PL-015, PL-016) -----------------------------------------------------
+    def set_limits(self, ref: str, limits: dict) -> dict:
+        from .saas import validate_plan
+        try:
+            lim = validate_plan(limits)
+        except ValueError as e:
+            raise TenantError(str(e))
+        with self._connect() as c:
+            t = self._resolve(c, ref)
+            c.execute("update tenants set plan_limits = %s where id = %s", (Jsonb(lim), t["id"]))
+            self._event(c, t["id"], "plan_limits_set", limits=lim)
+        return {"tenant": t["name"], "plan": t["plan"], "limits": lim}
+
+    def set_region(self, ref: str, region: Optional[str]) -> dict:
+        from .saas import REGIONS
+        if region is not None and region not in REGIONS:
+            raise TenantError(f"region must be one of {', '.join(REGIONS)} (or 'none')")
+        with self._connect() as c:
+            t = self._resolve(c, ref)
+            if region is not None and c.execute("select count(*) from repositories where tenant_id = %s", (t["id"],)).fetchone()[0] and \
+                    c.execute("select region from tenants where id = %s", (t["id"],)).fetchone()[0] not in (None, region):
+                raise TenantError("this tenant already holds data in another region: move it with a regional export and import, not by "
+                                  "changing the setting")
+            c.execute("update tenants set region = %s where id = %s", (region, t["id"]))
+            self._event(c, t["id"], "region_set", region=region)
+        return {"tenant": t["name"], "region": region}
+
+    def set_key(self, ref: str, key_ref: Optional[str], platform_wrapper=None) -> dict:
+        """Switch the tenant's data keys to a customer-managed key (or back to the platform's): every data key is unwrapped with the key that
+        wraps it now and wrapped with the new one, in one transaction, so no secret is ever lost or exposed."""
+        from .credentials import SecretError, keywrapper_from_env
+        from .kms import wrapper_for
+        from .secretstore import _aad_key
+        base = platform_wrapper or keywrapper_from_env()
+        with self._connect() as c:
+            t = self._resolve(c, ref)
+            old_ref = c.execute("select key_ref from tenants where id = %s", (t["id"],)).fetchone()[0]
+            try:
+                old, new = wrapper_for(old_ref, base), wrapper_for(key_ref, base)
+                if new is None:
+                    raise SecretError("no key-encryption key is configured")
+                rows = c.execute("select version, wrapped_dek from tenant_keys where tenant_id = %s for update", (t["id"],)).fetchall()
+                for version, wrapped in rows:
+                    dek = old.unwrap(bytes(wrapped), _aad_key(t["id"], version))
+                    c.execute("update tenant_keys set wrapped_dek = %s, kek_id = %s where tenant_id = %s and version = %s",
+                              (new.wrap(dek, _aad_key(t["id"], version)), new.id[:200], t["id"], version))
+            except SecretError as e:
+                raise TenantError(f"the data keys could not be re-wrapped: {e}")
+            c.execute("update tenants set key_ref = %s where id = %s", (key_ref, t["id"]))
+            self._event(c, t["id"], "customer_key_set", key_ref=key_ref, rewrapped=len(rows))
+        return {"tenant": t["name"], "key_ref": key_ref, "data_keys_rewrapped": len(rows)}
+
+    def meter(self, ref: str, month: Optional[str] = None) -> dict:
+        """PL-014: the tenant's metered usage for a month (the billing export)."""
+        from .saas import usage as metered
+        with self._connect() as c:
+            t = self._resolve(c, ref)
+            c.execute("select set_config('tia.tenant_id', %s, false)", (t["id"],))
+            u = metered(c, t["id"], month)
+            lim = c.execute("select plan_limits from tenants where id = %s", (t["id"],)).fetchone()[0]
+        return {"tenant": t["name"], "tenant_id": t["id"], "plan": t["plan"], "limits": lim, **u}
+
     def usage(self, ref: str, workspace_dirs=()) -> dict:
         """What the tenant stores: database row bytes per table (row sizes, excluding indexes) and workspace bytes on disk."""
         with self._connect() as c:
@@ -383,7 +445,8 @@ def certificate_valid(cert: dict) -> bool:
 # ---- command line --------------------------------------------------------------------------------------------------
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m tia.tenants", description="TIA tenant lifecycle (admin credentials).")
-    ap.add_argument("--admin-dsn", default=os.environ.get("TIA_ADMIN_DATABASE_URL"), help="admin DSN (default: $TIA_ADMIN_DATABASE_URL)")
+    from .credentials import env_secret
+    ap.add_argument("--admin-dsn", default=env_secret("TIA_ADMIN_DATABASE_URL"), help="admin DSN (default: $TIA_ADMIN_DATABASE_URL or _FILE)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("create"); p.add_argument("name"); p.add_argument("--display-name"); p.add_argument("--plan", default="standard")
     p.add_argument("--quota-bytes", type=int)
@@ -393,6 +456,13 @@ def main(argv=None) -> int:
     p = sub.add_parser("suspend"); p.add_argument("tenant"); p.add_argument("--reason", required=True)
     p = sub.add_parser("quota"); p.add_argument("tenant"); p.add_argument("bytes", help="bytes, or 'none' for unlimited")
     p = sub.add_parser("usage"); p.add_argument("tenant"); p.add_argument("--workspace", action="append", default=[])
+    p = sub.add_parser("limits-set", help="plan limits: max_repositories, max_users, max_analyses_per_month, max_evidence_records_per_month")
+    p.add_argument("tenant"); p.add_argument("limits", help='JSON, e.g. {"max_repositories": 200, "max_users": null}')
+    p = sub.add_parser("region-set", help="pin the tenant to a hosting region (data residency)"); p.add_argument("tenant"); p.add_argument("region")
+    p = sub.add_parser("key-set", help="use a customer-managed key (aws-kms:ARN | azure-kv:URL | vault-transit:NAME | none)")
+    p.add_argument("tenant"); p.add_argument("key_ref")
+    p = sub.add_parser("meter", help="metered usage for a month (billing export)"); p.add_argument("tenant")
+    p.add_argument("--month", help="YYYY-MM (default: this month)"); p.add_argument("--format", choices=("json", "csv"), default="json")
     for cmd in ("map-installation", "unmap-installation"):
         p = sub.add_parser(cmd); p.add_argument("tenant"); p.add_argument("provider", choices=PROVIDERS); p.add_argument("installation_id")
         if cmd == "map-installation":
@@ -426,6 +496,10 @@ def main(argv=None) -> int:
             "installations": lambda: svc.installations(a.tenant), "suspend": lambda: svc.suspend(a.tenant, a.reason),
             "quota": lambda: svc.set_quota(a.tenant, None if a.bytes.lower() == "none" else int(a.bytes)),
             "usage": lambda: svc.usage(a.tenant, a.workspace),
+            "limits-set": lambda: svc.set_limits(a.tenant, json.loads(a.limits)),
+            "region-set": lambda: svc.set_region(a.tenant, None if a.region.lower() == "none" else a.region.lower()),
+            "key-set": lambda: svc.set_key(a.tenant, None if a.key_ref.lower() == "none" else a.key_ref),
+            "meter": lambda: svc.meter(a.tenant, a.month),
             "map-installation": lambda: svc.map_installation(a.tenant, a.provider, a.installation_id, a.account),
             "unmap-installation": lambda: svc.unmap_installation(a.tenant, a.provider, a.installation_id) or {"unmapped": True},
             "offboard": lambda: svc.offboard(a.tenant, a.confirm, a.workspace),
@@ -441,6 +515,11 @@ def main(argv=None) -> int:
     except (TenantError, OSError, json.JSONDecodeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    if a.cmd == "meter" and a.format == "csv":
+        keys = [k for k in out if k != "limits"]
+        print(",".join(keys))
+        print(",".join(str(out[k]) for k in keys))
+        return 0
     print(json.dumps(out, indent=2, default=str))
     return 0
 

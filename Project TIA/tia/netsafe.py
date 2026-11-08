@@ -17,6 +17,7 @@ import ssl
 import threading
 import urllib.parse
 from typing import Optional
+from . import airgap
 
 MAX_BODY = 1_000_000
 TIMEOUT = 5.0
@@ -100,6 +101,7 @@ class _Conn(http.client.HTTPConnection):
 def request(method: str, url: str, *, data: Optional[bytes] = None, headers: Optional[dict] = None, private_ok: Optional[bool] = None,
             ca_file: Optional[str] = None) -> tuple[int, bytes]:
     """One HTTP request. Returns (status, body); redirects are not followed; the body is capped."""
+    airgap.guard(url, "outbound request")
     private_ok = allow_private() if private_ok is None else private_ok
     u = check_url(url, private_ok)
     port = u.port or (443 if u.scheme == "https" else 80)

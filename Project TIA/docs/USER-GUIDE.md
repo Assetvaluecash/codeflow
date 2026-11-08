@@ -163,9 +163,93 @@ Coverage here is **static**. "Covered" means a test addresses the aspect, not th
 * A written test case is matched by its text: it must name the field and use words such as "missing" or "invalid".
 * Functional coverage against business requirements is a separate tool.
 
+## 4d. Evidence beyond the code (CI, coverage, runtime, deployments)
+
+When your pipelines push evidence to TIA (see the [administrator guide](ADMIN-GUIDE.md#15-evidence-ci-results-coverage-runtime-deployments)), the report also says:
+
+* **For every relevant test**, these states, never merged into one another:
+  * it exists;
+  * it is associated (and how);
+  * it `passed` / `failed` / was `skipped` in a named CI build, and whether that build was of the analysed revision;
+  * it `executed` the component (per-test coverage);
+  * it `validated_contract` (it calls the affected endpoint and passed on the analysed revision).
+  * Without CI results it says `no_ci_results`; without per-test coverage, whether a test executed a component is *unknown*, not "no".
+* **Recommended tests**, each with the reason it is relevant: priority 1 executed the changed code, 2 is associated with an affected component, 3 by
+  naming only. Tests not listed are **not** shown to be safe to skip.
+* **Without test evidence**: affected entry points and material findings for which no relevant test evidence was found in the analysed sources.
+* **Observed at runtime**: a relationship seen in telemetry is `corroborated` (source and runtime agree) or `runtime_observed` (only seen at runtime, for
+  example a caller outside the analysed repositories), with the environments, time window and versions. A dependency **not** observed is still reported:
+  absence of an observation is not proof.
+* **Deployments**: per environment, the revision deployed and whether it is the analysed, the base or the proposed revision. A consumer running an older
+  revision in production is called out on its finding.
+
+## 4e. Contracts and events
+
+* **REST contracts** are compared in full:
+  * removed or moved routes;
+  * removed or retyped fields;
+  * fields or parameters that became required;
+  * allowed values removed from a request (narrowing) or added to a response (widening);
+  * tightened limits (shorter maximum length, higher minimum, a new pattern);
+  * a response that changes between an object and a list;
+  * the success status;
+  * authentication and authorisation requirements.
+
+  Your organisation can set each rule to *breaking* or *compatible*. OpenAPI/Swagger files in a repository count like code; where the code declares the
+  same endpoint, the code wins.
+* **Events (Kafka)**:
+  * Producers and consumers are found in Python and Java code, or declared in `tia-services.yaml`.
+  * Avro and JSON Schema files are tied to their topic.
+  * A removed or retyped field, a new enum value or a topic no longer produced reaches every known consumer, with the evidence (`E1` code, `E2` declaration).
+  * A topic that no analysed repository consumes is reported as an unknown.
+
+## 4f. Release policy
+
+If your organisation configured a release policy, the report, the PR comment and the check run show each rule's outcome:
+* `pass`;
+* `fail` (with the failing requirement and its evidence);
+* `not_evaluated` (a data source such as CI results is missing: never treated as a pass);
+* `requires_review`.
+
+In *advisory* mode nothing is blocked. In *enforcing* mode a failed mandatory rule makes the TIA check fail, and your branch protection decides what that blocks.
+An owning team approves with `POST /api/v1/impact-analyses/{aid}/approvals`.
+
+## 4g. Assistants (MCP)
+
+Coding assistants can read reports through TIA's MCP server (`POST /mcp`):
+* `get_impact_report` / `find_impact_report` / `get_test_scope` / `get_policy_outcome`;
+* read-only, showing what your token may see;
+* an assistant should cite the analysis id and narrate only what the report contains.
+
+## 4h. Releases, environments and incidents
+
+* **Releases**: `POST /api/v1/releases` with `{"name": "2026.11", "revisions": {"orders-service": "v4.2", ...}}` records a release (commits, tags or branches,
+  resolved to commits) and the dependency graph at exactly those revisions.
+  * `GET /api/v1/releases/compare?base=2026.10&head=2026.11` lists the dependencies **introduced**, **removed** and **modified** (same two ends, different evidence) between them.
+  * `GET /api/v1/releases/{name}/consumers?component=GET%20/prices/{}` answers "who was known to use this API, schema or topic in that release".
+* **What ran where**: `GET /api/v1/environments/at?at=2026-10-20T12:00:00Z` gives, per repository and environment, the revision deployed at that moment (from deployment records).
+* **Incidents**: push an incident with `POST /api/v1/incidents`, link a change you have validated with `POST /api/v1/incidents/{iid}/links`, and open
+  `GET /api/v1/incidents/{iid}/investigation`. Each candidate change says **how** it is associated:
+  * `directly_recorded` (the incident names it);
+  * `time_correlated` (deployed to the incident's service and environment shortly before; 72 hours by default, `window_hours` to change);
+  * `dependency_derived` (deployed to a service the incident's service depends on);
+  * `manually_validated` (a person linked it, with who and when).
+
+  TIA never names a root cause: the candidates are leads for your investigation, not a conclusion.
+
+## 4i. Teams, verdicts and trends
+
+* **Coordination**: when a change materially affects components other teams own, those teams are notified (chat, e-mail or a ServiceNow task, as your
+  organisation configured). Acknowledge for your team with `POST /api/v1/impact-analyses/{aid}/acknowledgements`; `GET /api/v1/impact-analyses/{aid}/coordination`
+  shows who was told and who has acknowledged. A release policy can require every affected team's acknowledgement.
+* **Verdicts**: if a finding was right, wrong or not worth the attention, say so with `POST /api/v1/impact-analyses/{aid}/verdicts`
+  (`confirmed`, `false_positive`, `irrelevant`). Verdicts measure each rule's precision (`GET /api/v1/calibration`); they never change the report.
+* **Trends**: `GET /api/v1/trends` shows, per application or team and month, how many changes were analysed, how many were breaking, and how often
+  dependencies were unresolved or affected components had no test. These are past figures, not a forecast.
+
 ## 5. Pull requests
 
-When your organisation has connected GitHub, opening or updating a pull request makes TIA analyse it automatically and post **one comment**, updated in place on every push,
+When your organisation has connected GitHub, GitLab, Bitbucket or Azure DevOps, opening or updating a pull (merge) request makes TIA analyse it automatically and post **one comment**, updated in place on every push,
 plus a **neutral** check run. A newer push supersedes an older run; an old run never overwrites a newer result. The comment links to the full report.
 By default the comment names only the pull request's own repository; whether it may mention other repositories is a setting your organisation chooses.
 
@@ -184,10 +268,11 @@ Two settings matter most for accuracy:
 
 * TIA analyses what is **in the repositories you connected**. Consumers outside them are reported as an unknown, not as absent.
 * HTTP clients it does not understand are listed, not guessed.
-* Compatibility is evaluated for routes and for the fields of request and response bodies; status codes, authentication, enum narrowing and headers are listed as *not evaluated*.
-* Runtime behaviour, events, deployed versions and release policy are not part of this release.
+* Languages: Python, Java, Go, C#/.NET, Kotlin and TypeScript/JavaScript (Express, NestJS) back ends; Angular, React and Vue front ends.
+* Compatibility is evaluated for routes, fields, constraints, enums, success status codes, response shape and authentication; headers and error response bodies are listed as *not evaluated*.
+* Runtime behaviour and deployed versions come only from the evidence pushed to TIA; a dependency not observed in that window may still exist.
 * An *inferred* finding is a lead, not a fact: check it.
-* **What to test** is limited to API entry points:
-  * Screens are named only through the labels you declare. Front-end code (JavaScript/TypeScript) is not analysed.
-  * Tests are found by static association and are not run.
+* **What to test**:
+  * Screens are named through the labels you declare, or found in the front-end code you connected.
+  * Tests are found by static association and are not run by TIA; their results come from the CI results you push.
   * Rule gaps cover item filters in Python (comprehension conditions, `filter`, loops that skip or collect items) and Java (stream `filter`, `removeIf`). Other ways of applying a rule (SQL `WHERE` clauses, validation annotations, `if` branches that return early) are not compared.

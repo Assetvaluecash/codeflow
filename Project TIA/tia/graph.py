@@ -4,9 +4,9 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import asdict
 
-from .data import add_data_layer
+from .data import add_data_layer, add_sql_lineage
 from .extract_python import module_name
-from .models import INFERRED, SOURCE_CONFIRMED, Edge, RepoExtract
+from .models import CONTRACT_CONFIRMED, INFERRED, SOURCE_CONFIRMED, Edge, RepoExtract
 from .resolve import resolve_consumers
 
 
@@ -25,6 +25,7 @@ class Graph:
         self.unresolved: list[dict] = []
         self.resolution_stats: dict = {}
         self.ambiguous_calls = 0
+        self.sql_unresolved: list[dict] = []        # procedure calls that match no analysed definition (FR-041)
 
     def add_node(self, nid: str, **attrs):
         self.nodes[nid] = attrs
@@ -32,10 +33,10 @@ class Graph:
     def add_edge(self, e: Edge):
         self.edges.append(e)
         # impact direction (who is affected when `key` changes)
-        if e.rel == "HANDLES":                 # handler change -> endpoint
+        if e.rel in ("HANDLES", "PUBLISHES"):  # handler change -> endpoint; producer change -> the topic it publishes to
             self._impact[e.src].append((e.dst, e))
             self._deps[e.dst].append((e.src, e))
-        elif e.rel in ("CALLS", "USES_SCHEMA", "CONSUMES_API", "ISSUES", "TESTS", "MAPS_TO", "MAPS_COLUMN", "READS", "WRITES"):
+        elif e.rel in ("CALLS", "USES_SCHEMA", "CONSUMES_API", "CONSUMES_EVENT", "ISSUES", "TESTS", "MAPS_TO", "MAPS_COLUMN", "READS", "WRITES"):
             self._impact[e.dst].append((e.src, e))     # table/column -> entity -> function: who is affected by a data change
             self._deps[e.src].append((e.dst, e))
         # EXPOSES / OWNED_BY / MIGRATES are not traversed
@@ -49,7 +50,7 @@ class Graph:
 
     def to_dict(self) -> dict:
         return {"nodes": self.nodes, "edges": [asdict(e) for e in self.edges], "unresolved": self.unresolved,
-                "resolution_stats": self.resolution_stats, "ambiguous_calls": self.ambiguous_calls}
+                "resolution_stats": self.resolution_stats, "ambiguous_calls": self.ambiguous_calls, "sql_unresolved": self.sql_unresolved}
 
     @staticmethod
     def from_dict(d: dict) -> "Graph":
@@ -58,7 +59,38 @@ class Graph:
         for e in d["edges"]:
             g.add_edge(Edge(**e))
         g.unresolved, g.resolution_stats, g.ambiguous_calls = d["unresolved"], d["resolution_stats"], d["ambiguous_calls"]
+        g.sql_unresolved = d.get("sql_unresolved", [])
         return g
+
+
+def add_events(g, extracts: dict):
+    """Topics (global: one Kafka topic name is one node), producers, consumers (listener nodes, like outbound call sites) and the
+    schema each topic carries (FR-019)."""
+    def topic(t):
+        nid = f"topic:{t}"
+        if nid not in g.nodes:
+            g.add_node(nid, type="topic", repo=None, service=None, file=None, line=None, name=t)
+        return nid
+    for repo, ex in extracts.items():
+        ev = lambda file, line: {"repo": repo, "file": file, "line": line, "commit": ex.commit}
+        for e in ex.events:
+            t = topic(e["topic"])
+            status, strat = (CONTRACT_CONFIRMED, "E2") if e.get("declared") else (SOURCE_CONFIRMED, "E1")
+            if e["kind"] == "produces":
+                src = e["function_id"] or f"svc:{ex.service}"
+                g.add_edge(Edge(src, "PUBLISHES", t, status, strat, None, ev(e["file"], e["line"])))
+            else:
+                lid = f"{repo}:{e['file']}:{e['line']}:consumes:{e['topic']}"
+                g.add_node(lid, type="listener", repo=repo, service=ex.service, file=e["file"], line=e["line"], name=f"{e['via']} {e['topic']}")
+                g.add_edge(Edge(lid, "CONSUMES_EVENT", t, status, strat, None, ev(e["file"], e["line"])))
+                if e["function_id"]:
+                    g.add_edge(Edge(e["function_id"], "ISSUES", lid, SOURCE_CONFIRMED, "extract", None, ev(e["file"], e["line"])))
+        for s in ex.event_schemas:
+            g.add_node(s["id"], type="event_schema", repo=repo, service=ex.service, file=s["file"], line=s["line"], name=s["name"])
+            if s.get("topic"):
+                inferred = s.get("topic_source") == "file_name"
+                g.add_edge(Edge(topic(s["topic"]), "USES_SCHEMA", s["id"], INFERRED if inferred else CONTRACT_CONFIRMED,
+                                f"schema-{s.get('topic_source')}", "INF-SCHEMA-FILE-NAME" if inferred else None, ev(s["file"], s["line"])))
 
 
 def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
@@ -89,7 +121,8 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
         schema_ids = {s.name: s.id for s in ex.schemas}
         for e in ex.endpoints:
             g.add_edge(Edge(f"svc:{ex.service}", "EXPOSES", e.id, SOURCE_CONFIRMED, "extract", None, ev(e.file, e.line)))
-            g.add_edge(Edge(e.handler_id, "HANDLES", e.id, SOURCE_CONFIRMED, "extract", None, ev(e.file, e.line)))
+            if e.source == "code":                                  # an endpoint declared only in a specification has no handler in the code
+                g.add_edge(Edge(e.handler_id, "HANDLES", e.id, SOURCE_CONFIRMED, "extract", None, ev(e.file, e.line)))
             for nm in ([e.response_schema] if e.response_schema else []) + list(e.request_schemas):
                 if nm in schema_ids:
                     g.add_edge(Edge(e.id, "USES_SCHEMA", schema_ids[nm], SOURCE_CONFIRMED, "extract", None,
@@ -136,6 +169,7 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
                                 g.add_edge(Edge(t.id, "TESTS", f.id, INFERRED, "test-naming", "INF-TEST-NAMING",
                                                 ev(t.file, t.line)))
 
+    add_events(g, extracts)
     edges, unresolved, stats, synthetic = resolve_consumers(extracts, strip_prefixes)
     for nid, attrs in synthetic.items():
         g.add_node(nid, **attrs)
@@ -143,4 +177,5 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
         g.add_edge(e)
     g.unresolved, g.resolution_stats = unresolved, stats
     add_data_layer(g, extracts)
+    add_sql_lineage(g, extracts)
     return g
