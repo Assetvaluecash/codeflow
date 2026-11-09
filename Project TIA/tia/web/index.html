@@ -20,7 +20,7 @@
   input,select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
   .row{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
   button{padding:7px 14px;border:1px solid var(--acc);background:var(--acc);color:var(--btnfg);border-radius:6px;font:inherit;cursor:pointer}
-  button.sec{background:transparent;color:var(--acc)} button:disabled{opacity:.5;cursor:wait}
+  button.sec{background:transparent;color:var(--acc)} button:disabled{opacity:.5;cursor:not-allowed} button.busy{cursor:wait}
   .tabs{display:flex;gap:6px;margin-bottom:8px} .tabs button{background:transparent;color:var(--fg);border-color:var(--line)} .tabs button.on{border-color:var(--acc);color:var(--acc)}
   table{width:100%;border-collapse:collapse;margin-top:8px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
   th{font-size:12px;color:var(--mut);font-weight:600}
@@ -120,7 +120,7 @@
     <div><label>Repositories (none selected = all)</label><select id="grepos" multiple size="3"></select></div>
     <div><label>Search</label><input id="gq" placeholder="name, path, file"></div>
     <div><label>Layout</label><select id="glayout"><option>cose</option><option>breadthfirst</option><option>concentric</option><option>circle</option><option>grid</option></select></div>
-    <div><button id="gload">Load graph</button> <button class="sec" id="gimpact" disabled>Show impact of last analysis</button> <button class="sec" id="gfit">Fit</button></div>
+    <div><button id="gload">Load graph</button> <button class="sec" id="gimpact" disabled title="Run an analysis in section 3 first">Show impact of last analysis</button> <button class="sec" id="gfit">Fit</button></div>
   </div>
   <div id="ginfo" class="mut" style="margin-top:6px"></div>
   <div id="gwrap"><div id="cy"></div><div id="gside"><span class="mut">Click a node or edge.</span></div></div>
@@ -140,7 +140,7 @@
   <h2>3. Analyse a change</h2>
   <div class="row">
     <div><label>Repository containing the change</label><select id="target"></select></div>
-    <div><label>Head: branch / tag / commit</label><input id="head" placeholder="feature/my-change"></div>
+    <div><label>Head: branch / tag / commit</label><input id="head" placeholder="feature/my-change" list="headchoices" autocomplete="off"><datalist id="headchoices"></datalist></div>
     <div><label>or Pull request number</label><input id="pr" type="number" min="1" placeholder="e.g. 42"></div>
     <div><label>Base (default: default branch)</label><input id="base" placeholder="main"></div>
     <div><label>Token (only to fetch a private PR)</label><input id="atoken" type="password" autocomplete="off"></div>
@@ -187,7 +187,7 @@
     <span id="vmsg" class="mut" aria-live="polite"></span>
   </div>
   <h2>PR comment (markdown)</h2><pre id="comment" tabindex="0" aria-label="Pull request comment (markdown)"></pre>
-  <p><button class="sec" id="toimpact" disabled>Show on graph</button> <button class="sec" id="copy">Copy comment</button> <button class="sec" id="json">Show full JSON</button> <a id="permalink" class="mut"></a></p>
+  <p><button class="sec" id="toimpact" disabled title="Run an analysis in section 3 first">Show on graph</button> <button class="sec" id="copy">Copy comment</button> <button class="sec" id="json">Show full JSON</button> <a id="permalink" class="mut"></a></p>
   <pre id="raw" class="hidden" tabindex="0" aria-label="Full report (JSON)"></pre>
 </section>
 <section id="testersec">
@@ -325,7 +325,7 @@ async function api(path, opts) {
   if (!r.ok) throw new Error((j && j.detail) || t || r.statusText);
   return j;
 }
-function busy(btn, on) { btn.disabled = on; }
+function busy(btn, on) { btn.disabled = on; btn.classList.toggle("busy", on); }
 // ---- configuration (own fetch: a refusal carries a list of problems, not a message)
 async function cfgCall(path, method, body) {
   const r = await tfetch(path, method ? {method, headers: {"Content-Type":"application/json", "X-TIA-Actor":"ui"}, body: JSON.stringify(body)} : undefined);
@@ -384,7 +384,17 @@ async function loadRepos() {
   fillRepoFilter();
   const cur = $("target").value;
   $("target").innerHTML = repos.map(r => `<option ${r.name===cur?"selected":""}>${esc(r.name)}</option>`).join("");
+  REPO_BRANCHES = Object.fromEntries(repos.map(r => [r.name, r.branches || []]));
+  fillHeadChoices();
 }
+// the Head box suggests the branches that already exist in the chosen repository (typing anything else still works)
+let REPO_BRANCHES = {};
+function fillHeadChoices() {
+  const bs = REPO_BRANCHES[$("target").value] || [];
+  $("headchoices").innerHTML = bs.map(b => `<option value="${esc(b)}">`).join("");
+  $("head").placeholder = bs.length ? `e.g. ${bs.filter(b => b !== "main")[0] || bs[0]} (click to see all branches)` : "feature/my-change";
+}
+$("target").addEventListener("change", fillHeadChoices);
 async function syncRepo(n) { try { await api(`/api/v1/repositories/${encodeURIComponent(n)}/sync`, {method:"POST", body:{token: $("token").value || null}}); } catch(e) { alert(e.message) } loadRepos(); }
 async function delRepo(n) { if (confirm("Remove "+n+"?")) { await api(`/api/v1/repositories/${encodeURIComponent(n)}`, {method:"DELETE"}); loadRepos(); } }
 

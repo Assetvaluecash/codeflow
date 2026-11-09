@@ -466,3 +466,11 @@ The user turned on Kubernetes in Docker Desktop. The kind cluster could not see 
 - **Note:** on Docker Desktop's 2-CPU VM, CPU requests had to be lowered to fit 2 workers.
 - **Not verified:** multi-node cluster, node failure, ReadWriteMany workspace, ingress, network-policy enforcement, Azure Terraform (Terraform not installed).
 - The test release and namespace were removed afterwards.
+
+## 2026-11-09: Demo test data for every UI section
+- **New:** `docs/DEMO-DATA.md` gives, per section (0-7), the exact inputs and the expected result, measured on 2026-11-09.
+- **New:** `tools/demo_seed.py` loads the demo evidence over the public API:
+  - releases 2026.10 and 2026.11, a CI run (3 passed, 1 failed), 4 deployments, production traffic incl. an unknown consumer (mobile-app), incident INC-1001;
+  - writes `loyalty-service-v1.zip` / `-v2.zip` for the upload tab.
+- **New:** `tests/test_demo_seed.py` (5 tests) keeps the page's numbers true. Verified (simulated), and once over HTTP against `run_dev.py`.
+- **Not demoable locally:** sign-in, people, identity providers, Git URL/discovery (need a host and PAT), team notifications (no channel configured).
