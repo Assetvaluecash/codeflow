@@ -196,7 +196,7 @@ any version can be restored (as a new version), and reports record which configu
 ```json
 {
   "limits": {"max_depth": 6, "max_results": 200, "time_budget_seconds": 60, "max_concurrent_jobs": 2},
-  "paths": {"strip_prefixes": ["/api/gateway"]},
+  "paths": {"strip_prefixes": ["/api/gateway"], "exclude_patterns": ["vendor/**", "*.min.js"]},
   "tests": {"naming_convention": true},
   "severity": {"overrides": {"SEV-BREAKING-CRITICAL": "high"}, "inferred_cap": "medium", "stale_cap": "low"},
   "materiality": {"severities": ["high", "critical"], "breaking_on_path": true},
@@ -208,6 +208,9 @@ any version can be restored (as a new version), and reports record which configu
 * `limits` are defaults **and ceilings**: a caller asking for a larger depth gets the tenant's value. `max_concurrent_jobs` can only lower the worker's per-tenant cap.
 * `paths.strip_prefixes` lists URL prefixes that are not part of a service's own routes (an API gateway, or **servlet context paths set in external configuration**).
   TIA does not read context paths from configuration files: if a Feign or WebClient call says `/accounts/{name}` while the controller maps `/{name}`, list `/accounts` here.
+* `paths.exclude_patterns` (up to 100 globs) are files TIA does not analyse at all: vendored code, generated or minified files. `*` stays within one folder, `**` crosses folders,
+  and a pattern without a folder also matches the file name anywhere (`*.min.js`). Other characters are literal. Excluding files only shrinks what is analysed: anything defined in an
+  excluded file is invisible, so a change to it reaches nothing. Every report records the patterns it ran with, and a different list is a different cache entry.
 * A severity override never hides anything: the finding keeps its rule id and records the override.
 * `comments.audience`: `target` (the default) names only the pull request's own repository in its comment; `readers` also names repositories that every reader of the pull request is provably allowed to read
   (needs the repository-access mirror); `all` shows everything (with authentication on it is treated as `readers`).

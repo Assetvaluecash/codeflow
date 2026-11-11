@@ -34,10 +34,10 @@ CRITICALITIES = ("critical", "high", "medium", "low", "none")
 AUDIENCES = ("target", "readers", "all")
 BOUNDS = {"max_depth": (1, 50), "max_results": (1, 5000), "time_budget_seconds": (1, 3600), "max_concurrent_jobs": (1, 16)}
 SERVICE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-MAX_PREFIXES, MAX_SERVICES, MAX_COMMENT = 50, 2000, 500
+MAX_PREFIXES, MAX_EXCLUDES, MAX_SERVICES, MAX_COMMENT = 50, 100, 2000, 500
 SECTIONS = {
     "limits": ("max_depth", "max_results", "time_budget_seconds", "max_concurrent_jobs"),
-    "paths": ("strip_prefixes",), "tests": ("naming_convention",), "severity": ("overrides", "inferred_cap", "stale_cap"),
+    "paths": ("strip_prefixes", "exclude_patterns"), "tests": ("naming_convention",), "severity": ("overrides", "inferred_cap", "stale_cap"),
     "materiality": ("severities", "breaking_on_path"), "comments": ("audience",), "compatibility": ("rules",),
     "itsm": ("provider", "instance_url", "auto_attach"),
     "retention": ("graph_days", "analysis_days", "runtime_days", "incident_days", "audit_days"), "incidents": ("window_hours",)}
@@ -59,6 +59,7 @@ class TenantConfig:
     time_budget_seconds: float = 60
     max_concurrent_jobs: int = 4
     strip_prefixes: tuple = ()
+    exclude_patterns: tuple = ()          # path globs skipped during extraction (vendor/**, *.min.js, ...)
     test_naming: bool = True
     severity_overrides: dict = field(default_factory=dict)
     inferred_cap: str = "medium"
@@ -95,7 +96,8 @@ class TenantConfig:
         """The full, normalised settings in their user-facing shape (defaults filled in)."""
         return {"limits": {"max_depth": self.max_depth, "max_results": self.max_results,
                            "time_budget_seconds": self.time_budget_seconds, "max_concurrent_jobs": self.max_concurrent_jobs},
-                "paths": {"strip_prefixes": list(self.strip_prefixes)}, "tests": {"naming_convention": self.test_naming},
+                "paths": {"strip_prefixes": list(self.strip_prefixes), "exclude_patterns": list(self.exclude_patterns)},
+                "tests": {"naming_convention": self.test_naming},
                 "severity": {"overrides": dict(sorted(self.severity_overrides.items())), "inferred_cap": self.inferred_cap,
                              "stale_cap": self.stale_cap},
                 "materiality": {"severities": list(self.material_severities), "breaking_on_path": self.breaking_is_material},
@@ -187,6 +189,23 @@ def parse(raw) -> TenantConfig:
                 else:
                     out.append(p)
             kw["strip_prefixes"] = tuple(out)
+    if "exclude_patterns" in paths:
+        pv = paths["exclude_patterns"]
+        out = []
+        if not isinstance(pv, list) or not all(isinstance(x, str) for x in pv):
+            problems.append("paths.exclude_patterns must be a list of strings")
+        elif len(pv) > MAX_EXCLUDES:
+            problems.append(f"paths.exclude_patterns may hold at most {MAX_EXCLUDES} patterns")
+        else:
+            for x in pv:
+                p = x.replace("\\", "/").strip()
+                if not p or len(p) > 200:
+                    problems.append(f"paths.exclude_patterns: '{x}' is not a usable path glob")
+                elif p in out:
+                    problems.append(f"paths.exclude_patterns: '{x}' is listed twice")
+                else:
+                    out.append(p)
+            kw["exclude_patterns"] = tuple(out)
     tests = section("tests")
     if "naming_convention" in tests:
         if isinstance(tests["naming_convention"], bool):

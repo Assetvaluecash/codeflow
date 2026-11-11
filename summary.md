@@ -474,3 +474,41 @@ The user turned on Kubernetes in Docker Desktop. The kind cluster could not see 
   - writes `loyalty-service-v1.zip` / `-v2.zip` for the upload tab.
 - **New:** `tests/test_demo_seed.py` (5 tests) keeps the page's numbers true. Verified (simulated), and once over HTTP against `run_dev.py`.
 - **Not demoable locally:** sign-in, people, identity providers, Git URL/discovery (need a host and PAT), team notifications (no channel configured).
+
+## 2026-11-11: Features ported from github.com/Assetvaluecash/tia (the "Pulse ports")
+The GitHub copy is this project split into `core/` (app) and `metadata/` (tests, docs), plus one feature commit. Read in full, then re-applied here by hand (the bulk copy was refused by the safety check).
+- **Ported:**
+  - ambiguous calls kept as inferred `CALLS` edges (`INF-CALL-AMBIGUOUS`);
+  - class/interface inheritance (`INHERITS`) for Python and Java;
+  - per-tenant `paths.exclude_patterns` (tia/exclude.py, part of the cache key and the snapshot);
+  - structural risk overlay (tia/structure.py), file communities (tia/communities.py), Mermaid architecture diagram in the report and PR comment (tia/diagram.py), finding catalog with explanation and remediation (tia/findings_catalog.py);
+  - SQL-reader fix for non-ASCII letters;
+  - UI: plain-text / Markdown PR comment, last analysis restored after reload, tabs filled on load;
+  - their tests (`tests/test_pulse_ports.py`).
+- **Fixed while porting (bugs present in the GitHub version):**
+  - privacy leak: the new report sections named services and files of repositories the reader cannot see (AC-016 failed). Overlays now cover the changed repository only; redaction re-draws the diagram with visible services only;
+  - overlays merged same-named files of different repositories (every service's `app.py` became one file);
+  - "on changed files" could never match (git gives (status, path) pairs);
+  - the cycle search could grow exponentially on dense code; now bounded by a step budget and reported when cut short;
+  - PR comment showed rule ids such as `SEV-BREAKING-CRITICAL` next to a severity the tenant had overridden.
+- **Not taken:** their `index.html` as a whole (older; would undo the UI fixes), their PRD (older, v3.1), their POC deploy scripts (one private server), the folder split.
+- **Verified:** full suite 1188 passed / 4 failed before the last fixes; the 4 and every related test then pass; real-Chrome check of the merged UI 17/17. Demo sheet updated (Functions graph 44 -> 49 nodes; all other demo numbers unchanged).
+- **Security note for the user:** their first commit added `core/deploy/secrets/*` (database DSNs, keys) and the second only stopped tracking them: they remain in that repository's history.
+
+## 2026-11-11 (later): The ported features now have screens
+- **Section 4 report:**
+  - findings table: new **What to do** column (remediation, plain explanation, rule id);
+  - new **Architecture and structure** block: the services diagram drawn on the page (changed red, affected amber, inferred links dashed, hidden services counted not shown); circular dependencies, highly connected files and layer violations in the changed repository, each with what to do, items on the change marked and opened; groups of files and most connected files.
+- **Section 2 graph:** class nodes labelled `class Payment` (were raw ids); inheritance drawn with a hollow arrow; ambiguous calls drawn orange dashed (call edges were always grey before); legend entries for both.
+- **Section 6:** a hint explaining `paths.exclude_patterns` with examples.
+- **Verified:** real Chrome 19/19 (new UI, incl. HTML-escaping and redacted-service handling) and 17/17 (earlier ported UI); 215 related tests pass; 2 new tests (graph view, page elements).
+- Note: in the lanes demo every service is one `app.py`, so the structure lists are honestly empty there; they fill on multi-file repositories.
+
+## 2026-11-11 (evening): Tester pack per change, in the UI, as JSON and as Knowledge Fabric chunks
+Asked for in a stakeholder note: one PR -> three agent answers (retest + coverage gate, locator pack, API matrix).
+- **New:** `tia/testerpack.py` and `GET /api/v1/impact-analyses/{id}/tester-pack`: for the entry points a change reaches (and the pages calling them), a coverage gate (covered / gaps / not_evaluated), the technical coverage, the API test matrix and the UI locator pack. Changed repository at its proposed revision; reads the finished report, starts nothing; redacted to readable repositories.
+- **Knowledge Fabric:** `POST /query/tia` now also returns chunk categories `coverage_gate`, `coverage_gap`, `api_matrix`, `ui_locators` (structured content in `extracted_knowledge`); `include_tester_pack: false` gives the earlier answer.
+- **UI:** "Tester pack for this change" block in section 4 (gate, three tabs, Show pack JSON, Show agent response).
+- **Demo (`contract`):** gate = gaps: 2 covered, 3 with gaps, 1 not evaluated (mobile-app); 3 endpoints, 2 pages. In DEMO-DATA.md.
+- **Verified (simulated):** `tests/test_testerpack.py` (6 tests), existing KF/docs/SDK tests, real Chrome 21/21. KF's real `retriever_api.py` is still not available, so the new chunk categories are unverified against KF itself.
+- Kept the payments demo rather than building a Keka landscape (same shape).

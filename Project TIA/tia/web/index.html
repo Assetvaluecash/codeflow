@@ -34,6 +34,9 @@
   #cy{height:540px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
   #gside{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:540px;overflow:auto}
   #gside dt{color:var(--mut);margin-top:6px} #gside dd{margin:0;word-break:break-all}
+  #archcy{height:240px;border:1px solid var(--line);border-radius:6px} #archwrap.none{display:none}
+  #structure details{margin-top:8px} #structure summary{cursor:pointer} #structure li{margin:3px 0;word-break:break-word}
+  .tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:8px;border:1px solid #d32f2f;color:#d32f2f;margin-left:4px}
   .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--mut);margin-top:6px} .legend i{display:inline-block;width:18px;height:0;border-top:3px solid;vertical-align:middle;margin-right:4px}
   .ctl{display:flex;gap:10px;flex-wrap:wrap;align-items:end} .ctl>div{min-width:130px}
   main.locked>section:not(#signin){display:none} #who{margin-left:auto} header button{padding:3px 10px}
@@ -132,6 +135,8 @@
     <span><i style="border-color:#b8c0cc"></i>structural</span>
     <span><i style="border-color:#b8651b"></i>entity</span>
     <span><i style="border-color:#0b6e4f"></i>table</span>
+    <span><i style="border-color:#c2410c"></i>inheritance (subclass &rarr; base class)</span>
+    <span><i style="border-color:#ef6c00;border-top-style:dashed"></i>ambiguous call: one dashed line per candidate</span>
     <span id="legimpact" class="hidden">Impact view: red outline = changed; fill = severity (critical dark red, high red, medium amber, low grey)</span>
   </div>
 </section>
@@ -154,6 +159,18 @@
   <div id="summary" class="mut"></div>
   <div id="scope"></div>
   <div id="evid"></div>
+  <h2 style="margin-top:16px">Tester pack for this change</h2>
+  <p class="mut" style="margin:0 0 6px">One change, three answers, limited to the entry points this change reaches. The same content is available as JSON for tools and AI testing agents.</p>
+  <p id="packgate" aria-live="polite"></p>
+  <div class="ttabs">
+    <button class="on" type="button" data-ptab="retest">1. Retest and coverage gate</button>
+    <button type="button" data-ptab="ui">2. UI locator pack</button>
+    <button type="button" data-ptab="api">3. API test matrix</button>
+  </div>
+  <div id="pk-retest"></div><div id="pk-ui" class="hidden"></div><div id="pk-api" class="hidden"></div>
+  <p><button class="sec" id="packjson" type="button">Show pack JSON</button> <button class="sec" id="kfjson" type="button">Show agent response (Knowledge Fabric JSON)</button> <span id="kfsum" class="mut" aria-live="polite"></span></p>
+  <pre id="packraw" class="hidden" tabindex="0" aria-label="Tester pack (JSON)"></pre>
+  <pre id="kfraw" class="hidden" tabindex="0" aria-label="Knowledge Fabric agent response (JSON)"></pre>
   <h2 style="margin-top:16px">Findings</h2>
   <div id="ffilter" class="row" role="group" aria-label="Filter findings">
     <label>Severity <select id="f_severity"><option value="">any</option><option>critical</option><option>high</option><option>medium</option><option>low</option><option>unknown</option></select></label>
@@ -166,7 +183,12 @@
     <label>Evidence gaps <select id="f_issue"><option value="">any</option><option>unresolved</option><option>stale</option><option>inferred</option></select></label>
     <button class="sec" id="fclear" type="button">Clear filters</button> <span id="fcount" class="mut" aria-live="polite"></span>
   </div>
-  <table id="findings"><thead><tr><th>Severity</th><th>Component</th><th>Evidence</th><th>Why</th><th>Tests</th></tr></thead><tbody></tbody></table>
+  <table id="findings"><thead><tr><th>Severity</th><th>Component</th><th>Evidence</th><th>Why</th><th>What to do</th><th>Tests</th></tr></thead><tbody></tbody></table>
+  <h2 style="margin-top:16px">Architecture and structure</h2>
+  <p class="mut" style="margin:0 0 6px">Derived context computed from the graph, not extracted evidence: it never adds or removes a finding.</p>
+  <div id="archwrap"><div id="archcy" role="img" aria-label="Architecture diagram: services involved in this change and the evidence links between them"></div></div>
+  <div id="archnote" class="mut"></div>
+  <div id="structure"></div>
   <h2 style="margin-top:16px">Unknowns</h2><ul id="unknowns"></ul>
   <h2 style="margin-top:16px">Team coordination</h2>
   <p class="mut" style="margin:0">Teams owning materially affected components: who was told and who has acknowledged.</p>
@@ -186,13 +208,19 @@
     <div><button class="sec" id="vsave" type="button">Record verdict</button></div>
     <span id="vmsg" class="mut" aria-live="polite"></span>
   </div>
-  <h2>PR comment (markdown)</h2><pre id="comment" tabindex="0" aria-label="Pull request comment (markdown)"></pre>
-  <p><button class="sec" id="toimpact" disabled title="Run an analysis in section 3 first">Show on graph</button> <button class="sec" id="copy">Copy comment</button> <button class="sec" id="json">Show full JSON</button> <a id="permalink" class="mut"></a></p>
+  <h2>PR comment</h2>
+  <p class="mut" style="margin:0 0 6px">Shown as plain text. <code>###</code>, <code>**</code> and tables are Markdown for GitHub: use <b>Copy for PR (markdown)</b> when pasting into a pull request.</p>
+  <div class="ttabs" style="margin-bottom:6px">
+    <button class="on" type="button" id="cplain">Plain text</button>
+    <button type="button" id="cmd">Markdown (for GitHub)</button>
+  </div>
+  <pre id="comment" tabindex="0" aria-label="Pull request comment"></pre>
+  <p><button class="sec" id="toimpact" disabled title="Run an analysis in section 3 first">Show on graph</button> <button class="sec" id="copy">Copy for PR (markdown)</button> <button class="sec" id="json">Show full JSON</button> <a id="permalink" class="mut"></a></p>
   <pre id="raw" class="hidden" tabindex="0" aria-label="Full report (JSON)"></pre>
 </section>
 <section id="testersec">
   <h2>5. Tester views</h2>
-  <p class="mut" style="margin:0 0 6px">What the code means for testing, across every ingested repository you can read. Matching is static: "covered" means a test addresses it, not that it passes.</p>
+  <p class="mut" style="margin:0 0 6px">What the code means for testing, across every ingested repository you can read. Matching is static: "covered" means a test addresses it, not that it passes. The tabs fill in when the page opens and again after each analysis.</p>
   <div class="ttabs">
     <button class="on" data-ttab="shared">Common components &amp; rule gaps</button>
     <button data-ttab="cov">Technical coverage</button>
@@ -261,6 +289,12 @@
 <section id="cfgsec">
   <h2>6. Configuration <span id="cfgid" class="pill"></span></h2>
   <p class="mut" id="cfgmeta">Per-tenant limits, severity rules, criticality and path prefixes. Every save is a new immutable version.</p>
+  <details id="cfghelp"><summary>Skip files TIA should not analyse (vendored, generated, minified)</summary>
+    <p class="mut" style="margin:4px 0">Add path patterns under <code>paths</code> &rarr; <code>exclude_patterns</code>, for example
+      <code>"paths": {"strip_prefixes": [], "exclude_patterns": ["vendor/**", "**/generated/**", "*.min.js"]}</code>.
+      <code>*</code> stays within one folder, <code>**</code> crosses folders, and a pattern without a folder also matches the file name anywhere.
+      Up to 100 patterns. Anything defined in a skipped file is invisible to TIA, so a change to it reaches nothing. Every report records the patterns it ran with.</p>
+  </details>
   <textarea id="cfgtext" aria-label="Tenant configuration (JSON)" spellcheck="false" style="width:100%;height:260px;font:12px ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px"></textarea>
   <ul id="cfgproblems" class="err"></ul>
   <div class="row"><div><label>Comment for this version</label><input id="cfgcomment" maxlength="500" placeholder="why this change"></div></div>
@@ -492,13 +526,48 @@ $("disc").onclick = async () => {
   catch(e) { msg("discmsg", e.message, "err") } busy($("disc"), false);
 };
 
+// ---- the last analysis survives a reload (this browser only; the token is never kept) ----
+function saveLastRun(extra) {
+  try {
+    const prev = JSON.parse(localStorage.getItem("tia.lastRun") || "{}");
+    localStorage.setItem("tia.lastRun", JSON.stringify({...prev, target: $("target").value, head: $("head").value, base: $("base").value,
+                                                        pr: $("pr").value, ...extra, saved_at: new Date().toISOString()}));
+  } catch (_) {}
+}
+function restoreRunForm() {
+  try {
+    const s = JSON.parse(localStorage.getItem("tia.lastRun") || "null");
+    if (!s) return;
+    if (s.target && [...$("target").options].some(o => o.value === s.target)) { $("target").value = s.target; fillHeadChoices(); }
+    if (s.head != null) $("head").value = s.head;
+    if (s.base != null) $("base").value = s.base;
+    if (s.pr != null) $("pr").value = s.pr;
+  } catch (_) {}
+}
+async function restoreLastAnalysis() {
+  let aid = null;
+  try { aid = (JSON.parse(localStorage.getItem("tia.lastRun") || "{}")).analysis_id || null; } catch (_) {}
+  if (!aid) return;
+  try {
+    const [rep, comment] = await Promise.all([api(`/api/v1/impact-analyses/${encodeURIComponent(aid)}`),
+                                              api(`/api/v1/impact-analyses/${encodeURIComponent(aid)}/comment`)]);
+    lastAnalysis = aid; $("gimpact").disabled = false; $("toimpact").disabled = false;
+    show(rep, comment, {scroll: false});
+    msg("runmsg", `Restored the last analysis, ${aid}`, "ok");
+  } catch (_) {
+    // the analysis is gone (for example a fresh database) or no longer readable: keep the form, forget the id
+    try { const s = JSON.parse(localStorage.getItem("tia.lastRun") || "{}"); delete s.analysis_id; localStorage.setItem("tia.lastRun", JSON.stringify(s)); } catch (_) {}
+  }
+}
 $("run").onclick = async () => {
   busy($("run"), true); msg("runmsg", "Analysing...");
   try {
     const body = {target:$("target").value, head:$("head").value.trim()||null, pr:$("pr").value?+$("pr").value:null, base:$("base").value.trim()||null, token:$("atoken").value||null};
     const r = await api("/api/v1/impact-analyses", {method:"POST", body});
     lastAnalysis = r.analysis_id; $("gimpact").disabled = false; $("toimpact").disabled = false;
+    saveLastRun({analysis_id: r.analysis_id});
     show(r.report, await api(`/api/v1/impact-analyses/${r.analysis_id}/comment`)); msg("runmsg", "Done", "ok");
+    warmAllSections();
   } catch(e) { msg("runmsg", e.message, "err") } busy($("run"), false);
 };
 // ---- findings and their filters (PRD 9.3): the server applies the filters, so the page and the API agree ----
@@ -507,6 +576,7 @@ let CUR_AID = null;
 function findingRows(list) {
   return list.map(f => `<tr><td><span class="pill ${esc(f.severity)}">${esc(f.severity)}</span></td><td>${esc(f.component)}<br><span class="mut">${esc(f.repository)}</span></td>
     <td>${esc(f.evidence_status)}${f.resolution_strategy ? `<br><span class="mut">${esc(f.resolution_strategy)}</span>`:""}${f.runtime ? `<br><span class="mut">observed in ${esc(f.runtime.environments.join(", ") || "telemetry")}: ${esc(f.runtime.calls_observed)} call(s)</span>` : ""}</td><td>${esc(f.reason)}${(f.limitations||[]).map(l=>`<br><span class="mut">- ${esc(l)}</span>`).join("")}</td>
+    <td>${f.remediation ? esc(f.remediation) + (f.explanation ? `<br><span class="mut">${esc(f.explanation)}${f.rule_id ? ` (<code>${esc(f.rule_id)}</code>)` : ""}</span>` : "") : '<span class="mut">-</span>'}</td>
     <td>${(f.tests||[]).map(t=>esc(t.name)+` <span class="mut">(${esc(t.association)})</span>`).join("<br>") || '<span class="mut">none found</span>'}</td></tr>`).join("");
 }
 async function applyFilters() {
@@ -515,7 +585,7 @@ async function applyFilters() {
   FILTERS.forEach(k => { const v = $("f_" + k).value.trim(); if (v) p.set(k, v) });
   try {
     const r = await api(`/api/v1/impact-analyses/${encodeURIComponent(CUR_AID)}/findings?${p}`);
-    $("findings").querySelector("tbody").innerHTML = findingRows(r.findings) || `<tr><td colspan="5" class="mut">No finding matches these filters.</td></tr>`;
+    $("findings").querySelector("tbody").innerHTML = findingRows(r.findings) || `<tr><td colspan="6" class="mut">No finding matches these filters.</td></tr>`;
     $("fcount").textContent = [...p.keys()].length ? `${r.matched} of ${r.total} finding(s) shown` : "";
   } catch (e) { $("fcount").textContent = e.message }
 }
@@ -611,21 +681,27 @@ $("incload").onclick = loadIncidents;
 
 // ---- insights (FR-043, FR-044) ----
 const share = v => v === null || v === undefined ? "-" : Math.round(v * 100) + "%";
-$("trgo").onclick = async () => {
+async function loadTrends() {
   try {
     const t = await api(`/api/v1/trends?group=${$("trgroup").value}&period=${$("trperiod").value}`);
     $("trout").innerHTML = `<p class="mut">${esc(t.note)}</p><table><thead><tr><th>${esc(t.group)}</th><th>Period</th><th>Changes</th><th>Breaking</th><th>Unresolved dependencies</th><th>Material findings without a test</th><th>Incident associations</th></tr></thead><tbody>` +
       (t.rows.map(r => `<tr><td>${esc(r[t.group])}</td><td>${esc(r.period)}</td><td>${r.change_volume}</td><td>${r.breaking_changes} (${share(r.breaking_share)})</td><td>${share(r.unresolved_dependency_share)}</td><td>${share(r.missing_verification_share)}</td><td>${r.incident_associations}</td></tr>`).join("")
        || '<tr><td colspan="7" class="mut">No analysis in this period.</td></tr>') + "</tbody></table>";
   } catch (e) { msg("insmsg", e.message, "err") }
-};
-$("calgo").onclick = async () => {
+}
+async function loadCalibration() {
   try {
     const c = await api("/api/v1/calibration");
     const rows = Object.entries(c.by.severity_rule).map(([rule, r]) => `<tr><td><code>${esc(rule)}</code></td><td>${r.judged}</td><td>${r.confirmed}</td><td>${r.false_positive}</td><td>${r.irrelevant}</td><td>${share(r.precision)}${r.too_few_to_act_on ? ' <span class="mut">(too few)</span>' : ""}</td></tr>`);
     $("calout").innerHTML = `<p class="mut">${esc(c.note)}</p><table><thead><tr><th>Severity rule</th><th>Judged</th><th>Confirmed</th><th>False positive</th><th>Irrelevant</th><th>Precision</th></tr></thead><tbody>${rows.join("") || '<tr><td colspan="6" class="mut">No verdict recorded yet.</td></tr>'}</tbody></table>`;
   } catch (e) { msg("insmsg", e.message, "err") }
-};
+}
+$("trgo").onclick = loadTrends;
+$("calgo").onclick = loadCalibration;
+// fill every tester, release and insight view from the live API, so an opened page is not blank
+async function warmAllSections() {
+  await Promise.allSettled([tShared(), tCov(), tApi(), tUi(), loadReleases(), loadIncidents(), loadTrends(), loadCalibration()]);
+}
 
 // ---- administration additions: usage, catalog import, evidence, environments ----
 $("adusage").onclick = async () => {
@@ -660,7 +736,33 @@ document.querySelectorAll("label").forEach(l => {
   const n = l.nextElementSibling;
   if (n && /^(INPUT|SELECT|TEXTAREA)$/.test(n.tagName)) { if (!n.id) n.id = "f" + Math.random().toString(36).slice(2, 9); l.htmlFor = n.id; }
 });
-function show(rep, comment) {
+// the PR comment is Markdown for GitHub; on this page it is shown as plain text unless asked otherwise
+let COMMENT_MD = "";
+function plainComment(md) {
+  return String(md || "")
+    .replace(/^<!--[\s\S]*?-->\s*/m, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/<\/?details>/gi, "")
+    .replace(/<\/?summary>/gi, "")
+    .replace(/^\|[-: |]+\|\s*$/gm, "")
+    .replace(/^\|/gm, "")
+    .replace(/\|\s*$/gm, "")
+    .replace(/\|/g, " | ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+function setCommentView(which) {
+  $("cplain").classList.toggle("on", which === "plain");
+  $("cmd").classList.toggle("on", which === "md");
+  $("comment").textContent = which === "md" ? COMMENT_MD : plainComment(COMMENT_MD);
+}
+$("cplain").onclick = () => setCommentView("plain");
+$("cmd").onclick = () => setCommentView("md");
+function show(rep, comment, opts) {
+  opts = opts || {};
   $("result").classList.remove("hidden");
   $("status").textContent = rep.status;
   $("warn").innerHTML = rep.status === "complete" ? "" : `<div class="banner">${rep.status === "failed" ? "The analysis failed: " + esc(rep.failure_reason) : "This is not a clean impact assessment: see the unknowns below."}</div>`;
@@ -668,18 +770,20 @@ function show(rep, comment) {
   $("summary").textContent = rep.status === "failed" ? "" : `${rep.change.repository} ${rep.change.base_revision.slice(0,7)} -> ${rep.change.proposed_revision.slice(0,7)}  |  change type: ${rep.change.change_type}  |  ${s.findings} finding(s), ${s.material_findings} material` + (rep.coverage && rep.coverage.outbound_call_sites ? `  |  ${rep.coverage.outbound_call_sites_resolved}/${rep.coverage.outbound_call_sites} outbound calls resolved` : "") + (s.message ? "  |  " + s.message : "") + (rep.redacted && rep.redacted.note ? "  |  " + rep.redacted.note : "");
   CUR_AID = rep.analysis_id;
   FILTERS.forEach(k => { $("f_" + k).value = "" }); $("fcount").textContent = "";
-  $("findings").querySelector("tbody").innerHTML = findingRows(rep.findings || []) || `<tr><td colspan="5" class="mut">No findings.</td></tr>`;
+  $("findings").querySelector("tbody").innerHTML = findingRows(rep.findings || []) || `<tr><td colspan="6" class="mut">No findings.</td></tr>`;
   $("vfinding").innerHTML = (rep.findings || []).map(f => `<option value="${esc(f.id)}">${esc(f.id)} ${esc(f.severity)} ${esc(f.component)}</option>`).join("");
   $("vsave").disabled = !(rep.findings || []).length;
   loadCoordination();
   $("unknowns").innerHTML = (rep.unknowns||[]).map(u => `<li>${esc(u.reason)}${u.items ? "<ul>" + u.items.slice(0,15).map(i=>`<li class="mut">${i.rule ? esc(i.rule) + " x" + esc(i.count) : `${esc(i.repo||"")} ${esc(i.file||"")}${i.line?":"+i.line:""}${i.service ? " " + esc(i.service) : ""}${i.count && !i.reason ? " x" + esc(i.count) : ""} - ${esc(i.reason||i.error||"")}`}</li>`).join("") + (u.items.length>15?`<li class="mut">... ${u.items.length-15} more in JSON</li>`:"") + "</ul>" : ""}</li>`).join("");
+  renderStructure(rep);
+  loadPack(rep.analysis_id, rep.status === "failed");
   $("scope").innerHTML = scopeHtml(rep.test_scope);
   $("evid").innerHTML = evidHtml(rep);
-  $("comment").textContent = comment; $("raw").textContent = JSON.stringify(rep, null, 2);
+  COMMENT_MD = comment || ""; setCommentView("plain"); $("raw").textContent = JSON.stringify(rep, null, 2);
   $("permalink").textContent = rep.analysis_id; $("permalink").href = `/analyses/${encodeURIComponent(rep.analysis_id)}`; $("permalink").target = "_blank";
-  $("result").scrollIntoView({behavior:"smooth"});
+  if (opts.scroll !== false) $("result").scrollIntoView({behavior:"smooth"});
 }
-$("copy").onclick = () => navigator.clipboard.writeText($("comment").textContent);
+$("copy").onclick = () => navigator.clipboard.writeText(COMMENT_MD || $("comment").textContent);
 $("json").onclick = () => $("raw").classList.toggle("hidden");
 
 // ================= tester views (docs/CASE-STUDY.md UC-1, UC-2, UC-3) =================
@@ -744,7 +848,11 @@ const tShared = () => tview("shared", "/api/v1/graph/shared-components", j =>
     <td><b>${esc(r.entry_points)}</b> in ${esc(r.services)} service(s)<br>${r.used_by.map(u => `<span class="mut">${esc(u.label || u.entry_point)} (${esc(u.service)})</span>`).join("<br>")}${r.used_by_withheld ? `<br><span class="mut">+${esc(r.used_by_withheld)} you cannot see</span>` : ""}</td></tr>`).join("") +
   `</tbody></table>` + (j.shared_components.length ? "" : '<p class="mut">No component is shared by two or more entry points.</p>') +
   `<h3 style="font-size:13px">Rule gaps</h3>` + (j.rule_gaps.map(gapHtml).join("") || '<p class="mut">No rule gap found between the consumers of a shared endpoint.</p>'));
-const tCov = () => tview("cov", "/api/v1/coverage", j => {
+const tCov = () => tview("cov", "/api/v1/coverage", j => covHtml(j));
+const tApi = () => tview("api", "/api/v1/automation/api", j => apiHtml(j));
+const tUi = () => tview("ui", "/api/v1/automation/ui", j => uiHtml(j));
+// the three renderers are shared with the tester pack of one analysis (which shows the same views for the touched entry points only)
+const covHtml = j => {
   const s = j.summary;
   const kinds = Object.entries(s.by_kind || {}).map(([k, v]) => `<tr><td>${esc(k.replace(/_/g, " "))}</td><td>${v.total}</td><td class="ok">${v.covered}</td><td style="color:var(--warn)">${v.partial}</td><td class="err">${v.missing}</td></tr>`).join("");
   return `<p id="covsummary"><b>${esc(s.percent)}%</b> of ${esc(s.aspects)} technical aspects covered: ${pill("covered", s.covered + " covered")} ${pill("partial", s.partial + " partial")} ${pill("missing", s.missing + " missing")}
@@ -755,8 +863,8 @@ const tCov = () => tview("cov", "/api/v1/coverage", j => {
       e.aspects.map(a => `<tr><td>${pill(a.status, a.status)}</td><td>${esc(a.title)}${a.values_missing && a.values_missing.length ? `<br><span class="mut">not tested: ${esc(a.values_missing.join(", "))}</span>` : ""}</td>
         <td>${a.covered_by.map(x => `${x.type === "written" ? `<b>${esc(x.id)}</b> ${esc(x.title)}` : `<code>${esc(x.name)}</code>`} <span class="mut">(${esc(x.type)}: ${esc(x.why)})</span>`).join("<br>") || '<span class="err">no test</span>'}</td></tr>`).join("") + `</tbody></table></details>`).join("") +
     (j.unmatched_written_tests.length ? `<p class="mut" id="unmatched">Written test cases that match no analysed entry point or page: ${j.unmatched_written_tests.map(u => `<b>${esc(u.id)}</b> ${esc(u.title)} (${esc(u.file)})`).join("; ")}</p>` : "");
-});
-const tApi = () => tview("api", "/api/v1/automation/api", j =>
+};
+const apiHtml = j =>
   `<p class="mut">${esc(j.summary.endpoints)} endpoint(s), ${esc(j.summary.inputs)} input(s) (${esc(j.summary.mandatory_inputs)} mandatory, ${esc(j.summary.inputs_with_rules)} with rules), ${esc(j.summary.cases)} test case(s) in the matrices.</p>` +
   j.endpoints.map(it => `<details class="apientry"><summary><b>${esc(it.label || it.entry_point)}</b> <span class="mut">${esc(it.service)} - ${it.inputs.length} input(s), ${it.case_count} case(s)${it.error_statuses.length ? ", errors " + it.error_statuses.map(s => s.status).join("/") : ""}</span></summary>
     <div class="wrapx"><table><thead><tr><th>Input</th><th>In</th><th>Mandatory</th><th>Rules</th><th>Valid values</th><th>Invalid values</th></tr></thead><tbody>` +
@@ -765,15 +873,68 @@ const tApi = () => tview("api", "/api/v1/automation/api", j =>
     `</tbody></table></div>` + (it.error_statuses.length ? `<p>Error answers: ${it.error_statuses.map(s => `<b>${esc(s.status)}</b>${s.detail ? " " + esc(s.detail) : ""} <span class="mut">(${esc(s.function)})</span>`).join("; ")}</p>` : "") +
     `<div class="wrapx"><table><thead><tr><th>Case</th><th>Kind</th><th>Input</th><th>Expect</th><th>Why</th></tr></thead><tbody>` +
     it.cases.map(c => `<tr><td>${esc(c.id)}</td><td>${esc(c.kind)}${c.field ? `<br><code>${esc(c.field)}</code>` : ""}</td><td><code>${esc(JSON.stringify(c.input))}</code></td><td>${esc(c.expect)}</td><td class="mut">${esc(c.why)}</td></tr>`).join("") +
-    `</tbody></table></div></details>`).join(""));
-const tUi = () => tview("ui", "/api/v1/automation/ui", j =>
+    `</tbody></table></div></details>`).join("");
+const uiHtml = j =>
   (j.pages.length ? `<p class="mut">${esc(j.summary.pages)} page(s), ${esc(j.summary.elements)} element(s), ${esc(j.summary.without_unique_locator)} without a unique locator.</p>` : '<p class="mut">No front-end page found in the ingested repositories.</p>') +
   j.pages.map(p => `<details class="uipage"><summary><b>${esc(p.page)}</b> <span class="mut">${esc(p.framework)}${p.component ? " " + esc(p.component) : ""} - ${p.summary.elements} element(s), ${p.summary.mandatory} mandatory${p.summary.without_unique_locator ? `, <span class="err">${p.summary.without_unique_locator} without a unique locator</span>` : ""}</span></summary>
     <div class="wrapx"><table><thead><tr><th>Element</th><th>Mandatory</th><th>Locator</th><th>Rules</th><th>Values</th></tr></thead><tbody>` +
     p.elements.map(e => `<tr><td><b>${esc(e.label || e.text || e.name || e.tag)}</b><br><span class="mut">${esc(e.tag)}${e.type && e.tag === "input" ? " " + esc(e.type) : ""}</span></td><td>${e.mandatory ? "yes" : "no"}</td>
       <td><span class="${e.locator.strategy.startsWith("position") ? "err" : ""}">${esc(e.locator.strategy)}</span><br><code>${esc(e.locator.css || e.locator.xpath)}</code><br><code class="mut">${esc(e.locator.playwright)}</code>${e.locator_note ? `<br><span class="mut">${esc(e.locator_note)}</span>` : ""}</td>
       <td>${esc(e.rules || "")}</td><td>${e.tag === "select" ? (e.options || []).filter(o => o.value !== "").map(o => esc(o.value ?? o.text)).join(", ") + `<br><span class="mut">${esc(e.options_source || "")}</span>` : ""}</td></tr>`).join("") +
-    `</tbody></table></div><p>Calls: ${p.api_calls.map(c => `<code>${esc(c.method)} ${esc(c.path)}</code> &rarr; ${c.endpoints.length ? c.endpoints.map(x => `${esc(x.entry_point)} <span class="mut">(${esc(x.service)})</span>`).join(", ") : `<span class="mut">${esc(c.note)}</span>`}`).join("; ") || '<span class="mut">none found</span>'}</p></details>`).join(""));
+    `</tbody></table></div><p>Calls: ${p.api_calls.map(c => `<code>${esc(c.method)} ${esc(c.path)}</code> &rarr; ${c.endpoints.length ? c.endpoints.map(x => `${esc(x.entry_point)} <span class="mut">(${esc(x.service)})</span>`).join(", ") : `<span class="mut">${esc(c.note)}</span>`}`).join("; ") || '<span class="mut">none found</span>'}</p></details>`).join("");
+
+// ================= tester pack of one analysis: retest + coverage gate, locator pack, API matrix (the three use cases for one change) ==========
+let PACK = null, PACK_AID = null;
+const GATE_PILL = {covered: "covered", gaps: "missing", not_evaluated: "partial"};
+const gateText = o => String(o || "").replace("_", " ");
+const noIds = html => html.replace(/ id="[^"]*"/g, "");            // the shared renderers carry ids that belong to section 5
+async function loadPack(aid, failed) {
+  PACK = null; PACK_AID = aid;
+  $("packraw").classList.add("hidden"); $("kfraw").classList.add("hidden"); $("kfsum").textContent = "";
+  if (failed) { $("packgate").innerHTML = '<span class="mut">The analysis failed: there is no tester pack.</span>'; ["retest", "ui", "api"].forEach(t => $("pk-" + t).innerHTML = ""); return; }
+  $("packgate").innerHTML = '<span class="mut">Loading the tester pack...</span>';
+  try {
+    const p = await api(`/api/v1/impact-analyses/${encodeURIComponent(aid)}/tester-pack`);
+    if (PACK_AID !== aid) return;                                  // another analysis was opened meanwhile
+    PACK = p; renderPack(p);
+  } catch (e) { if (PACK_AID === aid) $("packgate").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+function renderPack(p) {
+  const g = p.gate;
+  $("packgate").innerHTML = `Coverage gate: ${pill(GATE_PILL[g.outcome], gateText(g.outcome))} ${esc(g.headline)}`;
+  const rows = g.entry_points.map(r => `<tr><td>${r.label ? `<b>${esc(r.label)}</b><br>` : ""}<code>${esc(r.entry_point)}</code><br><span class="mut">${esc(r.kind === "page" ? "page" : r.kind === "api" ? "API" : "no analysed entry point")}</span></td>
+    <td>${esc(r.service)}</td><td>${r.change_effect ? pill(r.change_effect, EFFECT[r.change_effect] || r.change_effect) : '<span class="mut">calls a touched API</span>'}</td>
+    <td>${pill(GATE_PILL[r.outcome], gateText(r.outcome))}<br><span class="mut">${esc(r.reason)}</span></td>
+    <td>${r.missing_aspects.slice(0, 4).map(esc).join("<br>")}${r.missing_aspects.length > 4 ? `<br><span class="mut">... and ${r.missing_aspects.length - 4} more below</span>` : ""}</td>
+    <td>${esc(r.tests_found)}${r.failing_tests.length ? `<br><span class="err">${r.failing_tests.length} FAILED in CI: ${r.failing_tests.map(esc).join(", ")}</span>` : ""}</td></tr>`).join("");
+  const rt = p.retest;
+  $("pk-retest").innerHTML = (rows ? `<div class="wrapx"><table id="gatetable"><thead><tr><th>Entry point or page</th><th>Service</th><th>Change effect</th><th>Gate</th><th>Not covered</th><th>Tests found</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : '<p class="mut">This change reaches no entry point: nothing to retest.</p>') +
+    rt.rule_gaps.map(gapHtml).join("") + rt.consistency_checks.map(c => `<div class="banner"><b>Consistency check</b>: ${esc(c.check)}</div>`).join("") +
+    (p.coverage.entry_points.length ? `<h3 style="font-size:13px">Technical coverage of the touched entry points and pages</h3>` + noIds(covHtml(p.coverage)) : "") +
+    `<p class="mut">${esc(p.basis.note)}${p.basis.unavailable_repositories.length ? " Could not be read at the analysed revision: " + p.basis.unavailable_repositories.map(esc).join(", ") + "." : ""}</p>`;
+  $("pk-ui").innerHTML = p.ui.pages.length ? noIds(uiHtml(p.ui)) : '<p class="mut">No analysed page calls an entry point this change reaches.</p>';
+  $("pk-api").innerHTML = p.api.endpoints.length ? noIds(apiHtml(p.api)) : '<p class="mut">This change reaches no analysed API endpoint.</p>';
+  $("packraw").textContent = JSON.stringify(p, null, 2);
+}
+document.querySelectorAll("[data-ptab]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("[data-ptab]").forEach(x => x.classList.toggle("on", x === b));
+  ["retest", "ui", "api"].forEach(t => $("pk-" + t).classList.toggle("hidden", t !== b.dataset.ptab));
+});
+$("packjson").onclick = () => $("packraw").classList.toggle("hidden");
+$("kfjson").onclick = async () => {
+  if (!PACK_AID) return;
+  if (!$("kfraw").classList.contains("hidden")) { $("kfraw").classList.add("hidden"); return; }
+  busy($("kfjson"), true);
+  try {
+    const r = await api("/query/tia", {method: "POST", body: {analysis_id: PACK_AID}});
+    const cats = {}; r.chunks.forEach(c => { cats[c.category] = (cats[c.category] || 0) + 1 });
+    $("kfsum").textContent = `POST /query/tia {"analysis_id": "${PACK_AID}"} - ${r.chunks.length} chunks (` + Object.entries(cats).map(([k, v]) => `${v} ${k}`).join(", ") +
+      `), ${r.paths.length} paths` + (r.metadata.errors.length ? `, ${r.metadata.errors.length} confidence note(s)` : "");
+    $("kfraw").textContent = JSON.stringify(r, null, 2); $("kfraw").classList.remove("hidden");
+  } catch (e) { $("kfsum").textContent = e.message }
+  busy($("kfjson"), false);
+};
 $("tshared").onclick = tShared; $("tcov").onclick = tCov; $("tapi").onclick = tApi; $("tui").onclick = tUi;
 $("tccheck").onclick = async () => {
   busy($("tccheck"), true); msg("tcmsg", "Checking...");
@@ -789,6 +950,67 @@ $("tccheck").onclick = async () => {
   busy($("tccheck"), false);
 };
 
+
+// ================= architecture and structure (derived overlays of a report) =================
+let archCy = null;
+const MAXLIST = 10;
+function more(n) { return n > MAXLIST ? `<li class="mut">... and ${n - MAXLIST} more in the full JSON</li>` : ""; }
+function onChange(x) { return x.on_changed_path ? '<span class="tag">on your change</span>' : ""; }
+function renderStructure(rep) {
+  // the diagram: the services involved and the evidence links between them; the changed service outlined in red
+  const d = rep.architecture_diagram;
+  if (archCy) { archCy.destroy(); archCy = null; }
+  const hasDiagram = d && (d.services || []).length;
+  $("archwrap").classList.toggle("none", !hasDiagram);
+  if (hasDiagram) {
+    const fg = css("--fg") || "#222", line = css("--line") || "#ccc", affected = new Set(d.affected_services || []);
+    const els = d.services.map(s => ({data: {id: s, label: s, role: s === d.changed_service ? "changed" : affected.has(s) ? "affected" : "other"}}))
+      .concat((d.edges || []).map((e, i) => ({data: {id: "a" + i, source: e[0], target: e[1], label: e[2], status: e[3]}})));
+    archCy = cytoscape({container: $("archcy"), elements: els, wheelSensitivity: .25, userPanningEnabled: true, boxSelectionEnabled: false,
+      style: [
+        {selector: "node", style: {shape: "round-rectangle", label: "data(label)", "text-valign": "center", "text-halign": "center", "font-size": 11,
+                                   width: "label", height: 28, padding: "8px", "background-color": "#1f4fd8", color: "#fff", "border-width": 1, "border-color": line}},
+        {selector: 'node[role="affected"]', style: {"background-color": "#f5a524", color: "#222"}},
+        {selector: 'node[role="changed"]', style: {"border-color": "#d32f2f", "border-width": 4}},
+        {selector: "edge", style: {width: 2, "curve-style": "bezier", "target-arrow-shape": "triangle", "line-color": "#2e7d32", "target-arrow-color": "#2e7d32",
+                                   label: "data(label)", "font-size": 9, color: fg, "text-background-color": css("--card") || "#fff", "text-background-opacity": .85}},
+        {selector: 'edge[status="inferred"]', style: {"line-style": "dashed", "line-color": "#ef6c00", "target-arrow-color": "#ef6c00"}},
+      ]});
+    archCy.layout({name: "breadthfirst", directed: true, padding: 20, spacingFactor: 1.1, animate: false}).run();
+  }
+  $("archnote").innerHTML = hasDiagram
+    ? `Changed: <b>${esc(d.changed_service || "")}</b>${(d.affected_services || []).length ? "; affected (amber): " + d.affected_services.map(esc).join(", ") : ""}. ${esc(d.note || "")}` +
+      (d.redacted_services ? ` ${esc(d.redacted_services)} service(s) you cannot access are not shown.` : "")
+    : "No architecture diagram in this report.";
+
+  // structural risk and communities: inside the changed repository only
+  const sr = rep.structural_risk, cm = rep.communities;
+  if (!sr && !cm) { $("structure").innerHTML = '<p class="mut">No structural overlay in this report (older report, or a repository you cannot access).</p>'; return; }
+  let out = "";
+  if (sr) {
+    const s = sr.summary || {};
+    const fix = list => list.length && list[0].remediation ? `<p class="mut" style="margin:4px 0">${esc(list[0].explanation || "")} <b>What to do:</b> ${esc(list[0].remediation)}</p>` : "";
+    out += `<p style="margin:8px 0 0">In <b>${esc(sr.repository || rep.change.repository)}</b>: ${s.cycles || 0} circular dependenc${s.cycles === 1 ? "y" : "ies"} (${s.cycles_on_change || 0} on your change),
+      ${s.high_coupling || 0} highly connected file(s) (${s.high_coupling_on_change || 0} on your change), ${s.layer_violations || 0} layer violation(s) (${s.layer_violations_on_change || 0} on your change).</p>
+      <p class="mut" style="margin:2px 0">${esc(sr.note || "")}</p>`;
+    const cyc = sr.cycles || [], hub = sr.high_coupling || [], lay = sr.layer_violations || [];
+    if (cyc.length) out += `<details ${s.cycles_on_change ? "open" : ""}><summary>Circular dependencies (${cyc.length})</summary>${fix(cyc)}<ul>` +
+      cyc.slice(0, MAXLIST).map(c => `<li><code>${c.files.map(esc).join(" &rarr; ")} &rarr; ${esc(c.files[0])}</code>${onChange(c)}</li>`).join("") + more(cyc.length) + "</ul></details>";
+    if (hub.length) out += `<details ${s.high_coupling_on_change ? "open" : ""}><summary>Highly connected files (${hub.length})</summary>${fix(hub)}<ul>` +
+      hub.slice(0, MAXLIST).map(h => `<li><code>${esc(h.file)}</code> - ${esc(h.degree)} call link(s)${onChange(h)}</li>`).join("") + more(hub.length) + "</ul></details>";
+    if (lay.length) out += `<details ${s.layer_violations_on_change ? "open" : ""}><summary>Layer violations (${lay.length})</summary>${fix(lay)}<ul>` +
+      lay.slice(0, MAXLIST).map(v => `<li><code>${esc(v.from)}</code> (${esc(v.from_layer)}) calls <code>${esc(v.to)}</code> (${esc(v.to_layer)}): ${esc(v.suggestion)}${onChange(v)}</li>`).join("") +
+      more(lay.length) + '</ul><p class="mut">Layers are guessed from folder names (ui, api, services, domain, data, utils).</p></details>';
+  }
+  if (cm && (cm.communities || []).length) {
+    out += `<details><summary>Groups of files that call each other (${cm.communities.length})</summary><ul>` +
+      cm.communities.slice(0, MAXLIST).map(c => `<li><b>${esc(c.label)}</b>: ${esc(c.file_count)} file(s) - <code>${c.files.slice(0, 5).map(esc).join(", ")}</code>${c.file_count > 5 ? " ..." : ""}</li>`).join("") +
+      more(cm.communities.length) + "</ul>" +
+      ((cm.god_nodes || []).length ? `<p style="margin:4px 0">Most connected files: ${cm.god_nodes.slice(0, 5).map(g => `<code>${esc(g.file)}</code> (${esc(g.degree)})`).join(", ")}</p>` : "") +
+      `<p class="mut">${esc(cm.note || "")}</p></details>`;
+  }
+  $("structure").innerHTML = out;
+}
 
 // ================= code graph =================
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -810,6 +1032,7 @@ function gstyle() {
     {selector:'node[type="table"]', style:{shape:"round-rectangle","background-color":"#0b6e4f",width:22,height:16}},
     {selector:'node[type="column"]', style:{shape:"ellipse","background-color":"#7bc4a4",width:9,height:9}},
     {selector:'node[type="migration"]', style:{shape:"cut-rectangle","background-color":"#6b7280",width:14,height:14}},
+    {selector:'node[type="type"]', style:{shape:"rectangle","background-color":"#c2410c",width:14,height:14}},
     {selector:'node[type="unresolved"], node[?unresolved]', style:{shape:"octagon","background-color":"#e5e7eb","border-style":"dashed","border-color":"#6b7280","border-width":2}},
     {selector:"edge", style:{width:2,"line-color":"#9aa3af","target-arrow-color":"#9aa3af","target-arrow-shape":"triangle","curve-style":"bezier","arrow-scale":.9,"font-size":8,color:fg,"text-background-color":css("--card")||"#fff","text-background-opacity":.85,"text-background-padding":1}},
     {selector:"edge.struct", style:{width:1,"line-color":line,"target-arrow-color":line}},
@@ -819,6 +1042,11 @@ function gstyle() {
     {selector:'edge[status="runtime_observed"].dep', style:{"line-color":"#00838f","target-arrow-color":"#00838f"}},
     {selector:'edge[status="inferred"].dep', style:{"line-color":"#ef6c00","target-arrow-color":"#ef6c00","line-style":"dashed"}},
     {selector:'edge[rel="UNRESOLVED_CALL"]', style:{"line-color":"#9e9e9e","target-arrow-color":"#9e9e9e","line-style":"dotted"}},
+    // a call whose name matched several functions: one inferred candidate edge each (INF-CALL-AMBIGUOUS)
+    {selector:'edge[status="inferred"].struct', style:{"line-color":"#ef6c00","target-arrow-color":"#ef6c00","line-style":"dashed"}},
+    // subclass -> base class: a hollow arrow, as in a class diagram; dashed when the base name matched several classes
+    {selector:'edge[rel="INHERITS"]', style:{width:2,"line-color":"#c2410c","target-arrow-color":"#c2410c","target-arrow-shape":"triangle-backcurve","target-arrow-fill":"hollow"}},
+    {selector:'edge[rel="INHERITS"][status="inferred"]', style:{"line-style":"dashed"}},
     {selector:"edge[label]", style:{label:"data(label)"}},
     {selector:'node[role="changed"]', style:{"border-color":"#d32f2f","border-width":5}},
     {selector:'node[role="via"]', style:{opacity:.8}},
@@ -929,7 +1157,10 @@ async function boot() {
   applyPermissions();
   cfgLoad();
   if (can("admin")) adminLoad();
-  loadRepos().then(() => { gload(); tShared(); });
+  await loadRepos();
+  restoreRunForm();                                   // after the repositories are listed, so the saved target can be selected
+  gload();
+  await Promise.allSettled([warmAllSections(), restoreLastAnalysis()]);
 }
 // ---- administration (people, repository access, tokens, identity providers)
 const when = d => d ? new Date(d).toLocaleString() : "never";

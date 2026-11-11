@@ -33,6 +33,10 @@ from .tenantconfig import DEFAULT, TenantConfig, diff as config_diff
 from .store import Store
 from .testscope import classify_function, test_scope
 from .enrich import TestEvidence, apply_runtime, deployment_limitations, deployment_view, enrich_tests, runtime_of
+from . import communities as communities_mod
+from . import diagram as diagram_mod
+from . import structure as structure_mod
+from .findings_catalog import enrich_all
 
 
 @dataclass
@@ -49,6 +53,7 @@ class AnalysisRequest:
     time_budget_s: float = 60.0
     test_naming: bool = True
     strip_prefixes: tuple = ()
+    exclude_patterns: tuple = ()                              # path globs skipped during extraction (default: the tenant's)
     freshness: dict = field(default_factory=dict)             # repo -> scan state at analysis time (FR-005)
     config: Optional[TenantConfig] = None                     # the tenant's configuration the analysis runs under (None = defaults)
     stale_relationships: list = field(default_factory=list)   # unverifiable stale relationships (relationships.UNVERIFIABLE)
@@ -59,17 +64,17 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _extract(repo: str, path: str, rev: str, store: Optional[Store], strip: tuple) -> RepoExtract:
+def _extract(repo: str, path: str, rev: str, store: Optional[Store], strip: tuple, exclude: tuple = ()) -> RepoExtract:
     if store and len(rev) == 40 and all(c in "0123456789abcdef" for c in rev):
-        cached = store.get_extract(repo, rev, EXTRACTOR_VERSION, strip)         # an extract exists only for a commit git already confirmed
+        cached = store.get_extract(repo, rev, EXTRACTOR_VERSION, strip, exclude)  # an extract exists only for a commit git already confirmed
         if cached:
             return cached
     commit = gitutil.resolve_rev(path, rev)
     if store:
-        cached = store.get_extract(repo, commit, EXTRACTOR_VERSION, strip)
+        cached = store.get_extract(repo, commit, EXTRACTOR_VERSION, strip, exclude)
         if cached:
             return cached
-    ex, _ = extract_commit(repo, path, commit, store, strip)
+    ex, _ = extract_commit(repo, path, commit, store, strip, exclude=exclude)
     if store:
         store.put_extract(ex)
     return ex
@@ -114,7 +119,8 @@ def _without_files(ex: RepoExtract, files: set) -> RepoExtract:
     gone = [e for e in ex.endpoints if e.file in files]
     unreadable_use = {e.response_schema for e in gone if e.response_schema} | {n for e in gone for n in e.request_schemas}
     return dataclasses.replace(ex, endpoints=keep(ex.endpoints), schemas=[x for x in keep(ex.schemas) if x.name not in unreadable_use],
-                               functions=keep(ex.functions), tests=keep(ex.tests), entities=keep(ex.entities), migrations=keep(ex.migrations))
+                               functions=keep(ex.functions), tests=keep(ex.tests), entities=keep(ex.entities), migrations=keep(ex.migrations),
+                               types=keep(ex.types))
 
 
 def analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool = True) -> dict:
@@ -132,6 +138,7 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     t0 = time.monotonic()
     rec = store if persist else None
     cfg = req.config or DEFAULT
+    excl = tuple(req.exclude_patterns or cfg.exclude_patterns or ())
     if rec:
         rec.audit("analysis_requested", target=req.target, base=req.base, head=req.head,
                     repos=sorted(req.repos), pull_request=req.pull_request)
@@ -143,8 +150,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     try:
         base_sha = gitutil.resolve_rev(tpath, req.base)
         head_sha = gitutil.resolve_rev(tpath, req.head)
-        base_ex = _extract(req.target, tpath, base_sha, store, req.strip_prefixes)
-        head_ex = _extract(req.target, tpath, head_sha, store, req.strip_prefixes)
+        base_ex = _extract(req.target, tpath, base_sha, store, req.strip_prefixes, excl)
+        head_ex = _extract(req.target, tpath, head_sha, store, req.strip_prefixes, excl)
         changed_files = gitutil.changed_files(tpath, base_sha, head_sha)
     except gitutil.GitError as e:
         return _failed(req, f"cannot read target revisions: {e}", rec)
@@ -156,7 +163,7 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     def one(item):
         name, path = item
         try:
-            return name, _extract(name, path, req.revisions.get(name, "HEAD"), store, req.strip_prefixes), None
+            return name, _extract(name, path, req.revisions.get(name, "HEAD"), store, req.strip_prefixes, excl), None
         except gitutil.GitError as e:
             return name, None, str(e)
     # every repository costs a git process to resolve its revision (tens of milliseconds each, mostly process start-up): do them side by side.
@@ -673,7 +680,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
                          "reason": "Service criticality is not configured; all services are treated as non-critical."})
     if g.ambiguous_calls:
         unknowns.append({"area": "ambiguous_intra_repo_calls", "count": g.ambiguous_calls, "affects_confidence": True,
-                         "reason": f"{g.ambiguous_calls} intra-repository call(s) matched more than one function and were not linked."})
+                         "reason": f"{g.ambiguous_calls} intra-repository call candidate(s) matched more than one function; "
+                                   "they are linked as inferred CALLS (INF-CALL-AMBIGUOUS), not as confirmed edges."})
     if data_changes:
         mapped_by: dict = {}
         for s in seeds:
@@ -835,6 +843,21 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         "findings": findings, "test_scope": scope, "unknowns": unknowns, "policy_results": [],
         "generated_at": _now(), "configuration_version": cfg.ident(CONFIG_VERSION),
         "extractor_versions": dict(EXTRACTOR_VERSIONS)}
+    # Pulse ports: structural overlay, communities, architecture diagram, finding catalog packaging (derived context, not evidence)
+    # changed_files holds (status, path) pairs from git: the overlay matches on the paths
+    # both overlays cover the changed repository only: its paths are what changed, and a reader may not see the others
+    structural = structure_mod.analyse(g, {p for _, p in changed_files or ()}, repo=req.target)
+    report["structural_risk"] = structural
+    report["communities"] = communities_mod.cluster(g, repo=req.target)
+    for f in findings:
+        if f.get("repository") != req.target:
+            continue                                     # the overlay's paths belong to the changed repository
+        ev_file = (f.get("evidence") or {}).get("file") or next((p.get("file") for p in f.get("path") or [] if p.get("file")), None)
+        for note in structure_mod.limitations_for_file(ev_file, structural):
+            if note not in f.setdefault("limitations", []):
+                f["limitations"].append(note)
+    enrich_all(findings)
+    report["architecture_diagram"] = diagram_mod.build_architecture_diagram(g, report)
     # FR-022 to FR-029: what the ingested evidence says about the tests, the runtime and the deployments (informational unknowns only:
     # missing evidence limits what the report can say, it does not make the static analysis less complete)
     te = TestEvidence(extracts, ev.get("test_run", []), ev.get("coverage", []),
@@ -887,7 +910,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
             "revisions": {r: e.commit for r, e in sorted(extracts.items())},
             "extractor_versions": dict(EXTRACTOR_VERSIONS), "config_version": CONFIG_VERSION, "graph_id": graph_version,
             "tenant_config": {"version": cfg.version, "digest": cfg.digest, "settings": cfg.to_dict()},
-            "strip_prefixes": list(req.strip_prefixes), "test_naming": req.test_naming,
+            "strip_prefixes": list(req.strip_prefixes), "exclude_patterns": list(excl),
+            "test_naming": req.test_naming,
             "max_depth": req.max_depth, "max_results": req.max_results,
             "freshness": {r: f for r, f in sorted(req.freshness.items()) if r in extracts},
             "stale_relationships": req.stale_relationships,

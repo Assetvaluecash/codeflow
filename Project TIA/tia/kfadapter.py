@@ -47,6 +47,7 @@ class QueryRequest(_Strict):
     repository: Optional[str] = None
     pull_request: Optional[int] = None
     revision: Optional[str] = None
+    include_tester_pack: bool = True       # coverage gate and gaps, API test matrices and UI locator packs of the touched entry points
 
 
 class EntityRef(_Strict):
@@ -235,6 +236,73 @@ def scope_paths(rep: dict) -> list:
     return out
 
 
+# ---- the tester pack (tia.testerpack): coverage gate and gaps, API test matrices, UI locator packs -------------------------------------
+GATE_SCORE = {"gaps": 0.9, "not_evaluated": 0.6, "covered": 0.3}
+PACK_RANK = {"coverage_gate": 0, "coverage_gap": 1, "api_matrix": 2, "ui_locators": 3}
+MAX_CASES, MAX_ELEMENTS = 60, 80          # per chunk: the full lists stay in GET /api/v1/impact-analyses/{id}/tester-pack
+
+
+def _chunk(aid: str, bid: str, category: str, block_type: str, node_type: str, text: str, score: float, source: str, domain: str,
+           fields: dict, knowledge: Optional[dict] = None) -> ChunkItem:
+    return ChunkItem(text=text, source_file=source or "", category=category, score=round(score, 4), weaviate_uuid="", block_id=f"{aid}#{bid}",
+                     page_number=None, block_index=None, block_type=block_type, kg_node_type=node_type, domain=domain,
+                     extracted_fields=json.dumps({"analysis_id": aid, **fields}, sort_keys=True, default=str),
+                     extracted_knowledge=json.dumps(knowledge, sort_keys=True, default=str) if knowledge is not None else None)
+
+
+def pack_chunks(pack: Optional[dict], domain: str) -> list:
+    """The pack as chunks an agent can narrate or turn into tests: one gate verdict, one chunk per entry point that is not fully
+    covered, one API matrix per touched endpoint, one locator pack per page that calls a touched endpoint. Structured content is in
+    extracted_knowledge (JSON). Coverage is static: a chunk never says a test passes."""
+    if not pack:
+        return []
+    aid, out = pack["analysis_id"], []
+    gate = pack["gate"]
+    out.append(_chunk(aid, "gate", "coverage_gate", "tia_coverage_gate", "analysis",
+                      f"COVERAGE GATE: {gate['outcome'].upper().replace('_', ' ')}. {gate['headline']} 'Covered' means a test addresses the "
+                      "technical aspect, not that it passes; 'not evaluated' is not 'safe'.",
+                      GATE_SCORE[gate["outcome"]], "", domain, {"outcome": gate["outcome"], **gate["counts"]}))
+    for k, r in enumerate(gate["entry_points"]):
+        if r["outcome"] == "covered":
+            continue
+        name = f"{r['label']}: {r['entry_point']}" if r.get("label") else r["entry_point"]
+        miss = "; ".join(r["missing_aspects"][:8]) + (f"; and {len(r['missing_aspects']) - 8} more" if len(r["missing_aspects"]) > 8 else "")
+        text = (f"COVERAGE GAP {name} ({r['service']}): {r['covered']} of {r['total']} technical aspects covered. Not covered: {miss}."
+                if r["outcome"] == "gaps" else f"COVERAGE NOT EVALUATED {name} ({r['service']}): {r['reason']}.")
+        if r["failing_tests"]:
+            text += f" Linked tests that FAILED in the last CI run: {', '.join(r['failing_tests'][:5])}."
+        out.append(_chunk(aid, f"gap-{k}", "coverage_gap", "tia_coverage_gap", "page" if r["kind"] == "page" else "endpoint", text,
+                          GATE_SCORE[r["outcome"]], "", domain,
+                          {k2: r[k2] for k2 in ("entry_point", "kind", "service", "repo", "outcome", "covered", "partial", "missing", "total", "tests_found")},
+                          {"missing_aspects": r["missing_aspects"], "failing_tests": r["failing_tests"]}))
+    for k, it in enumerate(pack["api"]["endpoints"]):
+        ins = "; ".join(f"{i['name']} ({'required' if i['required'] else 'optional'}{', ' + i['rules'] if i['rules'] else ''})" for i in it["inputs"][:12])
+        errs = ", ".join(str(s["status"]) for s in it["error_statuses"]) or "none declared"
+        text = (f"API TEST MATRIX {it.get('label') + ': ' if it.get('label') else ''}{it['entry_point']} ({it['service']}): {len(it['inputs'])} input(s), "
+                f"{it['case_count']} generated case(s), error statuses {errs}. Inputs: {ins or 'none'}.")
+        out.append(_chunk(aid, f"api-{k}", "api_matrix", "tia_api_matrix", "endpoint", text, 0.5, str(it.get("file") or ""), domain,
+                          {"entry_point": it["entry_point"], "service": it["service"], "repo": it["repo"], "inputs": len(it["inputs"]),
+                           "cases": it["case_count"], "cases_in_chunk": min(it["case_count"], MAX_CASES)},
+                          {"method": it["method"], "path": it["path"],
+                           "inputs": [{k2: i.get(k2) for k2 in ("name", "in", "type", "required", "multi", "rules", "valid", "invalid")} for i in it["inputs"]],
+                           "error_statuses": it["error_statuses"], "cases": it["cases"][:MAX_CASES]}))
+    for k, p in enumerate(pack["ui"]["pages"]):
+        s = p["summary"]
+        calls = "; ".join(f"{c['method']} {c['path']}" for c in p["api_calls"][:5]) or "none found"
+        text = (f"UI LOCATORS page {p['page']} ({p['framework']}, {p['repo']}): {s['elements']} element(s), {s['mandatory']} mandatory, "
+                f"{s['without_unique_locator']} without a unique locator (position-based, fragile). Calls: {calls}.")
+        els = [{"name": e.get("label") or e.get("text") or e.get("name") or e["tag"], "tag": e["tag"], "type": e.get("type"), "mandatory": bool(e.get("mandatory")),
+                "locator": e["locator"], **({"locator_note": e["locator_note"]} if e.get("locator_note") else {}), "rules": e.get("rules"),
+                **({"options": [o.get("value") if o.get("value") is not None else o.get("text") for o in e.get("options", []) if o.get("value") != ""],
+                    "options_source": e.get("options_source")} if e["tag"] == "select" else {})} for e in p["elements"][:MAX_ELEMENTS]]
+        out.append(_chunk(aid, f"ui-{k}", "ui_locators", "tia_ui_locators", "page", text, 0.5, str((p.get("files") or [""])[0]), domain,
+                          {"page": p["page"], "framework": p["framework"], "repo": p["repo"], "elements": s["elements"],
+                           "elements_in_chunk": len(els), "without_unique_locator": s["without_unique_locator"]},
+                          {"elements": els, "api_calls": [{"method": c["method"], "path": c["path"],
+                                                           "endpoints": [x["entry_point"] for x in c["endpoints"]]} for c in p["api_calls"]]}))
+    return out
+
+
 def empty(req: QueryRequest, errors: list[str], t0: float) -> QueryResponse:
     return QueryResponse(query=req.query, domain=req.domain, detected_domains=[DetectedDomain(domain=req.domain, confidence=1.0)] if req.domain else [],
                          chunks=[], reranked_chunks=[], paths=[], reranked_paths=[],
@@ -242,8 +310,9 @@ def empty(req: QueryRequest, errors: list[str], t0: float) -> QueryResponse:
                                                     chunks_considered=0, paths_considered=0, errors=errors))
 
 
-def to_query_response(rep: dict, req: QueryRequest, t0: Optional[float] = None) -> QueryResponse:
-    """Project one (already redacted) report. Material findings rank first in reranked_*; unknowns are always included."""
+def to_query_response(rep: dict, req: QueryRequest, t0: Optional[float] = None, pack: Optional[dict] = None) -> QueryResponse:
+    """Project one (already redacted) report, and its tester pack when given. Material findings rank first in reranked_*; unknowns are
+    always included."""
     t0 = t0 if t0 is not None else time.perf_counter()
     findings = rep.get("findings") or []
     chunks = [chunk_for(rep, i, f, req.domain) for i, f in enumerate(findings)]
@@ -259,10 +328,16 @@ def to_query_response(rep: dict, req: QueryRequest, t0: Optional[float] = None) 
     rank = {"rule_gap": 0, "test_scope": 1, "consistency_check": 2}
     reranked_chunks = reranked_chunks + sorted(tchunks, key=lambda c: (rank[c.category], -c.score, c.block_id))[: req.top_k_semantic]
     reranked_paths = (reranked_paths + sorted(tpaths, key=lambda p: (-p.score, p.source_block_id)))[: req.top_k_graph]
-    chunks, paths = chunks + tchunks, paths + tpaths
+    # the tester pack: the gate verdict first, then gaps, API matrices and locator packs, each kind bounded by the same top_k
+    pchunks = pack_chunks(pack, req.domain)
+    for cat in PACK_RANK:
+        reranked_chunks = reranked_chunks + [c for c in pchunks if c.category == cat][: req.top_k_semantic]
+    chunks, paths = chunks + tchunks + pchunks, paths + tpaths
     # unknowns are never ranked away: they ride along after the findings, whatever top_k says
     reranked_chunks = reranked_chunks + unknown_chunks
     errors = []
+    if pack and pack["basis"]["unavailable_repositories"]:
+        errors.append("tester pack: could not read " + ", ".join(pack["basis"]["unavailable_repositories"]) + " at the analysed revision")
     if rep.get("status") in ("partial", "complete_with_gaps", "failed"):
         errors.append(f"report status {rep['status']}: " + ("the analysis is INCOMPLETE" if rep["status"] == "partial" else
                                                             "the analysis FAILED" if rep["status"] == "failed" else "finished with unknowns that limit confidence"))

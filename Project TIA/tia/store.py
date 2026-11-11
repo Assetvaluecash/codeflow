@@ -36,20 +36,23 @@ class Store:
 
     # ---- evidence cache (incremental analysis: unchanged revisions are not re-parsed) -----------------
     @staticmethod
-    def _key(repo: str, commit: str, version: str, strip: tuple = ()) -> str:
-        """An extract depends on the gateway prefixes it was normalised with: a different configuration is a different cache entry."""
-        return f"{repo}@{commit}#{version}" + (f"|strip={','.join(strip)}" if strip else "")
+    def _key(repo: str, commit: str, version: str, strip: tuple = (), exclude: tuple = ()) -> str:
+        """An extract depends on the gateway prefixes and exclude globs it was made with: a different configuration is a different cache entry."""
+        return (f"{repo}@{commit}#{version}" + (f"|strip={','.join(strip)}" if strip else "")
+                + (f"|excl={','.join(exclude)}" if exclude else ""))
 
-    def get_extract(self, repo: str, commit: str, version: str, strip: tuple = ()) -> Optional[RepoExtract]:
+    def get_extract(self, repo: str, commit: str, version: str, strip: tuple = (), exclude: tuple = ()) -> Optional[RepoExtract]:
         with self.db.tx(self.tenant_id) as c:
-            r = c.execute("select data from extractions where key = %s", (self._key(repo, commit, version, tuple(strip)),)).fetchone()
+            r = c.execute("select data from extractions where key = %s",
+                          (self._key(repo, commit, version, tuple(strip), tuple(exclude)),)).fetchone()
         return RepoExtract.from_dict(r[0]) if r else None
 
     def put_extract(self, ex: RepoExtract):
         with self.db.tx(self.tenant_id) as c:
             c.execute("insert into extractions (tenant_id, key, data) values (%s, %s, %s) "
                       "on conflict (tenant_id, key) do update set data = excluded.data",
-                      (self.tenant_id, self._key(ex.repo, ex.commit, ex.extractor_version, tuple(ex.strip_prefixes)), Jsonb(ex.to_dict())))
+                      (self.tenant_id, self._key(ex.repo, ex.commit, ex.extractor_version, tuple(ex.strip_prefixes),
+                                                 tuple(ex.exclude_patterns or ())), Jsonb(ex.to_dict())))
 
     # ---- tenant configuration (versioned, insert-only) -------------------------------------------------------------
     def effective_config(self):

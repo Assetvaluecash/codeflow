@@ -9,6 +9,10 @@ from .extract_python import module_name
 from .models import CONTRACT_CONFIRMED, INFERRED, SOURCE_CONFIRMED, Edge, RepoExtract
 from .resolve import resolve_consumers
 
+# Relationships whose destination change affects the source (caller / subclass / reader).
+_IMPACT_DST = ("CALLS", "INHERITS", "USES_SCHEMA", "CONSUMES_API", "CONSUMES_EVENT", "ISSUES",
+               "TESTS", "MAPS_TO", "MAPS_COLUMN", "READS", "WRITES")
+
 
 def _path_matches(template: str, concrete: str) -> bool:
     """Endpoint template ('/a/{}/b') vs a test's concrete or templated path ('/a/123/b')."""
@@ -36,7 +40,7 @@ class Graph:
         if e.rel in ("HANDLES", "PUBLISHES"):  # handler change -> endpoint; producer change -> the topic it publishes to
             self._impact[e.src].append((e.dst, e))
             self._deps[e.dst].append((e.src, e))
-        elif e.rel in ("CALLS", "USES_SCHEMA", "CONSUMES_API", "CONSUMES_EVENT", "ISSUES", "TESTS", "MAPS_TO", "MAPS_COLUMN", "READS", "WRITES"):
+        elif e.rel in _IMPACT_DST:
             self._impact[e.dst].append((e.src, e))     # table/column -> entity -> function: who is affected by a data change
             self._deps[e.src].append((e.dst, e))
         # EXPOSES / OWNED_BY / MIGRATES are not traversed
@@ -105,6 +109,9 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
                        line=f.line, name=f.qualname)
             by_name[f.qualname.split(".")[-1]].append(f)
         fn_by_repo_name[repo] = by_name
+        for tdecl in ex.types:
+            g.add_node(tdecl.id, type="type", repo=repo, service=ex.service, file=tdecl.file,
+                       line=tdecl.line, name=tdecl.name, kind=tdecl.kind)
         for s in ex.schemas:
             g.add_node(s.id, type="schema", repo=repo, service=ex.service, file=s.file, line=s.line, name=s.name)
         for e in ex.endpoints:
@@ -118,6 +125,9 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
     for repo, ex in extracts.items():
         ev = lambda file, line: {"repo": repo, "file": file, "line": line, "commit": ex.commit}
         by_name = fn_by_repo_name[repo]
+        types_by_name = defaultdict(list)
+        for tdecl in ex.types:
+            types_by_name[tdecl.name].append(tdecl)
         schema_ids = {s.name: s.id for s in ex.schemas}
         for e in ex.endpoints:
             g.add_edge(Edge(f"svc:{ex.service}", "EXPOSES", e.id, SOURCE_CONFIRMED, "extract", None, ev(e.file, e.line)))
@@ -132,11 +142,23 @@ def build_graph(extracts: dict[str, RepoExtract], strip_prefixes: tuple = (),
                 g.add_edge(Edge(c.function_id, "ISSUES", c.id, SOURCE_CONFIRMED, "extract", None, ev(c.file, c.line)))
         for f in ex.functions:
             for callee in f.calls:
-                cands = by_name.get(callee, [])
-                if len(cands) == 1 and cands[0].id != f.id:
+                cands = [c for c in by_name.get(callee, []) if c.id != f.id]
+                if len(cands) == 1:
                     g.add_edge(Edge(f.id, "CALLS", cands[0].id, SOURCE_CONFIRMED, "extract", None, ev(f.file, f.line)))
                 elif len(cands) > 1:
-                    g.ambiguous_calls += 1
+                    # keep every candidate as an inferred edge instead of dropping the call (Pulse port)
+                    g.ambiguous_calls += len(cands)
+                    for cand in cands:
+                        g.add_edge(Edge(f.id, "CALLS", cand.id, INFERRED, "extract", "INF-CALL-AMBIGUOUS", ev(f.file, f.line)))
+        for tdecl in ex.types:
+            for base in tdecl.bases:
+                cands = [t for t in types_by_name.get(base, []) if t.id != tdecl.id]
+                if len(cands) == 1:
+                    g.add_edge(Edge(tdecl.id, "INHERITS", cands[0].id, SOURCE_CONFIRMED, "extract", None, ev(tdecl.file, tdecl.line)))
+                elif len(cands) > 1:
+                    for cand in cands:
+                        g.add_edge(Edge(tdecl.id, "INHERITS", cand.id, INFERRED, "extract", "INF-INHERITS-AMBIGUOUS",
+                                        ev(tdecl.file, tdecl.line)))
         # ---- test association (TFD: TESTS is a static association, not execution) -------------------
         funcs_by_module = defaultdict(list)
         for f in ex.functions:

@@ -67,7 +67,8 @@ def resolve(svc: RepoService, p: dict, fetch_pr: bool = True, cfg: Optional[Tena
             "pr": p.get("pr"), "change_record": p.get("change_record"),
             "max_depth": min(int(p.get("max_depth") or cfg.max_depth), cfg.max_depth),
             "max_results": min(int(p.get("max_results") or cfg.max_results), cfg.max_results),
-            "head_ref": p.get("head"), "strip_prefixes": list(cfg.strip_prefixes), "test_naming": cfg.test_naming,
+            "head_ref": p.get("head"), "strip_prefixes": list(cfg.strip_prefixes),
+            "exclude_patterns": list(cfg.exclude_patterns), "test_naming": cfg.test_naming,
             "time_budget_s": cfg.time_budget_seconds, "config": cfg.to_dict(), "config_version": cfg.version, "config_digest": cfg.digest}
 
 
@@ -155,7 +156,9 @@ def execute(svc: RepoService, store: Store, c: dict, secrets=None) -> dict:
     rep = analyze(AnalysisRequest(repos=paths, target=c["target"], base=c["base"], head=c["head"],
                                   revisions=c["revisions"], pull_request=c.get("pr"), change_record=c.get("change_record"),
                                   max_depth=c["max_depth"], max_results=c["max_results"], time_budget_s=c.get("time_budget_s", 60.0),
-                                  strip_prefixes=tuple(c.get("strip_prefixes", ())), test_naming=c.get("test_naming", True),
+                                  strip_prefixes=tuple(c.get("strip_prefixes", ())),
+                                  exclude_patterns=tuple(c.get("exclude_patterns", cfg.exclude_patterns or ())),
+                                  test_naming=c.get("test_naming", True),
                                   freshness=freshness_of(svc, c["scope"], repos), stale_relationships=stale, config=cfg,
                                   evidence=EvidenceStore(store.db, store.tenant_id).for_analysis(paths, c["target"], c["head"])), store)
     if rep["status"] != "failed":
@@ -204,7 +207,8 @@ def reproduce(svc: RepoService, store: Store, analysis_id: str) -> dict:
         repos=paths, target=target, base=snap["target_base"], head=snap["target_head"],
         revisions={r: c for r, c in snap["revisions"].items() if r != target}, pull_request=orig["change"].get("pull_request"),
         change_record=orig["change"].get("change_record"), max_depth=snap["max_depth"], max_results=snap["max_results"],
-        test_naming=snap["test_naming"], strip_prefixes=tuple(snap["strip_prefixes"]), freshness=snap["freshness"],
+        test_naming=snap["test_naming"], strip_prefixes=tuple(snap["strip_prefixes"]),
+        exclude_patterns=tuple(snap.get("exclude_patterns") or ()), freshness=snap["freshness"],
         stale_relationships=snap["stale_relationships"], time_budget_s=snap.get("time_budget_s", 60.0),
         config=_snapshot_config(snap), evidence=EvidenceStore(store.db, store.tenant_id).pinned(snap.get("evidence_ids") or {})),
         store, persist=False)

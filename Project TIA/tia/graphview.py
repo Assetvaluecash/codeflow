@@ -36,6 +36,8 @@ def _label(nid: str, n: dict) -> str:
         return f"{n['method']} {n['path']}"
     if t in ("function", "schema", "test", "entity", "table", "column"):
         return n.get("name") or nid
+    if t == "type":                                    # a class / interface / record (inheritance)
+        return f"{n.get('kind') or 'class'} {n.get('name') or nid}"
     if t == "migration":
         return f"migration {n.get('name')}"
     if t == "callsite":
@@ -116,14 +118,14 @@ def build_view(extracts: dict, level: str = "service", repos: Optional[list] = N
             if t == "column" and not (q or focus):
                 continue                    # dozens per repository: shown when the viewer searches or focuses, not in the overview
             add_node(nid, type=t, label=_label(nid, n), repo=n["repo"], service=n["service"], file=n.get("file"),
-                     line=n.get("line"), unresolved=nid in unresolved)
+                     line=n.get("line"), unresolved=nid in unresolved, **({"kind": n["kind"]} if n.get("kind") else {}))
         for e in g.edges:
             if e.rel == "CONSUMES_API":
                 continue
             if e.src in nodes and e.dst in nodes or (e.rel == "EXPOSES" and e.dst in nodes):
                 if level == "endpoint" and e.rel not in ("EXPOSES", "USES_SCHEMA"):
                     continue
-                add_edge(e.src, e.dst, e.rel, e.status, strategy=e.strategy)
+                add_edge(e.src, e.dst, e.rel, e.status, strategy=e.strategy, **({"rule": e.rule} if e.rule else {}))
         if level == "function":
             for e in consumes:
                 add_edge(e.src, e.dst, "CONSUMES_API", status_of(e), strategy=e.strategy, rule=e.rule,

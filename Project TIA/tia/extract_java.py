@@ -28,7 +28,7 @@ from tree_sitter import Language, Node, Parser
 from . import EXTRACTOR_VERSION
 from .extract_data import SPRING_DATA_BASES, snake
 from .events import TOPIC as EVENT_TOPIC
-from .models import CallSite, Endpoint, Entity, Function, RepoExtract, Schema, TestCase, normalize_path
+from .models import CallSite, Endpoint, Entity, Function, RepoExtract, Schema, TestCase, TypeDecl, normalize_path
 
 _LANG = Language(tree_sitter_java.language())
 
@@ -571,6 +571,26 @@ class _JavaVisitor:
             self._add_client(node, name, feign, body)
         elif node.type in ("class_declaration", "record_declaration") and not (set(mods) & STEREOTYPES):
             self._add_schema(node, name)
+        if not self.is_test_file and node.type in ("class_declaration", "interface_declaration", "record_declaration"):
+            # inheritance blast edges: superclass and implemented / extended interfaces, by simple name
+            bases = []
+            sup = node.child_by_field_name("superclass")
+            if sup is not None:
+                sn = next((c for c in sup.children if c.type in ("type_identifier", "scoped_type_identifier", "generic_type")), None)
+                if sn is not None:
+                    b = _simple(_t(sn)).split("<")[0]
+                    if b and b not in ("Object", "Record", "Enum"):
+                        bases.append(b)
+            ifaces = node.child_by_field_name("interfaces") or next((c for c in node.children if c.type == "super_interfaces"), None)
+            if ifaces is not None:
+                for c in ifaces.children:
+                    if c.type in ("type_identifier", "scoped_type_identifier", "generic_type"):
+                        b = _simple(_t(c)).split("<")[0]
+                        if b:
+                            bases.append(b)
+            kind = "interface" if is_interface else "record" if node.type == "record_declaration" else "class"
+            self.out.types.append(TypeDecl(id=f"{self.repo}:{self.path}::{name}", repo=self.repo, service=self.service, name=name,
+                                           file=self.path, line=node.start_point[0] + 1, bases=bases, kind=kind))
         if body is not None:
             for m in body.children:
                 if m.type in ("method_declaration", "constructor_declaration"):

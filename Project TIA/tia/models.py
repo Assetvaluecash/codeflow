@@ -152,6 +152,19 @@ class Migration:
 
 
 @dataclass
+class TypeDecl:
+    """A class / interface / record declaration used for inheritance blast edges."""
+    id: str
+    repo: str
+    service: str
+    name: str
+    file: str
+    line: int
+    bases: list = field(default_factory=list)   # simple superclass / interface names
+    kind: str = "class"                         # class | interface | record
+
+
+@dataclass
 class Edge:
     src: str
     rel: str
@@ -189,6 +202,7 @@ class RepoExtract:
     data_refs: list = field(default_factory=list)          # Python: model references in functions (assembly input)
     secrets_withheld: int = 0                              # secret-like values found in source and kept out of these records
     strip_prefixes: list = field(default_factory=list)     # gateway prefixes the paths were normalised with: part of the cache identity
+    exclude_patterns: list = field(default_factory=list)   # tenant path globs skipped during extraction: part of the cache identity
     context_path: Optional[str] = None                     # Spring server.servlet.context-path of this service (already applied to its endpoints)
     external_context_paths: dict = field(default_factory=dict)   # service -> context path, from a configuration repository (shared/<service>.yml)
     enums: dict = field(default_factory=dict)              # enum type name -> allowed values (Python Enum, Java enum)
@@ -199,6 +213,7 @@ class RepoExtract:
     event_schemas: list = field(default_factory=list)      # [{id, name, format: avro|json-schema, fields, file, line, topic, topic_source}]
     sql_access: list = field(default_factory=list)         # SQL in code (FR-041): [{function_id, op: read|write|call, target, file, line, sql, columns}]
     procedures: list = field(default_factory=list)         # SQL definitions (FR-041): [{name, kind, reads, writes, calls, columns, file, line, ...}]
+    types: list = field(default_factory=list)              # TypeDecl: class/interface inheritance for blast edges
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -223,11 +238,13 @@ class RepoExtract:
             migrations=[Migration(**m) for m in d.get("migrations", [])],
             data_unknowns=d.get("data_unknowns", []), repositories=d.get("repositories", []),
             data_refs=d.get("data_refs", []), secrets_withheld=d.get("secrets_withheld", 0),
-            strip_prefixes=d.get("strip_prefixes", []), context_path=d.get("context_path"),
+            strip_prefixes=d.get("strip_prefixes", []), exclude_patterns=d.get("exclude_patterns", []),
+            context_path=d.get("context_path"),
             external_context_paths=d.get("external_context_paths", {}), enums=d.get("enums", {}),
             ui_facts=d.get("ui_facts", []), ui_pages=d.get("ui_pages", []), manual_tests=d.get("manual_tests", []),
             events=d.get("events", []), event_schemas=d.get("event_schemas", []),
-            sql_access=d.get("sql_access", []), procedures=d.get("procedures", []))
+            sql_access=d.get("sql_access", []), procedures=d.get("procedures", []),
+            types=[TypeDecl(**t) for t in d.get("types", [])])
 
 
 def normalize_path(path: str, strip_prefixes: tuple = ()) -> str:

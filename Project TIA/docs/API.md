@@ -541,6 +541,14 @@ Request body:
 |---|---|---|---|
 | `aid` | path | string | yes |
 
+### `GET /api/v1/impact-analyses/{aid}/tester-pack`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  For the entry points this change reaches: what to retest with a coverage gate (covered / gaps / not_evaluated), the locator pack of the pages that call them, and the API test matrix of the touched endpoints. Reads the finished report; starts nothing.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `aid` | path | string | yes |
+
 ### `GET /api/v1/impact-analyses/{aid}/unknowns`
 
 **Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  
@@ -656,6 +664,7 @@ Request body:
 | `repository` | string (optional) | no |  |
 | `pull_request` | integer (optional) | no |  |
 | `revision` | string (optional) | no |  |
+| `include_tester_pack` | boolean | no |  |
 
 
 ## Releases

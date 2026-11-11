@@ -57,7 +57,7 @@ Tabs that need a real Git host and cannot be shown offline:
 |---|---|---|
 | Services | nothing selected | 3 boxes and 2 arrows: customer-portal → payments-service ← statement-service |
 | Endpoints & schemas | nothing selected | 15 nodes and 14 edges; the arrows end on `GET /accounts/{}/payments` |
-| Functions, call sites, tests | nothing selected | 44 nodes and 40 edges; the full chain from `account_payments` and `statement_rows` down to `ordered` |
+| Functions, call sites, tests | nothing selected | 49 nodes and 40 edges; the full chain from `account_payments` and `statement_rows` down to `ordered`, plus the 5 classes (no inheritance edges: their bases `BaseModel` and `Enum` are framework types) |
 | Services | only statement-service | 1 box and no arrows. This is the "island": selecting one repository hides the others |
 
 A grey dotted edge from `payments.component.ts` is expected. The Angular page calls a relative address, so TIA marks it unresolved
@@ -120,6 +120,27 @@ the analysed repositories, are listed under **Unknowns**.
   These two verdicts feed section 5b.
 - **PR comment (markdown)** begins "TIA impact analysis - complete_with_gaps … 5 finding(s), 5 material - 5 high", followed by the
   What to test table marked **BREAKING**.
+
+### Tester pack for this change (after `contract`)
+One change, three answers, limited to what the change reaches.
+
+- **Coverage gate:** **gaps**. "6 entry point(s) and page(s) to retest: 2 covered, 3 with gaps, 1 not evaluated."
+
+  | Entry point or page | Gate | Why |
+  |---|---|---|
+  | Payments screen `GET /portal/accounts/{account_id}/payments` | covered | 1 of 1 aspects |
+  | Monthly statement PDF `GET /statements/{account_id}/pdf` | covered | 2 of 2 aspects |
+  | `GET /accounts/{account_id}/payments` | gaps | 2 of 4: the `status` filter values are not tested |
+  | mobile-app (observed at runtime) | not evaluated | known only from production traffic |
+  | page `/accounts/:id/payments` | gaps | 3 of 8 |
+  | page `/statements` | gaps | 2 of 5 |
+
+- **Tab 2, UI locator pack:** 2 pages, 14 elements, 2 without a unique locator (the two Export buttons).
+- **Tab 3, API test matrix:** the 3 touched endpoints, 5 generated cases. "Create a payment" is not there: this change does not reach it.
+- **Show pack JSON** shows the same content as JSON.
+- **Show agent response (Knowledge Fabric JSON)** shows what an AI testing agent receives. Its chunks include 1 coverage_gate,
+  4 coverage_gap, 3 api_matrix and 2 ui_locators, next to the findings, test scope, rule gap and unknowns.
+- After `docstring` the pack says "This change reaches no entry point: nothing to retest."
 
 ## 5. Tester views
 

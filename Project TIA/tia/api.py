@@ -1559,6 +1559,41 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
         return {"analysis_id": rep["analysis_id"], "status": rep["status"],
                 "report": redact(rep, audience(x_tia_readable_repos))}
 
+    # ---- tester pack: one finished analysis -> what to retest + coverage gate, locator pack, API matrix (docs/CASE-STUDY.md) ----------
+    def tester_pack_of(rep: dict, header: Optional[str]) -> dict:
+        """rep: the caller's (already redacted) report. The pack is computed over the repositories the caller may read, the changed
+        repository at its proposed revision and the others at the revisions the analysis used. Nothing is analysed anew: the extracts
+        and the graph come from the caches the analysis filled."""
+        from .gitutil import GitError
+        from .impact import _extract
+        from .testerpack import build_pack
+        ok = audience(header)
+        cfg = store.effective_config()
+        strip, excl = tuple(cfg.strip_prefixes), tuple(cfg.exclude_patterns)
+        revs = {x["repo"]: x["commit"] for x in (rep.get("coverage") or {}).get("repositories_analysed", [])}
+        target = rep["change"]["repository"]
+        if target in revs:
+            revs[target] = rep["change"]["proposed_revision"]
+        ex, gone = {}, []
+        for repo, sha in sorted(revs.items()):
+            if ok is not None and repo not in ok:
+                continue
+            try:
+                ex[repo] = _extract(repo, svc.get(repo).path, sha, store, strip, excl)
+            except (IngestError, GitError):
+                gone.append(repo)                                  # removed since, or its commit is no longer in the clone
+        g = get_or_build(store, ex, strip, cfg.test_naming)[0] if ex else None
+        return scrub_json(build_pack(rep, ex, g, {r: e.commit for r, e in sorted(ex.items())}, gone))[0]
+
+    @app.get("/api/v1/impact-analyses/{aid}/tester-pack")
+    def tester_pack(aid: str, x_tia_readable_repos: Optional[str] = Header(None)):
+        """For the entry points this change reaches: what to retest with a coverage gate (covered / gaps / not_evaluated), the locator
+        pack of the pages that call them, and the API test matrix of the touched endpoints. Reads the finished report; starts nothing."""
+        rep = get(aid, x_tia_readable_repos)
+        if rep.get("status") == "failed":
+            raise HTTPException(409, "the analysis failed: there is no impact to build a tester pack from")
+        return tester_pack_of(rep, x_tia_readable_repos)
+
     # ---- Knowledge Fabric V2.5 door (TIA_KF_V2_INTEGRATION.docx, option B: a sibling of KF's /query) ----------------------------
     @app.post("/query/tia", response_model=kfadapter.QueryResponse)
     def kf_query(body: kfadapter.QueryRequest, x_tia_readable_repos: Optional[str] = Header(None)):
@@ -1580,7 +1615,9 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
                                           "(TIA does not infer a repository or a change from the question text)"], t0)
         if rep is None or not visible(rep["change"]["repository"]):
             return kfadapter.empty(body, ["no analysis found for that selection"], t0)
-        return kfadapter.to_query_response(redact(rep, audience(x_tia_readable_repos)), body, t0)
+        red = redact(rep, audience(x_tia_readable_repos))
+        pack = tester_pack_of(red, x_tia_readable_repos) if body.include_tester_pack and red.get("status") != "failed" else None
+        return kfadapter.to_query_response(red, body, t0, pack)
 
     # ---- SCM webhooks (authenticated by signature, not by session) ------------------------------------------------
     @app.post("/api/v1/webhooks/github")

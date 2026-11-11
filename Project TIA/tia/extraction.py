@@ -7,27 +7,31 @@ import time
 from typing import Optional
 
 from . import EXTRACTOR_VERSION, gitutil, telemetry, tracing
+from .exclude import should_exclude
 from .extract_python import is_shared_config, assemble, extract_source, is_extractable, is_service_config, read_service_map
 from .models import RepoExtract
 from .store import Store
 
 
-def _file_key(repo: str, service: str, strip: tuple, blob: str, path: str) -> str:
-    return f"{repo}|{service}|{','.join(strip)}|{EXTRACTOR_VERSION}|{blob}|{path}"
+def _file_key(repo: str, service: str, strip: tuple, blob: str, path: str, exclude: tuple = ()) -> str:
+    return f"{repo}|{service}|{','.join(strip)}|{','.join(exclude)}|{EXTRACTOR_VERSION}|{blob}|{path}"
 
 
-def extract_commit(repo: str, path: str, commit: str, store: Optional[Store], strip: tuple = (), force: bool = False):
+def extract_commit(repo: str, path: str, commit: str, store: Optional[Store], strip: tuple = (), force: bool = False,
+                   exclude: tuple = ()):
     """Returns (RepoExtract, stats). Without a store nothing is cached and every file is parsed.
-    force=True is the full-rescan path: the cache is ignored and every file fact is re-derived and stored again."""
+    force=True is the full-rescan path: the cache is ignored and every file fact is re-derived and stored again.
+    exclude: the tenant's path globs; matching files are not analysed (they are counted in the stats)."""
     t0 = time.perf_counter()
     with tracing.span("extraction.run", repo=repo, force=force) as sp:
-        ex, stats = _extract_commit(repo, path, commit, store, strip, force)
+        ex, stats = _extract_commit(repo, path, commit, store, strip, force, exclude)
         sp.set(files=stats["files"], parsed=stats["parsed"], reused=stats["reused"], failed=len(ex.files_failed))
     telemetry.record_extraction(stats, len(ex.files_failed), time.perf_counter() - t0)
     return ex, stats
 
 
-def _extract_commit(repo: str, path: str, commit: str, store: Optional[Store], strip: tuple, force: bool):
+def _extract_commit(repo: str, path: str, commit: str, store: Optional[Store], strip: tuple, force: bool,
+                    exclude: tuple = ()):
     tree = gitutil.list_tree(path, commit)
     wanted = [p for p in tree if p in ("tia-services.yaml", "tia-services.yml", "catalog-info.yaml", "catalog-info.yml") or is_service_config(p) or is_shared_config(p)
               or (p.startswith("contracts/") and p.endswith(".json"))]
@@ -36,8 +40,9 @@ def _extract_commit(repo: str, path: str, commit: str, store: Optional[Store], s
     smap = read_service_map(small)
     service = smap.get("service", repo)
 
-    py = sorted(p for p in tree if is_extractable(p))
-    keys = {p: _file_key(repo, service, strip, tree[p], p) for p in py}
+    excluded = sorted(p for p in tree if is_extractable(p) and should_exclude(p, exclude))
+    py = sorted(p for p in tree if is_extractable(p) and not should_exclude(p, exclude))
+    keys = {p: _file_key(repo, service, strip, tree[p], p, exclude) for p in py}
     have = store.get_file_extracts(list(keys.values())) if store and not force else {}
     missing = [p for p in py if keys[p] not in have]
     blobs = gitutil.read_blobs(path, sorted({tree[p] for p in missing}))
@@ -53,5 +58,11 @@ def _extract_commit(repo: str, path: str, commit: str, store: Optional[Store], s
     if store:
         store.put_file_extracts(fresh, overwrite=force)
     per_file = {p: have.get(keys[p]) or fresh[keys[p]] for p in py}
-    ex = assemble(repo, commit, list(tree), smap, service, per_file, small, strip)
-    return ex, {"files": len(py), "reused": len(py) - len(missing), "parsed": len(missing)}
+    # assemble still walks the tree; omit excluded extractable paths so they are not analysed
+    skip = set(excluded)
+    ex = assemble(repo, commit, [p for p in tree if p not in skip], smap, service, per_file, small, strip)
+    ex.exclude_patterns = list(exclude)
+    stats = {"files": len(py), "reused": len(py) - len(missing), "parsed": len(missing)}
+    if exclude:
+        stats.update(excluded=len(excluded), excluded_paths=excluded[:50])
+    return ex, stats

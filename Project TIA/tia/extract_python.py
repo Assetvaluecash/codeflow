@@ -29,7 +29,7 @@ from .scrub import scrub_extract
 from .adapters import adapter_for, run as run_adapter
 from .sqllineage import embedded as embedded_sql, is_sql_source, parse_definitions
 from .streams import connector_facts, is_connector_path, stream_facts
-from .models import (CallSite, Endpoint, Function, RepoExtract, Schema, TestCase,
+from .models import (CallSite, Endpoint, Function, RepoExtract, Schema, TestCase, TypeDecl,
                      normalize_path)
 
 HTTP_VERBS = {"get", "post", "put", "delete", "patch"}
@@ -399,6 +399,13 @@ class _FileVisitor:
             if ent is not None:
                 self.out.entities.append(ent)
         bases = {_unparse(b).split(".")[-1] for b in node.bases}
+        # inheritance blast edges: every non-test class with its declared bases (standard-library and framework bases left out)
+        skip_bases = {"object", "Object", "Exception", "BaseException", "type", "Enum", "IntEnum", "StrEnum",
+                      "BaseModel", "ABC", "Protocol", "TypedDict", "Generic"}
+        declared = [b for b in (_unparse(x).split(".")[-1] for x in node.bases) if b and b not in skip_bases]
+        if not self.is_test and not self.is_migration:
+            self.out.types.append(TypeDecl(id=f"{self.repo}:{self.path}::{node.name}", repo=self.repo, service=self.service,
+                                           name=node.name, file=self.path, line=node.lineno, bases=declared, kind="class"))
         if bases & {"Enum", "IntEnum", "StrEnum"}:
             vals = [_literal(st.value) for st in node.body if isinstance(st, ast.Assign) and len(st.targets) == 1
                     and isinstance(st.targets[0], ast.Name) and _literal(st.value) is not None]
@@ -1007,6 +1014,7 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
             out.event_schemas += part.event_schemas
             out.sql_access += part.sql_access
             out.procedures += part.procedures
+            out.types += part.types
         elif path.startswith("contracts/") and path.endswith(".json"):
             try:
                 c = json.loads(small_files[path])
@@ -1057,6 +1065,7 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
     out.callsites.sort(key=lambda c: c.id)
     out.functions.sort(key=lambda f: f.id)
     out.tests.sort(key=lambda t: t.id)
+    out.types.sort(key=lambda t: t.id)
     return out
 
 

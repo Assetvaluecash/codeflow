@@ -60,6 +60,13 @@ changed database migrations and the tables and columns they touch, and then who 
 * **Tests** lists the tests that exercise the affected code, found by static association; it does not say they pass.
 * **Unknowns** lists everything TIA could not see or evaluate: unreachable or stale repositories, files that did not parse, unsupported HTTP clients, consumers outside the analysed repositories,
   event consumers, compatibility aspects not evaluated, call sites it could not resolve, and credentials it withheld.
+* The **What to do** column gives each finding's suggested remediation and a plain explanation of its severity rule; the PR comment lists the remediations under *Required verification*.
+* **Architecture and structure** (derived context computed from the graph, not extracted evidence; it never adds or removes a finding):
+  * a diagram of the services involved: the changed service outlined in red, affected services in amber, evidence links between them (dashed when inferred). Services you cannot access are left out and counted. The PR comment carries the same diagram in Mermaid, which GitHub draws;
+  * in the changed repository: circular dependencies between files, highly connected files, and calls that go upward across folder layers (for example `lib/` calling `services/`). Each list says what to do; items touching your change are marked **on your change** and opened. Layers are guessed from folder names;
+  * groups of files in the changed repository that call each other heavily, and the most connected files.
+* A call whose function name matches several functions in the same repository is kept as an **inferred** link (rule `INF-CALL-AMBIGUOUS`) to each candidate, so it can still reach a finding; inferred links cap severity. On the graph (Functions level) these are orange dashed lines. Class inheritance is followed too (`INHERITS`, drawn with a hollow arrow from subclass to base class): changing a base class reaches its subclasses.
+* The PR comment is shown as plain text; **Markdown (for GitHub)** shows what is posted, and **Copy for PR (markdown)** copies it. The page remembers your last analysis in this browser and shows it again when you come back.
 * **Show on graph** draws the impact paths; **Show full JSON** shows everything. Every material finding links to its evidence; `GET /api/v1/impact-analyses/{id}/evidence` returns the evidence snapshot.
 * A report is **reproducible**: the same revisions, extractor versions and configuration give the same report; re-running it on its evidence snapshot gives an identical result even after the repositories have moved on.
 * Each analysis has a shareable page, `/analyses/<id>`, which pull-request comments link to. Opening it needs the same permission as the rest of TIA.
@@ -162,6 +169,19 @@ Each aspect is `covered`, `partial` (some allowed values tested) or `missing`. E
 Coverage here is **static**. "Covered" means a test addresses the aspect, not that it passes.
 * A written test case is matched by its text: it must name the field and use words such as "missing" or "invalid".
 * Functional coverage against business requirements is a separate tool.
+
+## 4c2. Tester pack for one change
+
+Sections 4b and 4c cover every repository. The **Tester pack for this change** block of a report gives the same three answers for one change, limited to the entry points it reaches and the pages that call them:
+
+1. **Retest and coverage gate.** Each entry point and page with a verdict: `covered` (every technical aspect is addressed by a test), `gaps` (the aspects not covered are listed) or `not evaluated` (TIA has no analysed entry point to measure, for example a consumer seen only in production traffic). The overall gate is `gaps` if any entry point has gaps, otherwise `not evaluated` if any could not be measured, otherwise `covered`. Linked tests that failed in the last CI run are named. Rule gaps and consistency checks are repeated here.
+2. **UI locator pack.** The pages that call a touched endpoint, with each element's locator, mandatory flag, rules and dropdown values.
+3. **API test matrix.** The touched endpoints with their inputs, valid and invalid values, generated cases and error statuses.
+
+* The pack describes the changed repository **at its proposed revision** and the others at the revisions the analysis used.
+* "Covered" means a test addresses the aspect, not that it passes. "Not evaluated" does not mean safe.
+* **Show pack JSON** shows the pack (`GET /api/v1/impact-analyses/{id}/tester-pack`). **Show agent response** shows what an AI testing agent receives for this analysis (`POST /query/tia`, see KF-ADAPTER.md).
+* You see only repositories you can read: entry points, pages and tests of the others are neither shown nor counted.
 
 ## 4d. Evidence beyond the code (CI, coverage, runtime, deployments)
 

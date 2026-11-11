@@ -169,6 +169,11 @@ def split_statements(text: str) -> list:
             continue
         if c.isalpha() or c == "_":
             m = _WORD.match(text, i)
+            if m is None:
+                # non-ASCII letter: .isalpha() is true but _WORD is ASCII-only - skip one character
+                push(c)
+                i += 1
+                continue
             w = m.group(0)
             wl = w.lower()
             first = start is None

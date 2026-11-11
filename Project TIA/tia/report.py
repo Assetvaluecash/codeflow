@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 
+from .diagram import mermaid_markdown, redact_diagram
 from .testscope import redact_scope
 
 MARKER = "<!-- tia-analysis -->"
@@ -33,9 +34,18 @@ def redact(report: dict, readable_repos) -> dict:
         redact_scope(r["test_scope"], readable)
     if r.get("policy_results"):
         r["policy_results"] = redact_policy({"results": r["policy_results"]}, report, readable)["results"]
+    visible_services = {f["component"] for f in kept} | {r["change"].get("service")}
     if r.get("owners"):
-        visible_services = {f["component"] for f in kept} | {r["change"].get("service")}
         r["owners"] = {k: v for k, v in r["owners"].items() if k in visible_services}
+    # derived overlays name services and files too: the diagram keeps only visible services; the file-level overlays cover the
+    # changed repository only, so they are kept when the audience can read it and dropped when it cannot
+    if r.get("architecture_diagram"):
+        r["architecture_diagram"] = redact_diagram(r["architecture_diagram"], visible_services)
+    if r["change"]["repository"] not in readable:
+        for k in ("structural_risk", "communities"):
+            r.pop(k, None)
+        for f in kept:
+            f["limitations"] = [x for x in f.get("limitations") or [] if "(structural overlay)" not in x and "(folder convention overlay)" not in x]
     # evidence sections (FR-022 to FR-029) name repositories too: only readable ones are kept
     if r.get("test_recommendations"):
         r["test_recommendations"]["tests"] = [t for t in r["test_recommendations"]["tests"] if t["repo"] in readable]
@@ -177,6 +187,7 @@ def render_comment(report: dict, max_rows: int = 12, link: str | None = None) ->
         L += [f"**{withheld} finding(s) in other repositories are withheld from this comment** (visibility policy). "
               "This is not a clean result: open the TIA report for the full impact.", ""]
     L += _test_scope_md(report.get("test_scope"), max_rows, report)
+    L += mermaid_markdown(report.get("architecture_diagram"))
     mat = [f for f in report["findings"] if f["material"]]
     if mat:
         L += ["| Severity | Component | Evidence | Why |", "|---|---|---|---|"]
@@ -189,12 +200,27 @@ def render_comment(report: dict, max_rows: int = 12, link: str | None = None) ->
         L.append("<details><summary>Required verification</summary>\n")
         seen = set()
         for f in mat[:max_rows]:
+            if f.get("remediation"):
+                k = (f["component"], f["remediation"])
+                if k not in seen:
+                    seen.add(k)
+                    # the rule id stays in the report: printed here it would show e.g. "CRITICAL" beside a severity the tenant overrode
+                    L.append(f"- **{f['component']}**: {f['remediation']}")
             for v in f["required_verification"]:
                 k = (f["component"], v)
                 if k not in seen:
                     seen.add(k)
                     L.append(f"- **{f['component']}**: {v}")
         L.append("\n</details>")
+    summ = (report.get("structural_risk") or {}).get("summary") or {}
+    if summ.get("cycles_on_change") or summ.get("high_coupling_on_change") or summ.get("layer_violations_on_change"):
+        L += ["", "**Structural risk on changed files** (overlay, not confirmed impact)"]
+        if summ.get("cycles_on_change"):
+            L.append(f"- {summ['cycles_on_change']} circular-dependency ring(s) touch changed files")
+        if summ.get("high_coupling_on_change"):
+            L.append(f"- {summ['high_coupling_on_change']} high-coupling hub(s) among changed files")
+        if summ.get("layer_violations_on_change"):
+            L.append(f"- {summ['layer_violations_on_change']} layer-direction violation(s) on changed paths")
     low = [f for f in report["findings"] if not f["material"]]
     if low:
         L += ["", f"_{len(low)} non-material finding(s) collapsed; see the full report._"]

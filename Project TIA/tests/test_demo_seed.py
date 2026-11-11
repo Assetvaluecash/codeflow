@@ -35,7 +35,7 @@ def analyse(c, head, target="payments-service", base="main"):
 def test_graph_and_change_analyses(demo):
     c = demo
     counts = {lv: c.get(f"/api/v1/graph?level={lv}").json() for lv in ("service", "endpoint", "function")}
-    assert [(len(g["nodes"]), len(g["edges"])) for g in counts.values()] == [(3, 2), (15, 14), (44, 40)]
+    assert [(len(g["nodes"]), len(g["edges"])) for g in counts.values()] == [(3, 2), (15, 14), (49, 40)]
     _, b = analyse(c, "behaviour")
     assert sev(b) == {"medium": 5, "low": 1} and b["test_scope"]["summary"]["entry_points"] == 3
     assert [g.get("entry_point") or g.get("component") for g in b["test_gaps"]] == ["mobile-app"]     # seen only in production traffic

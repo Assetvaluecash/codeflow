@@ -662,6 +662,11 @@
       "title": "Domain",
       "type": "string"
      },
+     "include_tester_pack": {
+      "default": true,
+      "title": "Include Tester Pack",
+      "type": "boolean"
+     },
      "intent": {
       "default": "software_tia",
       "title": "Intent",
@@ -4036,6 +4041,61 @@
     },
     "summary": "Reproduce Analysis",
     "x-tia-permission": "analyze"
+   }
+  },
+  "/api/v1/impact-analyses/{aid}/tester-pack": {
+   "get": {
+    "description": "For the entry points this change reaches: what to retest with a coverage gate (covered / gaps / not_evaluated), the locator\npack of the pages that call them, and the API test matrix of the touched endpoints. Reads the finished report; starts nothing.",
+    "operationId": "tester_pack_api_v1_impact_analyses__aid__tester_pack_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "aid",
+      "required": true,
+      "schema": {
+       "title": "Aid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Tester Pack",
+    "x-tia-permission": "read"
    }
   },
   "/api/v1/impact-analyses/{aid}/unknowns": {
