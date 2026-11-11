@@ -34,6 +34,12 @@
   #cy{height:540px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
   #gside{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:540px;overflow:auto}
   #gside dt{color:var(--mut);margin-top:6px} #gside dd{margin:0;word-break:break-all}
+  /* report tables: fixed column widths so long text wraps inside its cell instead of pushing the table past the card */
+  #findings,#scopetable{table-layout:fixed;min-width:900px} #findings td,#scopetable td{overflow-wrap:anywhere}
+  dl.why{margin:0} dl.why dt{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.03em;margin-top:6px} dl.why dt:first-child{margin-top:0} dl.why dd{margin:1px 0 0}
+  .tchip{display:inline-block;white-space:nowrap;font-size:12px} .tchip i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:baseline}
+  .hop{display:inline-block;margin:1px 0} .hop .arr{color:var(--mut);margin:0 4px}
+  #pgcy{height:210px;border:1px solid var(--line);border-radius:6px;background:var(--bg)} tr.pgrow td{background:var(--bg)}
   #archcy{height:240px;border:1px solid var(--line);border-radius:6px} #archwrap.none{display:none}
   #structure details{margin-top:8px} #structure summary{cursor:pointer} #structure li{margin:3px 0;word-break:break-word}
   .tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:8px;border:1px solid #d32f2f;color:#d32f2f;margin-left:4px}
@@ -127,6 +133,7 @@
   </div>
   <div id="ginfo" class="mut" style="margin-top:6px"></div>
   <div id="gwrap"><div id="cy"></div><div id="gside"><span class="mut">Click a node or edge.</span></div></div>
+  <div class="legend" id="typelegend" aria-label="Component types"></div>
   <div class="legend">
     <span><i style="border-color:#2e7d32"></i>source-confirmed / corroborated</span>
     <span><i style="border-color:#1565c0"></i>contract-confirmed</span>
@@ -183,7 +190,7 @@
     <label>Evidence gaps <select id="f_issue"><option value="">any</option><option>unresolved</option><option>stale</option><option>inferred</option></select></label>
     <button class="sec" id="fclear" type="button">Clear filters</button> <span id="fcount" class="mut" aria-live="polite"></span>
   </div>
-  <table id="findings"><thead><tr><th>Severity</th><th>Component</th><th>Evidence</th><th>Why</th><th>What to do</th><th>Tests</th></tr></thead><tbody></tbody></table>
+  <table id="findings"><thead><tr><th style="width:8%">Severity</th><th style="width:13%">Component</th><th style="width:11%">Evidence</th><th style="width:29%">Why</th><th style="width:17%">What to do</th><th style="width:14%">Tests</th><th style="width:8%">Graph</th></tr></thead><tbody></tbody></table>
   <h2 style="margin-top:16px">Architecture and structure</h2>
   <p class="mut" style="margin:0 0 6px">Derived context computed from the graph, not extracted evidence: it never adds or removes a finding.</p>
   <div id="archwrap"><div id="archcy" role="img" aria-label="Architecture diagram: services involved in this change and the evidence links between them"></div></div>
@@ -573,19 +580,83 @@ $("run").onclick = async () => {
 // ---- findings and their filters (PRD 9.3): the server applies the filters, so the page and the API agree ----
 const FILTERS = ["severity", "service", "reach", "kind", "evidence", "environment", "policy", "issue"];
 let CUR_AID = null;
-function findingRows(list) {
-  return list.map(f => `<tr><td><span class="pill ${esc(f.severity)}">${esc(f.severity)}</span></td><td>${esc(f.component)}<br><span class="mut">${esc(f.repository)}</span></td>
-    <td>${esc(f.evidence_status)}${f.resolution_strategy ? `<br><span class="mut">${esc(f.resolution_strategy)}</span>`:""}${f.runtime ? `<br><span class="mut">observed in ${esc(f.runtime.environments.join(", ") || "telemetry")}: ${esc(f.runtime.calls_observed)} call(s)</span>` : ""}</td><td>${esc(f.reason)}${(f.limitations||[]).map(l=>`<br><span class="mut">- ${esc(l)}</span>`).join("")}</td>
-    <td>${f.remediation ? esc(f.remediation) + (f.explanation ? `<br><span class="mut">${esc(f.explanation)}${f.rule_id ? ` (<code>${esc(f.rule_id)}</code>)` : ""}</span>` : "") : '<span class="mut">-</span>'}</td>
-    <td>${(f.tests||[]).map(t=>esc(t.name)+` <span class="mut">(${esc(t.association)})</span>`).join("<br>") || '<span class="mut">none found</span>'}</td></tr>`).join("");
+// ---- one colour per component type, used by the graphs, the legend and the report tables ----
+const TYPE_COLOR = {service:"#1f4fd8", endpoint:"#2a9df4", schema:"#8e5bd9", function:"#8b95a5", callsite:"#12a594", contract_ref:"#8a9a2e", test:"#3ba55d",
+  entity:"#b8651b", table:"#0b6e4f", column:"#7bc4a4", migration:"#6b7280", type:"#c2410c", topic:"#b83280", listener:"#d53f8c", event_schema:"#805ad5",
+  procedure:"#0e7490", runtime_ref:"#00838f", config:"#a16207", file:"#78716c", page:"#0891b2", unresolved:"#9e9e9e", redacted:"#9e9e9e"};
+const TYPE_NAME = {service:"service", endpoint:"endpoint (API)", schema:"schema", function:"function", callsite:"outbound call", contract_ref:"declared contract", test:"test",
+  entity:"data entity", table:"table", column:"column", migration:"migration", type:"class", topic:"event topic", listener:"event listener", event_schema:"event schema",
+  procedure:"stored procedure", runtime_ref:"seen at runtime", config:"configuration", file:"file", page:"page", unresolved:"unresolved call", redacted:"hidden"};
+const typeChip = (t, text) => `<span class="tchip"><i style="background:${TYPE_COLOR[t] || "#9aa3af"}"></i>${esc(text === undefined ? (TYPE_NAME[t] || t || "component") : text)}</span>`;
+function shortNode(p) {
+  if (!p || p.type === "redacted" || !p.node) return "[hidden]";
+  if (p.type === "callsite") return `call ${p.file || ""}:${p.line || ""}`;
+  const id = String(p.node);
+  if (p.type === "runtime_ref") return id.replace(/^runtime:/, "").split("->")[0] + " (seen at runtime)";
+  return id.includes("::") ? id.split("::").pop() : id.replace(/^svc:/, "").split(":").slice(1).join(":") || id;
 }
+// "Why", in labelled parts: what changed, why this row is affected, the path from the change to it, the evidence, the limits
+function whyHtml(o) {
+  const part = (k, v) => v ? `<dt>${k}</dt><dd>${v}</dd>` : "";
+  const hops = (o.path || []).map((p, i) => `<span class="hop">${i ? '<span class="arr">&rarr;</span>' : ""}${typeChip(p.type, shortNode(p))}</span>`).join(" ");
+  return `<dl class="why">${part("What changed", esc(o.changed))}${part("Why this is affected", esc(o.how))}${part("Path from the change", hops)}` +
+    part("Evidence", o.ev && o.ev.file ? `<code>${esc(o.ev.repo || "")}:${esc(o.ev.file)}${o.ev.line ? ":" + esc(o.ev.line) : ""}</code>` : "") +
+    part("Limits", (o.limits || []).map(esc).join("<br>")) + "</dl>";
+}
+const splitReason = r => { const i = String(r || "").indexOf(". Change: "); return i < 0 ? [String(r || ""), ""] : [r.slice(0, i) + ".", r.slice(i + 10).replace(/\.$/, "")]; };
+const graphBtn = (kind, i, has) => has ? `<button class="sec" type="button" data-pg="${kind}:${i}" aria-expanded="false">Show</button>` : '<span class="mut">-</span>';
+const PG_ROWS = {f: [], s: []};
+function findingRows(list) {
+  PG_ROWS.f = list;
+  return list.map((f, i) => { const [how, changed] = splitReason(f.reason); return `<tr><td><span class="pill ${esc(f.severity)}">${esc(f.severity)}</span></td><td>${esc(f.component)}<br><span class="mut">${esc(f.repository)}</span>${f.node_type ? "<br>" + typeChip(f.node_type) : ""}</td>
+    <td>${esc(String(f.evidence_status || "").replace(/_/g, " "))}${f.resolution_strategy ? `<br><span class="mut">${esc(f.resolution_strategy)}</span>`:""}${f.runtime ? `<br><span class="mut">observed in ${esc(f.runtime.environments.join(", ") || "telemetry")}: ${esc(f.runtime.calls_observed)} call(s)</span>` : ""}</td>
+    <td>${whyHtml({changed, how, path: f.path, ev: f.evidence, limits: f.limitations})}</td>
+    <td>${f.remediation ? esc(f.remediation) + (f.explanation ? `<br><span class="mut">${esc(f.explanation)}${f.rule_id ? ` (<code>${esc(f.rule_id)}</code>)` : ""}</span>` : "") : '<span class="mut">-</span>'}</td>
+    <td>${(f.tests||[]).map(t=>esc(t.name)+` <span class="mut">(${esc(t.association)})</span>`).join("<br>") || '<span class="mut">none found</span>'}</td>
+    <td>${graphBtn("f", i, (f.path || []).length > 1)}</td></tr>`; }).join("");
+}
+// ---- the Graph column: this row's impact path, drawn under the row (one open at a time) ----
+let pgCy = null;
+function closePathGraph() {
+  if (pgCy) { pgCy.destroy(); pgCy = null; }
+  document.querySelectorAll("tr.pgrow").forEach(r => r.remove());
+  document.querySelectorAll("[data-pg]").forEach(b => { b.textContent = "Show"; b.setAttribute("aria-expanded", "false"); });
+}
+function showPathGraph(btn) {
+  const open = btn.getAttribute("aria-expanded") === "true";
+  closePathGraph();
+  if (open) return;
+  const [kind, i] = btn.dataset.pg.split(":"), row = PG_ROWS[kind][+i], tr = btn.closest("tr");
+  if (!row || !tr) return;
+  const path = row.path || [], pe = row.path_edges || [];
+  tr.insertAdjacentHTML("afterend", `<tr class="pgrow"><td colspan="${tr.children.length}"><div id="pgcy" role="img" aria-label="Impact path of this row: ${esc(path.map(shortNode).join(" to "))}"></div>
+    <p class="mut" style="margin:4px 0 0">Red outline = what changed. Arrows follow the impact, from the change to what is affected${kind === "f" ? " (filled by severity)" : ""}. Dashed orange = inferred link. ${[...new Set(path.map(p => p.type))].map(t => typeChip(t)).join(" &nbsp; ")}</p></td></tr>`);
+  btn.textContent = "Hide"; btn.setAttribute("aria-expanded", "true");
+  const fg = css("--fg") || "#222", ids = path.map((p, n) => "n" + n);
+  const els = path.map((p, n) => ({data: {id: ids[n], label: shortNode(p), tcolor: TYPE_COLOR[p.type] || "#9aa3af", role: n === 0 ? "changed" : n === path.length - 1 ? "affected" : "via",
+                                          ...(kind === "f" && n === path.length - 1 && n ? {sevcolor: SEV[row.severity]} : {})}, position: {x: n * 230, y: (n % 2) * 70}}))
+    .concat(pe.slice(0, path.length - 1).map((e, n) => ({data: {id: "e" + n, source: ids[n], target: ids[n + 1], label: e.rel, status: e.status}})));
+  pgCy = cytoscape({container: $("pgcy"), elements: els, layout: {name: "preset", fit: true, padding: 30}, wheelSensitivity: .25, boxSelectionEnabled: false, style: [
+    {selector: "node", style: {label: "data(label)", "font-size": 10, color: fg, "text-valign": "bottom", "text-margin-y": 4, "text-wrap": "ellipsis", "text-max-width": 150,
+                               "background-color": "data(tcolor)", width: 20, height: 20, "border-width": 1, "border-color": css("--line") || "#ccc"}},
+    {selector: 'node[role="changed"]', style: {"border-color": "#d32f2f", "border-width": 5}},
+    {selector: "node[sevcolor]", style: {"background-color": "data(sevcolor)", width: 28, height: 28}},
+    {selector: "edge", style: {width: 2, "curve-style": "bezier", "target-arrow-shape": "triangle", "line-color": "#2e7d32", "target-arrow-color": "#2e7d32", label: "data(label)",
+                               "font-size": 8, color: fg, "text-rotation": "autorotate", "text-margin-y": -9}},
+    {selector: 'edge[status="contract_confirmed"]', style: {"line-color": "#1565c0", "target-arrow-color": "#1565c0"}},
+    {selector: 'edge[status="runtime_observed"]', style: {"line-color": "#00838f", "target-arrow-color": "#00838f"}},
+    {selector: 'edge[status="inferred"]', style: {"line-color": "#ef6c00", "target-arrow-color": "#ef6c00", "line-style": "dashed"}}]});
+}
+document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-pg]"); if (b) showPathGraph(b); });
+$("typelegend").innerHTML = "<span>Component types:</span>" + ["service", "endpoint", "schema", "function", "callsite", "test", "type", "entity", "table", "topic",
+  "listener", "config", "page", "contract_ref", "runtime_ref", "unresolved"].map(t => `<span>${typeChip(t)}</span>`).join("");
 async function applyFilters() {
   if (!CUR_AID) return;
   const p = new URLSearchParams();
   FILTERS.forEach(k => { const v = $("f_" + k).value.trim(); if (v) p.set(k, v) });
   try {
     const r = await api(`/api/v1/impact-analyses/${encodeURIComponent(CUR_AID)}/findings?${p}`);
-    $("findings").querySelector("tbody").innerHTML = findingRows(r.findings) || `<tr><td colspan="6" class="mut">No finding matches these filters.</td></tr>`;
+    $("findings").querySelector("tbody").innerHTML = findingRows(r.findings) || `<tr><td colspan="7" class="mut">No finding matches these filters.</td></tr>`;
     $("fcount").textContent = [...p.keys()].length ? `${r.matched} of ${r.total} finding(s) shown` : "";
   } catch (e) { $("fcount").textContent = e.message }
 }
@@ -770,7 +841,7 @@ function show(rep, comment, opts) {
   $("summary").textContent = rep.status === "failed" ? "" : `${rep.change.repository} ${rep.change.base_revision.slice(0,7)} -> ${rep.change.proposed_revision.slice(0,7)}  |  change type: ${rep.change.change_type}  |  ${s.findings} finding(s), ${s.material_findings} material` + (rep.coverage && rep.coverage.outbound_call_sites ? `  |  ${rep.coverage.outbound_call_sites_resolved}/${rep.coverage.outbound_call_sites} outbound calls resolved` : "") + (s.message ? "  |  " + s.message : "") + (rep.redacted && rep.redacted.note ? "  |  " + rep.redacted.note : "");
   CUR_AID = rep.analysis_id;
   FILTERS.forEach(k => { $("f_" + k).value = "" }); $("fcount").textContent = "";
-  $("findings").querySelector("tbody").innerHTML = findingRows(rep.findings || []) || `<tr><td colspan="6" class="mut">No findings.</td></tr>`;
+  $("findings").querySelector("tbody").innerHTML = findingRows(rep.findings || []) || `<tr><td colspan="7" class="mut">No findings.</td></tr>`;
   $("vfinding").innerHTML = (rep.findings || []).map(f => `<option value="${esc(f.id)}">${esc(f.id)} ${esc(f.severity)} ${esc(f.component)}</option>`).join("");
   $("vsave").disabled = !(rep.findings || []).length;
   loadCoordination();
@@ -822,10 +893,11 @@ function scopeHtml(ts) {
   const rows = [...ts.entry_points, ...ts.code_without_entry_point];
   if (!rows.length && !ts.rule_gaps.length) return `<h2 style="margin-top:16px">What to test</h2><p class="mut">No entry point is reached by this change: nothing to retest.</p>`;
   return `<h2 style="margin-top:16px">What to test <span class="mut" style="font-weight:normal">(${ts.summary.entry_points} entry point(s), ${ts.summary.tests_linked} test(s) found)</span></h2>
-    <table id="scopetable"><thead><tr><th>Entry point</th><th>Service</th><th>Change effect</th><th>Why</th><th>Tests found</th></tr></thead><tbody>` +
-    rows.map(e => `<tr><td>${e.label ? `<b>${esc(e.label)}</b><br>` : ""}<code>${esc(e.entry_point)}</code>${e.type !== "endpoint" ? '<br><span class="mut">no analysed API endpoint</span>' : ""}</td>
+    <table id="scopetable"><thead><tr><th style="width:21%">Entry point</th><th style="width:12%">Service</th><th style="width:11%">Change effect</th><th style="width:34%">Why</th><th style="width:14%">Tests found</th><th style="width:8%">Graph</th></tr></thead><tbody>` +
+    (PG_ROWS.s = rows).map((e, i) => `<tr><td>${e.label ? `<b>${esc(e.label)}</b><br>` : ""}<code>${esc(e.entry_point)}</code>${e.type !== "endpoint" ? '<br><span class="mut">no analysed API endpoint</span>' : ""}<br>${typeChip(e.type)}</td>
       <td>${esc(e.service)}</td><td>${pill(e.change_effect, EFFECT[e.change_effect] || e.change_effect)}${["source_confirmed","contract_confirmed","corroborated"].includes(e.evidence_status) ? "" : `<br><span class="mut">${esc(e.evidence_status)}</span>`}</td>
-      <td>${esc(e.why)}</td><td>${e.tests.map(t => `${esc(t.name)} <span class="mut">(${esc(t.file)})</span>${resultPill(t)}`).join("<br>") || '<span class="err">none found</span>'}</td></tr>`).join("") +
+      <td>${whyHtml({changed: (e.changes || []).join("; "), how: splitReason(e.why)[0], path: e.path, ev: e})}</td><td>${e.tests.map(t => `${esc(t.name)} <span class="mut">(${esc(t.file)})</span>${resultPill(t)}`).join("<br>") || '<span class="err">none found</span>'}</td>
+      <td>${graphBtn("s", i, (e.path || []).length > 1)}</td></tr>`).join("") +
     `</tbody></table>` + ts.rule_gaps.map(gapHtml).join("") +
     ts.consistency_checks.map(c => `<div class="banner"><b>Consistency check</b>: ${esc(c.check)}</div>`).join("") +
     (ts.redacted ? `<p class="mut">${esc(ts.redacted.note)}</p>` : "");
@@ -1033,6 +1105,7 @@ function gstyle() {
     {selector:'node[type="column"]', style:{shape:"ellipse","background-color":"#7bc4a4",width:9,height:9}},
     {selector:'node[type="migration"]', style:{shape:"cut-rectangle","background-color":"#6b7280",width:14,height:14}},
     {selector:'node[type="type"]', style:{shape:"rectangle","background-color":"#c2410c",width:14,height:14}},
+    {selector:"node[tcolor]", style:{"background-color":"data(tcolor)"}},          // one colour per type (TYPE_COLOR), same as the tables and the legend
     {selector:'node[type="unresolved"], node[?unresolved]', style:{shape:"octagon","background-color":"#e5e7eb","border-style":"dashed","border-color":"#6b7280","border-width":2}},
     {selector:"edge", style:{width:2,"line-color":"#9aa3af","target-arrow-color":"#9aa3af","target-arrow-shape":"triangle","curve-style":"bezier","arrow-scale":.9,"font-size":8,color:fg,"text-background-color":css("--card")||"#fff","text-background-opacity":.85,"text-background-padding":1}},
     {selector:"edge.struct", style:{width:1,"line-color":line,"target-arrow-color":line}},
@@ -1055,7 +1128,7 @@ function gstyle() {
   ];
 }
 function gelements(data, impact) {
-  const nodes = data.nodes.map(n => { const d = {...n}; if (impact && n.severity) d.sevcolor = SEV[n.severity]; return {data:d}; });
+  const nodes = data.nodes.map(n => { const d = {...n}; if (TYPE_COLOR[n.type]) d.tcolor = TYPE_COLOR[n.type]; if (impact && n.severity) d.sevcolor = SEV[n.severity]; return {data:d}; });
   const edges = data.edges.map(e => { const d = {...e};
     if (e.rel === "CONSUMES_API" && e.count) d.label = (e.count > 1 ? e.count + "x " : "") + (e.strategies || []).join("+");
     else if (e.rel === "CONSUMES_API" && e.strategy) d.label = e.strategy;

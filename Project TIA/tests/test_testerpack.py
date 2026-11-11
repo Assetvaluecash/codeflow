@@ -117,6 +117,22 @@ def test_knowledge_fabric_carries_the_pack_as_chunks(world):
     assert "customer-portal" not in hidden and "#amount" not in hidden
 
 
+def test_the_report_tables_explain_why_in_parts_and_draw_each_row(world):
+    """The page builds 'Why' from these report fields and draws each row's path: a finding and a test-scope row must carry them."""
+    from pathlib import Path
+    c, aids = world
+    rep = c.get(f"/api/v1/impact-analyses/{aids['contract']}").json()
+    f = rep["findings"][0]
+    assert ". Change: " in f["reason"] and len(f["path"]) >= 2 and len(f["path_edges"]) == len(f["path"]) - 1 and f["node_type"] and f["evidence"]["file"]
+    e = rep["test_scope"]["entry_points"][0]
+    assert e["changes"] and len(e["path"]) >= 2 and len(e["path_edges"]) == len(e["path"]) - 1 and e["type"] == "endpoint"
+    assert all(p["type"] for p in f["path"] + e["path"])
+    html = (Path(__file__).resolve().parent.parent / "tia" / "web" / "index.html").read_text(encoding="utf-8")
+    for needle in ("function whyHtml", "What changed", "Why this is affected", "Path from the change", "<th style=\"width:8%\">Graph</th>",
+                   "function showPathGraph", "const TYPE_COLOR", 'id="typelegend"', "node[tcolor]", "table-layout:fixed"):
+        assert needle in html, needle
+
+
 def test_the_page_has_the_tester_pack_block():
     from pathlib import Path
     html = (Path(__file__).resolve().parent.parent / "tia" / "web" / "index.html").read_text(encoding="utf-8")

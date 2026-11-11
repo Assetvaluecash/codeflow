@@ -198,7 +198,7 @@ def test_graph_view_shows_classes_inheritance_and_ambiguous_calls():
 def test_the_page_presents_the_new_report_sections():
     from pathlib import Path
     html = (Path(__file__).resolve().parent.parent / "tia" / "web" / "index.html").read_text(encoding="utf-8")
-    for needle in ("<th>What to do</th>", 'id="archcy"', 'id="structure"', "function renderStructure", 'node[type="type"]',
+    for needle in (">What to do</th>", 'id="archcy"', 'id="structure"', "function renderStructure", 'node[type="type"]',
                    'edge[rel="INHERITS"]', 'edge[status="inferred"].struct', "ambiguous call", 'id="cfghelp"', "exclude_patterns",
                    'id="cplain"', 'id="cmd"', "function restoreLastAnalysis", "function warmAllSections"):
         assert needle in html, needle

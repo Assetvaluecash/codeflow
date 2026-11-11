@@ -512,3 +512,11 @@ Asked for in a stakeholder note: one PR -> three agent answers (retest + coverag
 - **Demo (`contract`):** gate = gaps: 2 covered, 3 with gaps, 1 not evaluated (mobile-app); 3 endpoints, 2 pages. In DEMO-DATA.md.
 - **Verified (simulated):** `tests/test_testerpack.py` (6 tests), existing KF/docs/SDK tests, real Chrome 21/21. KF's real `retriever_api.py` is still not available, so the new chunk categories are unverified against KF itself.
 - Kept the payments demo rather than building a Keka landscape (same shape).
+
+## 2026-11-11 (night): Report tables restructured (section 4)
+- **Why column** (Findings and What to test): labelled parts - What changed / Why this is affected / Path from the change / Evidence / Limits. Path hops carry a type-coloured dot.
+- **No more clipped columns:** fixed column widths, long text wraps inside its cell (the 6-column table used to run past the card's right edge).
+- **New Graph column:** "Show" draws that row's impact path under the row (changed = red outline, affected = severity fill, links labelled and coloured by evidence); one open at a time; works on filtered rows.
+- **One colour per component type** (service, endpoint, function, outbound call, test, class, config, page, ...): a legend under the graph, chips in the tables, same colours in every graph.
+- Evidence status shown with spaces ("runtime observed").
+- **Verified:** real Chrome 21/21 for this change; the three earlier UI checks re-run (21, 19, 17, after updating two outdated expectations in the check scripts); 135 page-reading tests pass; screenshot reviewed.
