@@ -70,7 +70,11 @@ def test_page_shows_the_whole_report(client, fx):
     for e in ts["entry_points"]:
         assert e["entry_point"] in text                                                              # the tester's view first
     for f in rep["findings"]:
-        assert f["id"] in p.ids and f["reason"] in text                                              # every finding, in full, linkable
+        how, _, changed = f["reason"].partition(". Change: ")                                        # shown in two labelled parts, nothing dropped
+        assert f["id"] in p.ids and how in text and changed.rstrip(".") in text                      # every finding, in full, linkable
+    for label in ("What changed", "Why this is affected", "Path from the change", "Evidence"):
+        assert label in text
+    assert p.tags.count("svg") == sum(1 for x in rep["findings"] + ts["entry_points"] + ts["code_without_entry_point"] if len(x["path"]) > 1)      # a drawn path per row that has one
     for u in rep["unknowns"]:
         assert u["area"] in text and u["reason"] in text
     assert "affects confidence" in text and "informational" in text
@@ -110,8 +114,9 @@ def test_tables_stack_into_labelled_cards_on_narrow_screens(client, fx):
     cells = [a for a in p.attrs if a[0] == "td"]
     labelled = [a for a in cells if a[1] == "data-label"]
     assert p.tags.count("td") == len(labelled) and len(labelled) > 0                  # no unlabelled cell: nothing is lost when stacked
-    assert {a[2] for a in labelled} >= {"Severity", "Component", "Evidence", "Why", "Repository", "Revision", "Entry point", "Change effect", "Priority", "Test"}
-    assert sum(1 for a in p.attrs if a[:2] == ("table", "class") and a[2] == "stack") == 4          # what to test, recommended tests, findings, coverage
+    assert {a[2] for a in labelled} >= {"Severity", "Component", "Evidence", "Why", "Graph", "Repository", "Revision", "Entry point", "Change effect", "Priority", "Test"}
+    assert sum(1 for a in p.attrs if a[:2] == ("table", "class") and "stack" in a[2].split()) == 4  # what to test, recommended tests, findings, coverage
+    assert "table.report{min-width:0" in html                                                      # the fixed-width report tables give way when stacked
     assert "@media (max-width:700px)" in html and 'name="viewport"' in html
 
 

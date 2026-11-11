@@ -45,6 +45,20 @@ TIA reads the code; it never builds or runs it.
 The graph shows the dependencies TIA extracted from every repository's default branch: services, endpoints and schemas, functions and call sites, tests, database tables and columns.
 Edge colour is the evidence. Click a node for details; double-click to focus on its neighbourhood; search by name, path or file.
 
+**Ask the graph** answers four questions about one component, with no change involved (`GET /api/v1/graph/query`):
+
+| Question | Answer |
+|---|---|
+| Who depends on it? | the code and entry points that reach it, the other services involved, the tests attached |
+| What does it depend on? | the code it calls, endpoints of other services, data and event topics |
+| Which tests cover it? | tests attached to it directly, or to code that uses it (and through what) |
+| What does this test cover? | what the test is attached to and the code that runs behind it |
+
+* Name the component as its method and path (the way an entry point is written in the report), or by its function, test, service, table or topic name.
+* If several components have that name, TIA lists them and asks you to choose: it never guesses. If none has, it says so.
+* Each row carries its evidence: a row marked **inferred** rests on a name match and is a lead, not a fact.
+* Every answer lists its limits: consumers outside the analysed repositories are not visible, unresolved calls may hide consumers, and test links are static (a test names or calls the code; it was not seen to run or pass).
+
 ## 3. Analyse a change
 
 Choose the repository that contains the change and say what the change is: a **branch, tag or commit** (compared with the base, by default the default branch) or a **pull request number**.
@@ -236,10 +250,22 @@ An owning team approves with `POST /api/v1/impact-analyses/{aid}/approvals`.
 
 ## 4g. Assistants (MCP)
 
-Coding assistants can read reports through TIA's MCP server (`POST /mcp`):
-* `get_impact_report` / `find_impact_report` / `get_test_scope` / `get_policy_outcome`;
-* read-only, showing what your token may see;
-* an assistant should cite the analysis id and narrate only what the report contains.
+Coding and testing assistants read TIA through its MCP server (`POST /mcp`). Every tool is read-only and shows what your token may see.
+
+| Tool | What it answers |
+|---|---|
+| `get_impact_report` / `find_impact_report` | the report of one analysis, by id or by repository plus pull request or revision |
+| `get_test_scope` | what to test for one analysis |
+| `get_policy_outcome` | the release-policy outcome of one analysis |
+| `get_tester_pack` | for one analysis: coverage gate, UI locator pack and API test matrix of what the change reaches (4c2) |
+| `get_coverage` | technical coverage of the test repository, with no change (4c) |
+| `get_api_inventory` / `get_ui_inventory` | the automation inventories (4b) |
+| `check_test_case` | what one test case covers and misses |
+| `get_shared_components` | components many entry points depend on, and rule gaps |
+| `query_graph` | a direct question about one component (section 2, *Ask the graph*) |
+
+* An assistant should cite the analysis id and narrate only what the answer contains, including its unknowns and limits.
+* The same calls exist in the REST API and in the Python client (`tia_client`): `tester_pack`, `coverage`, `api_inventory`, `ui_inventory`, `check_test_case`, `shared_components`, `consumers_of`, `dependencies_of`, `tests_covering`, `covered_by_test`, `agent_answer`.
 
 ## 4h. Releases, environments and incidents
 

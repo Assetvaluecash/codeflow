@@ -216,6 +216,17 @@ Request body:
 | `depth` | query | integer | no |
 | `limit` | query | integer | no |
 
+### `GET /api/v1/graph/query`
+
+**Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  A direct question to the code graph, with no change involved. question: consumers (who depends on the component), dependencies (what it depends on), tests (which tests exercise it), covers (what one test exercises). component: a node id, 'METHOD /path', or a function, test, service, table or topic name. The answer's status is ok, ambiguous (candidates are listed; nothing is guessed) or not_found. Only repositories the caller may read are searched.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `question` | query | string | yes |
+| `component` | query | string | yes |
+| `repository` | query | string|null | no |
+| `limit` | query | integer | no |
+
 ### `GET /api/v1/graph/relationships`
 
 **Needs:** `read` (`viewer`, `engineer`, `release_manager`, `auditor`, `administrator`).  Cross-repository relationships with their state: current, or stale with the reason (AC-011).

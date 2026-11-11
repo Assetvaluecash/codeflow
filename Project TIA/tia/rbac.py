@@ -80,7 +80,7 @@ ROUTES = {
     # analyses
     ("POST", "/api/v1/impact-analyses"): "analyze", ("GET", "/api/v1/jobs/{job_id}"): "read", ("DELETE", "/api/v1/jobs/{job_id}"): "analyze",
     ("GET", "/api/v1/impact-analyses/{aid}"): "read", ("GET", "/analyses/{aid}"): "read",
-    ("GET", "/api/v1/impact-analyses/{aid}/tester-pack"): "read",
+    ("GET", "/api/v1/impact-analyses/{aid}/tester-pack"): "read", ("GET", "/api/v1/graph/query"): "read",
     ("GET", "/api/v1/impact-analyses/{aid}/graph"): "read", ("GET", "/api/v1/impact-analyses/{aid}/comment"): "read",
     ("GET", "/api/v1/impact-analyses/{aid}/evidence"): "read", ("GET", "/api/v1/impact-analyses/{aid}/paths"): "read",
     ("GET", "/api/v1/impact-analyses/{aid}/unknowns"): "read", ("GET", "/api/v1/evidence-snapshots/{sid}"): "read",

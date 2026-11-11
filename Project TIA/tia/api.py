@@ -979,6 +979,25 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
             raise HTTPException(404, "no repository to assess against")
         return scrub_json(assess_test_case(ex, g, body.model_dump()))[0]
 
+    @app.get("/api/v1/graph/query")
+    def graph_query(question: str, component: str, repository: Optional[str] = None, limit: int = 200,
+                    x_tia_readable_repos: Optional[str] = Header(None)):
+        """A direct question to the code graph, with no change involved. question: consumers (who depends on the component),
+        dependencies (what it depends on), tests (which tests exercise it), covers (what one test exercises). component: a node id,
+        'METHOD /path', or a function, test, service, table or topic name. The answer's status is ok, ambiguous (candidates are
+        listed; nothing is guessed) or not_found. Only repositories the caller may read are searched."""
+        from .graphquery import QUESTIONS, query as ask_graph
+        if question not in QUESTIONS:
+            raise HTTPException(400, f"question must be one of {', '.join(QUESTIONS)}")
+        if not component.strip() or len(component) > 500:
+            raise HTTPException(400, "component must be 1-500 characters")
+        if repository:
+            require_repo(repository)
+        ex, g = tester_scope(None, x_tia_readable_repos)
+        if not ex:
+            return {"question": question, "asked": component, "status": "not_found", "results": [], "hint": "No repository to search."}
+        return scrub_json(ask_graph(g, question, component, repository, limit))[0]
+
     # ---- ingested evidence (FR-022 to FR-029): pushed before an analysis, never queried live during one -----------------------------
     def evstore():
         return EvidenceStore(store.db, store.tenant_id)
@@ -1525,7 +1544,21 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
             pol = policy_now(full)
             return {"analysis_id": rep["analysis_id"], **(redact_policy(pol, full, ok) if ok is not None else pol)}
 
-        tools = {"get_impact_report": tool_report, "find_impact_report": tool_find, "get_test_scope": tool_scope, "get_policy_outcome": tool_policy}
+        def via(fn, *a, **k):
+            """A tester tool is its REST route called for this caller: same visibility, same redaction, same answer."""
+            try:
+                return fn(*a, **k, x_tia_readable_repos=x_tia_readable_repos)
+            except HTTPException as e:
+                raise mcp.ToolError(str(e.detail))
+
+        tools = {"get_impact_report": tool_report, "find_impact_report": tool_find, "get_test_scope": tool_scope, "get_policy_outcome": tool_policy,
+                 "get_tester_pack": lambda a: via(tester_pack, a["analysis_id"]),
+                 "get_coverage": lambda a: via(coverage, a.get("repositories")),
+                 "get_api_inventory": lambda a: via(automation_api, a.get("repositories")),
+                 "get_ui_inventory": lambda a: via(automation_ui, a.get("repositories")),
+                 "check_test_case": lambda a: via(coverage_test_case, TestCaseIn(**{k: v for k, v in a.items() if k != "repositories"}), a.get("repositories")),
+                 "get_shared_components": lambda a: via(graph_shared_components, 2, int(a.get("limit") or 100)),
+                 "query_graph": lambda a: via(graph_query, a["question"], a["component"], a.get("repository"), int(a.get("limit") or 200))}
         msgs = msg if isinstance(msg, list) else [msg]
         out = [r for r in (await run_in_threadpool(lambda: [mcp.handle(m, tools) for m in msgs])) if r is not None]
         if not out:

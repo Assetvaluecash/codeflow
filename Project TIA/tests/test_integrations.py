@@ -105,7 +105,7 @@ def test_mcp_handshake_and_read_only_tools(world):
     assert init["result"]["serverInfo"]["name"] == "tia" and "no blast-radius claim in a review without a TIA analysis id" in init["result"]["instructions"]
     assert rpc(c, "notifications/initialized", mid=None).status_code == 202
     tools = rpc(c, "tools/list").json()["result"]["tools"]
-    assert {t["name"] for t in tools} == {"get_impact_report", "find_impact_report", "get_test_scope", "get_policy_outcome"}
+    assert {t["name"] for t in tools} >= {"get_impact_report", "find_impact_report", "get_test_scope", "get_policy_outcome"}
     assert all(t["annotations"]["readOnlyHint"] and not t["annotations"]["destructiveHint"] for t in tools)      # AC-032: no write tool
     bad = rpc(c, "tools/call", {"name": "record_relationship", "arguments": {}}).json()
     assert bad["error"]["code"] == -32602 and "read-only" in bad["error"]["message"]

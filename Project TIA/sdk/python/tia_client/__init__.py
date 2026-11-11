@@ -158,6 +158,48 @@ class TiaClient:
     def investigate_incident(self, incident_id: str, window_hours: Optional[float] = None) -> dict:
         return self.call("GET", f"/api/v1/incidents/{urllib.parse.quote(incident_id, safe='')}/investigation", params={"window_hours": window_hours})
 
+    # ---- testing: tester pack of a change, landscape views, direct graph questions, the agent (Knowledge Fabric) answer ---------------
+    def tester_pack(self, analysis_id: str) -> dict:
+        """For the entry points a change reaches: coverage gate, technical coverage, UI locator pack, API test matrix."""
+        return self.call("GET", f"/api/v1/impact-analyses/{urllib.parse.quote(analysis_id, safe='')}/tester-pack")
+
+    def coverage(self, repositories: Optional[list] = None) -> dict:
+        return self.call("GET", "/api/v1/coverage", params={"repos": ",".join(repositories) if repositories else None})
+
+    def api_inventory(self, repositories: Optional[list] = None) -> dict:
+        return self.call("GET", "/api/v1/automation/api", params={"repos": ",".join(repositories) if repositories else None})
+
+    def ui_inventory(self, repositories: Optional[list] = None) -> dict:
+        return self.call("GET", "/api/v1/automation/ui", params={"repos": ",".join(repositories) if repositories else None})
+
+    def check_test_case(self, title: str = "", entry_point: str = "", steps: str = "", expected: str = "") -> dict:
+        """One test case as a query: what it covers and what it misses."""
+        return self.call("POST", "/api/v1/coverage/test-case", json_body={"title": title, "entry_point": entry_point, "steps": steps, "expected": expected})
+
+    def shared_components(self, limit: int = 100) -> dict:
+        return self.call("GET", "/api/v1/graph/shared-components", params={"limit": limit})
+
+    def graph_query(self, question: str, component: str, repository: Optional[str] = None, limit: int = 200) -> dict:
+        """question: consumers | dependencies | tests | covers. The answer's status is ok, ambiguous (see 'candidates') or not_found."""
+        return self.call("GET", "/api/v1/graph/query", params={"question": question, "component": component, "repository": repository, "limit": limit})
+
+    def consumers_of(self, component: str, repository: Optional[str] = None) -> dict:
+        return self.graph_query("consumers", component, repository)
+
+    def dependencies_of(self, component: str, repository: Optional[str] = None) -> dict:
+        return self.graph_query("dependencies", component, repository)
+
+    def tests_covering(self, component: str, repository: Optional[str] = None) -> dict:
+        return self.graph_query("tests", component, repository)
+
+    def covered_by_test(self, test: str, repository: Optional[str] = None) -> dict:
+        return self.graph_query("covers", test, repository)
+
+    def agent_answer(self, analysis_id: str, include_tester_pack: bool = True, top_k: int = 10) -> dict:
+        """What an AI testing agent receives for one analysis (Knowledge Fabric QueryResponse: chunks and paths)."""
+        return self.call("POST", "/query/tia", json_body={"analysis_id": analysis_id, "include_tester_pack": include_tester_pack,
+                                                          "top_k_semantic": top_k, "top_k_graph": top_k})
+
     # ---- audit ---------------------------------------------------------------------------------------------------------------------
     def verify_audit(self) -> dict:
         return self.call("GET", "/api/v1/audit/verify")

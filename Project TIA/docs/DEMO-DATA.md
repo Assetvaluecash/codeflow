@@ -63,6 +63,17 @@ Tabs that need a real Git host and cannot be shown offline:
 A grey dotted edge from `payments.component.ts` is expected. The Angular page calls a relative address, so TIA marks it unresolved
 instead of guessing.
 
+### Ask the graph
+Choose the question, type the component, press **Ask**.
+
+| Question | Component | You should see |
+|---|---|---|
+| Who depends on it? | `GET /accounts/{account_id}/payments` | other services: customer-portal, statement-service; 2 entry points that reach it |
+| What does it depend on? | `GET /statements/{account_id}/pdf` | 1 endpoint of another service: `GET /accounts/{account_id}/payments` |
+| Which tests cover it? | `ordered` | `test_list_payments` "covers it through GET /accounts/{account_id}/payments", and the consumers' tests |
+| What does this test cover? | `test_statement_pdf` | attached to `GET /statements/{account_id}/pdf` |
+| Who depends on it? | `fetch_payments` | "2 components are called fetch_payments … TIA does not guess": choose one |
+
 ## 3. Analyse a change
 
 For every run:

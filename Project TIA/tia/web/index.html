@@ -146,6 +146,15 @@
     <span><i style="border-color:#ef6c00;border-top-style:dashed"></i>ambiguous call: one dashed line per candidate</span>
     <span id="legimpact" class="hidden">Impact view: red outline = changed; fill = severity (critical dark red, high red, medium amber, low grey)</span>
   </div>
+  <h3 style="font-size:13px;margin:14px 0 4px">Ask the graph</h3>
+  <p class="mut" style="margin:0 0 6px">A direct question about one component, with no change involved. AI agents ask the same through <code>GET /api/v1/graph/query</code> or the MCP tool <code>query_graph</code>.</p>
+  <div class="ctl">
+    <div><label for="aqq">Question</label><select id="aqq"><option value="consumers">Who depends on it?</option><option value="dependencies">What does it depend on?</option>
+      <option value="tests">Which tests cover it?</option><option value="covers">What does this test cover?</option></select></div>
+    <div style="flex:1;min-width:220px"><label for="aqc">Component</label><input id="aqc" placeholder="GET /accounts/{account_id}/payments, or a function, test, service, table or topic name"></div>
+    <div><button id="aqgo" type="button">Ask</button></div>
+  </div>
+  <div id="aqout" aria-live="polite"></div>
 </section>
 
 <section>
@@ -1184,6 +1193,40 @@ async function fillRepoFilter() {
   const repos = await api("/api/v1/repositories"); const cur = new Set([...$("grepos").selectedOptions].map(o => o.value));
   $("grepos").innerHTML = repos.map(r => `<option value="${esc(r.name)}" ${cur.has(r.name) ? "selected" : ""}>${esc(r.name)}</option>`).join("");
 }
+// ---- ask the graph: consumers / dependencies / tests / what a test covers (GET /api/v1/graph/query) ----
+const AQ_GROUPS = {consumers: [["entry_points", "Entry points that reach it"], ["tests", "Tests attached"], ["consumers", "Everything that depends on it"]],
+  dependencies: [["endpoints_of_other_services", "Endpoints of other services it calls"], ["data", "Data it uses"], ["topics", "Event topics"], ["dependencies", "Everything it depends on"]],
+  tests: [["tests", "Tests that exercise it"]], covers: [["attached_to", "What the test is attached to"], ["entry_points", "Entry points it exercises"], ["also_exercises", "Code it also runs through"]]};
+function aqTable(rows) {
+  return `<div class="wrapx"><table><thead><tr><th>Component</th><th>Service</th><th>Where</th><th>Steps away</th><th>Evidence</th></tr></thead><tbody>` +
+    rows.slice(0, 50).map(r => `<tr><td>${typeChip(r.type, r.name)}${r.covers ? `<br><span class="mut">covers it ${esc(r.covers)}</span>` : ""}</td><td>${esc(r.service || "")}</td>
+      <td class="mut">${esc(r.file || "")}${r.line ? ":" + esc(r.line) : ""}</td><td>${esc(r.depth)}</td>
+      <td>${r.evidence_status === "inferred" ? '<span class="err">inferred (a lead, not a fact)</span>' : esc(String(r.evidence_status || "").replace(/_/g, " "))}</td></tr>`).join("") +
+    (rows.length > 50 ? `<tr><td colspan="5" class="mut">... and ${rows.length - 50} more in the JSON answer</td></tr>` : "") + "</tbody></table></div>";
+}
+async function askGraph(component) {
+  const c = (component || $("aqc").value).trim(); if (!c) { $("aqout").innerHTML = '<p class="err">Name a component first.</p>'; return; }
+  busy($("aqgo"), true);
+  try {
+    const a = await api("/api/v1/graph/query?" + new URLSearchParams({question: $("aqq").value, component: c}));
+    if (a.status === "not_found") $("aqout").innerHTML = `<p class="err">${esc(a.hint)}</p>`;
+    else if (a.status === "ambiguous") {
+      $("aqout").innerHTML = `<p>${esc(a.candidates_total)} components are called <b>${esc(a.asked)}</b>. Choose one (TIA does not guess):</p><p>` +
+        a.candidates.map((x, i) => `<button class="sec" type="button" data-aq="${i}">${esc(x.name)} - ${esc(x.repo)} <span class="mut">${esc(x.file || "")}${x.line ? ":" + esc(x.line) : ""}</span></button>`).join(" ") + "</p>";
+      document.querySelectorAll("[data-aq]").forEach(b => b.onclick = () => askGraph(a.candidates[+b.dataset.aq].node));
+    } else {
+      const s = a.results, k = a.component;
+      $("aqout").innerHTML = `<p>${typeChip(k.type, k.name)} <span class="mut">${esc(k.service || "")} ${esc(k.file || "")}${k.line ? ":" + esc(k.line) : ""}</span>` +
+        (s.services && s.services.length ? ` &nbsp; Other services involved: <b>${s.services.map(esc).join(", ")}</b>` : "") + "</p>" +
+        AQ_GROUPS[a.question].map(([key, title]) => { const rows = s[key] || [];
+          return `<details ${key === AQ_GROUPS[a.question][0][0] ? "open" : ""}><summary>${title} (${rows.length})</summary>${rows.length ? aqTable(rows) : '<p class="mut">None found.</p>'}</details>`; }).join("") +
+        (a.limits.length ? `<p class="mut"><b>Limits of this answer:</b><br>${a.limits.map(esc).join("<br>")}</p>` : "");
+    }
+  } catch (e) { $("aqout").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  busy($("aqgo"), false);
+}
+$("aqgo").onclick = () => askGraph();
+$("aqc").onkeydown = e => { if (e.key === "Enter") askGraph(); };
 $("gload").onclick = () => gload(); $("gimpact").onclick = gimpact; $("toimpact").onclick = gimpact;
 $("gfit").onclick = () => cy && cy.fit(undefined, 30);
 $("glevel").onchange = () => gload(); $("glayout").onchange = () => cy && (gmode === "impact" ? gimpact() : gload());

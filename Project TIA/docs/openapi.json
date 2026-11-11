@@ -2787,6 +2787,96 @@
     "x-tia-permission": "read"
    }
   },
+  "/api/v1/graph/query": {
+   "get": {
+    "description": "A direct question to the code graph, with no change involved. question: consumers (who depends on the component),\ndependencies (what it depends on), tests (which tests exercise it), covers (what one test exercises). component: a node id,\n'METHOD /path', or a function, test, service, table or topic name. The answer's status is ok, ambiguous (candidates are\nlisted; nothing is guessed) or not_found. Only repositories the caller may read are searched.",
+    "operationId": "graph_query_api_v1_graph_query_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "question",
+      "required": true,
+      "schema": {
+       "title": "Question",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "component",
+      "required": true,
+      "schema": {
+       "title": "Component",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "repository",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Repository"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 200,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tia-readable-repos",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tia-Readable-Repos"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Graph Query",
+    "x-tia-permission": "read"
+   }
+  },
   "/api/v1/graph/relationships": {
    "get": {
     "description": "Cross-repository relationships with their state: current, or stale with the reason (AC-011).",

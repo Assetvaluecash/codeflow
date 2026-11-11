@@ -520,3 +520,20 @@ Asked for in a stakeholder note: one PR -> three agent answers (retest + coverag
 - **One colour per component type** (service, endpoint, function, outbound call, test, class, config, page, ...): a legend under the graph, chips in the tables, same colours in every graph.
 - Evidence status shown with spaces ("runtime observed").
 - **Verified:** real Chrome 21/21 for this change; the three earlier UI checks re-run (21, 19, 17, after updating two outdated expectations in the check scripts); 135 page-reading tests pass; screenshot reviewed.
+
+## 2026-11-11 (late): Agent parity and direct graph questions
+From a review of how testing agents can consume the code graph (items 1 and 2 of its list).
+- **MCP:** 7 new read-only tools (11 in total): `get_tester_pack`, `get_coverage`, `get_api_inventory`, `get_ui_inventory`, `check_test_case`, `get_shared_components`, `query_graph`. Each is its REST route called for the caller (same visibility and redaction).
+- **SDK (`tia_client`):** `tester_pack`, `coverage`, `api_inventory`, `ui_inventory`, `check_test_case`, `shared_components`, `graph_query`, `consumers_of`, `dependencies_of`, `tests_covering`, `covered_by_test`, `agent_answer`.
+- **New:** `tia/graphquery.py` and `GET /api/v1/graph/query` (question = consumers | dependencies | tests | covers). Ambiguous names return candidates (never a guess); evidence = weakest link, confirmed paths preferred; every answer lists its limits; only readable repositories are searched.
+- **UI:** "Ask the graph" in section 2 (four questions, candidate chooser, limits shown).
+- **Bug found by the tests and fixed:** "what does this test cover" returned nothing (the search would not start from a test node).
+- **Verified (simulated):** `tests/test_graphquery.py` (9 tests), MCP/SDK/access/docs tests, real Chrome 14/14 for Ask the graph; earlier UI checks re-run and pass.
+- **Still open from the review:** failed-test triage, data impact and event contracts in the tester pack, an "AI agents" panel in the UI, journeys, stub lists, authorisation tests.
+
+## 2026-11-11 (last): The shareable report page (/analyses/<id>) restructured too
+The user's "4 columns" were this page's tables (Severity, Component, Evidence, Why), not section 4 of the main page: I had fixed only the main page.
+- **Findings and What to test tables now have 5 columns:** the new **Graph** column draws each row's impact path (changed = red ring, affected = severity fill, links labelled and coloured by evidence, dashed = inferred). Drawn as inline SVG because the page allows no script.
+- **Why** is in labelled parts: What changed / Why this is affected / Path from the change / Evidence / What to do / Limits (+ Tests found in the What to test table). Fixed column widths; text wraps in its cell.
+- Type-colour chips and a legend, same colours as the main page.
+- **Verified:** real Chrome 12/12 (5 columns, nothing clipped, a drawing per row, no script, unique ids, phone layout); `tests/test_reportpage.py` updated (two outdated expectations) and passing; screenshots reviewed.
