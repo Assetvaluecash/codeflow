@@ -93,8 +93,9 @@ def test_renderers_and_knowledge_fabric_carry_the_selection(reps):
     out = kfadapter.to_query_response(rep, kfadapter.QueryRequest(analysis_id="x")).model_dump()
     cats = [c["category"] for c in out["reranked_chunks"]]
     assert "regression_summary" in cats and cats.count("regression_test") == 4 and "config_check" in cats
-    first = next(c for c in out["reranked_chunks"] if c["category"] in ("regression_summary", "regression_test", "test_scope", "rule_gap"))
+    first = next(c for c in out["reranked_chunks"] if c["category"].startswith(("regression", "config")))
     assert first["category"] == "regression_summary"
+    assert "test_scope" in cats and len([c for c in out["chunks"] if c["category"] == "regression_test"]) == 4
 
 
 def test_redaction(reps):
@@ -103,7 +104,8 @@ def test_redaction(reps):
     assert same["regression"]["summary"]["selected"] == 4 and len(same["config_checks"]) == 1
     none = redact(rep, [])["test_scope"]
     assert none["regression"]["selected"] == [] and none["regression"]["unmapped"] == [] and none["config_checks"] == []
-    assert none["regression"]["summary"]["test_cases"] == 0 and none["redacted"]["items"] >= 11
+    assert none["regression"]["summary"]["test_cases"] == 0 and none["regression"]["withheld"]["test_cases"] == 10
+    assert none["redacted"]["items"] >= 1                                            # the configuration check, with the entry points
 
 
 # ---- configuration parsing and reads (unit) ------------------------------------------------------------------------------------------

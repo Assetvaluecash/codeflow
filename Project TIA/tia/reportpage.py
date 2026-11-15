@@ -298,6 +298,8 @@ def _regression(reg: dict) -> str:
     if reg.get("changed_by_this_change"):
         out += ("<p>Added or edited by this change (new tests for the change, not regression): "
                 + ", ".join(f"<code>{_e(c['id'])}</code> {_e(c['title'])}" for c in reg["changed_by_this_change"]) + "</p>")
+    if reg.get("withheld"):
+        out += f'<p class="mut">{_e(reg["withheld"]["note"])}</p>'
     return out + f'<p class="mut">{_e(reg["basis"])}</p>'
 
 

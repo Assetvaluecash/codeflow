@@ -1,6 +1,6 @@
 # TIA architecture as built
 
-The system as it is coded today: 98 Python modules (25,926 lines) in 10 layers, 29 PostgreSQL tables, three processes from one container image. Everything here is read from the code by `tools/gen_architecture.py`; the design written before the build is [ARCHITECTURE.md](ARCHITECTURE.md), and section 7 says where the two differ.
+The system as it is coded today: 100 Python modules (26,644 lines) in 10 layers, 29 PostgreSQL tables, three processes from one container image. Everything here is read from the code by `tools/gen_architecture.py`; the design written before the build is [ARCHITECTURE.md](ARCHITECTURE.md), and section 7 says where the two differ.
 
 **Status: Built.** The layer rule in section 2 is checked against the real imports on every test run (`tests/test_architecture_doc.py`), so this document cannot silently go out of date.
 
@@ -28,10 +28,10 @@ All three run the same image (`deploy/Dockerfile`, entry point `python -m`, non-
 | # | Layer | Modules | Lines | Responsible for |
 |---|---|---|---|---|
 | 1 | Entry points | 4 | 376 | The processes and commands that start everything: the API server, the queue worker, the command line and the schema migration. |
-| 2 | HTTP API, web UI and agent surfaces | 10 | 4,228 | Every way in: the REST API and web UI, sign-in, permissions on each request, the shareable report page, MCP for coding assistants and the Knowledge Fabric adapter. Requests are authenticated, classified and bound to one tenant here, before any work starts. |
+| 2 | HTTP API, web UI and agent surfaces | 10 | 4,295 | Every way in: the REST API and web UI, sign-in, permissions on each request, the shareable report page, MCP for coding assistants and the Knowledge Fabric adapter. Requests are authenticated, classified and bound to one tenant here, before any work starts. |
 | 3 | Orchestration, ingestion and jobs | 8 | 1,797 | Turns a request into work: resolves revisions, registers and syncs repositories, queues jobs and runs an analysis end to end, the same way for the UI, the API and a pull-request webhook. |
 | 4 | Source-control and change-management connectors | 8 | 1,549 | Talks to the outside on the platform's behalf: webhooks in, pull-request comments and check runs out, repository permissions mirrored from the host, ServiceNow change records. Nothing below this layer calls a git host or ITSM. |
-| 5 | Impact engine and tester views | 15 | 4,324 | The deterministic core: diff the change, walk the graph within bounds, attach evidence, score with the rule table, and turn the result into the report and the tester views (test scope, coverage, automation inventory, tester pack, graph questions). |
+| 5 | Impact engine and tester views | 17 | 4,975 | The deterministic core: diff the change, walk the graph within bounds, attach evidence, score with the rule table, and turn the result into the report and the tester views (test scope, regression test selection, configuration checks, coverage, automation inventory, tester pack, graph questions). |
 | 6 | Graph and identity resolution | 4 | 791 | Connects facts from many repositories into one typed graph: who calls which endpoint, which code reads which table, with the resolution strategy and evidence on every edge. Versioned graphs are stored, never edited. |
 | 7 | Extraction (language adapters) | 21 | 7,137 | Reads code as bytes and parses it into facts (endpoints, call sites, functions, schemas, tables, tests, UI elements). Never imports, runs or builds customer code. Facts are cached per git blob, so an unchanged file is never parsed twice. |
 | 8 | Tenancy, identity and persistence | 11 | 2,984 | Everything stored, and who it belongs to: tenant-bound database transactions, the analysis and evidence store with its audit chain, tenants and their configuration, users, roles, secrets and customer keys, retention and backup. |
@@ -48,7 +48,7 @@ How many module imports go from each layer (row) to each layer (column), counted
 | 2. HTTP API, web UI and agent surfaces | · | 9 | 7 | 7 | 11 | 2 | 2 | 15 | 1 | 11 |
 | 3. Orchestration, ingestion and jobs | 1 | · | 5 | 7 | 5 | 3 | 2 | 6 | 1 | 8 |
 | 4. Source-control and change-management connectors | · | · | · | 8 | 4 | · | · | 1 | 3 | 15 |
-| 5. Impact engine and tester views | · | · | · | · | 15 | 8 | 2 | 2 | 4 | 14 |
+| 5. Impact engine and tester views | · | · | · | · | 21 | 8 | 4 | 2 | 4 | 15 |
 | 6. Graph and identity resolution | · | · | · | · | · | 3 | 2 | 1 | · | 4 |
 | 7. Extraction | · | · | · | · | · | · | 29 | 1 | 2 | 19 |
 | 8. Tenancy, identity and persistence | · | · | 1 | · | · | · | · | 17 | 5 | 13 |
@@ -92,9 +92,9 @@ Every way in: the REST API and web UI, sign-in, permissions on each request, the
 | [`ratelimit`](../tia/ratelimit.py) | 112 | Request rate limiting (SECURITY T17, PRD 11 SaaS operations). | none | `api` |
 | [`gate`](../tia/gate.py) | 92 | Request-path enforcement of the tenant lifecycle (UC1-20): is this tenant allowed to act, and is there storage room? | `db`, `tenants` | `api` |
 | [`health`](../tia/health.py) | 214 | Health, readiness and scrape-time metrics (PL-007). | `credentials`, `db`, `metrics` | `api`, `worker` |
-| [`reportpage`](../tia/reportpage.py) | 387 | The shareable report page for one analysis (UC1-16): what the PR comment and the check run link to. | none | `api` |
-| [`mcp`](../tia/mcp.py) | 118 | MCP server for coding assistants (PRD FR-037, AC-032): read-only tools over the Model Context Protocol (JSON-RPC 2.0, the streamable-HTTP transport answered with single JSON responses) at POST /mcp, behind the same authentication ... | none | `api` |
-| [`kfadapter`](../tia/kfadapter.py) | 355 | Knowledge Fabric V2.5 adapter: a finished Change Impact Report in the shape KF agents already consume (QueryResponse). | none | `api` |
+| [`reportpage`](../tia/reportpage.py) | 417 | The shareable report page for one analysis (UC1-16): what the PR comment and the check run link to. | none | `api` |
+| [`mcp`](../tia/mcp.py) | 119 | MCP server for coding assistants (PRD FR-037, AC-032): read-only tools over the Model Context Protocol (JSON-RPC 2.0, the streamable-HTTP transport answered with single JSON responses) at POST /mcp, behind the same authentication ... | none | `api` |
+| [`kfadapter`](../tia/kfadapter.py) | 391 | Knowledge Fabric V2.5 adapter: a finished Change Impact Report in the shape KF agents already consume (QueryResponse). | none | `api` |
 
 ### 3.3 Orchestration, ingestion and jobs
 
@@ -128,25 +128,27 @@ Talks to the outside on the platform's behalf: webhooks in, pull-request comment
 
 ### 3.5 Impact engine and tester views
 
-The deterministic core: diff the change, walk the graph within bounds, attach evidence, score with the rule table, and turn the result into the report and the tester views (test scope, coverage, automation inventory, tester pack, graph questions).
+The deterministic core: diff the change, walk the graph within bounds, attach evidence, score with the rule table, and turn the result into the report and the tester views (test scope, regression test selection, configuration checks, coverage, automation inventory, tester pack, graph questions).
 
 | Module | Lines | What it does | Uses | Used by |
 |---|---|---|---|---|
-| [`impact`](../tia/impact.py) | 943 | Change-impact engine. | 23 modules (layer 5: 6, layer 6: 4, layer 7: 2, layer 8: 2, layer 9: 4, layer 10: 5) | `analysis_service`, `api`, `cli` |
+| [`impact`](../tia/impact.py) | 987 | Change-impact engine. | 26 modules (layer 5: 8, layer 6: 4, layer 7: 3, layer 8: 2, layer 9: 4, layer 10: 5) | `analysis_service`, `api`, `cli` |
 | [`enrich`](../tia/enrich.py) | 376 | Evidence enrichment of an analysis (PRD FR-022 to FR-029): CI results, coverage, runtime observations and deployments, read from TIA's evidence store (never queried live) and pinned in the analysis's evidence snapshot. | `evidence`, `graph`, `models` | `api`, `impact` |
 | [`evidence`](../tia/evidence.py) | 433 | Ingested evidence (PRD FR-022 CI results, FR-023 coverage, FR-026/027 runtime, FR-028/029 deployments): parsers and the tenant store. | `models`, `scrub` | `analysis_service`, `api`, `enrich`, `incidents` |
-| [`report`](../tia/report.py) | 342 | Report rendering and audience filtering (PRD section 8, 9.1, 11.1). | `diagram`, `testscope` | `ado`, `analysis_service`, `api`, `cli`, `github`, `publish`, `scmhosts` |
+| [`report`](../tia/report.py) | 386 | Report rendering and audience filtering (PRD section 8, 9.1, 11.1). | `configkeys`, `diagram`, `regression`, `testscope` | `ado`, `analysis_service`, `api`, `cli`, `github`, `publish`, `scmhosts` |
 | [`findingfilter`](../tia/findingfilter.py) | 98 | Report filters (PRD 9.3): severity; service or repository; direct versus transitive impact; contract, data, test, runtime and operational impact; evidence status; environment; policy result; unresolved or stale evidence. | none | `api` |
 | [`findings_catalog`](../tia/findings_catalog.py) | 98 | Explainable finding catalog packaging (Pulse RULE_CATALOG shape, TIA content). | none | `impact`, `structure` |
 | [`structure`](../tia/structure.py) | 175 | Structural risk amplifiers on the evidence graph (Pulse cycles / coupling / layers port). | `findings_catalog` | `impact` |
 | [`communities`](../tia/communities.py) | 99 | File-level communities and god nodes (Pulse Leiden port, pure-Python label propagation). | `models` | `impact` |
 | [`diagram`](../tia/diagram.py) | 99 | Mermaid architecture block for impact reports (Pulse architecture-diagram port). | none | `impact`, `report` |
-| [`testscope`](../tia/testscope.py) | 396 | Test scope (UC-1 in docs/CASE-STUDY.md): what a change means for a tester, in things a tester can test without reading code. | `models` | `api`, `cli`, `coverage`, `impact`, `incidents`, `report`, `testerpack` |
-| [`coverage`](../tia/coverage.py) | 343 | Technical coverage (UC-2, docs/CASE-STUDY.md): "are my test cases enough?" on the technical side. | `automation`, `graph`, `models`, `testscope` | `api`, `cli`, `testerpack` |
+| [`testscope`](../tia/testscope.py) | 396 | Test scope (UC-1 in docs/CASE-STUDY.md): what a change means for a tester, in things a tester can test without reading code. | `models` | `api`, `cli`, `coverage`, `impact`, `incidents`, `regression`, `report`, `testerpack` |
+| [`coverage`](../tia/coverage.py) | 343 | Technical coverage (UC-2, docs/CASE-STUDY.md): "are my test cases enough?" on the technical side. | `automation`, `graph`, `models`, `testscope` | `api`, `cli`, `regression`, `testerpack` |
 | [`automation`](../tia/automation.py) | 401 | Automation inventory (UC-3, docs/CASE-STUDY.md): what an automation tester needs from the code, without reading it. | `models` | `api`, `cli`, `coverage`, `testerpack` |
 | [`testerpack`](../tia/testerpack.py) | 101 | The tester pack of one analysis (docs/CASE-STUDY.md: one change, three answers from the same code facts). | `automation`, `coverage`, `testscope` | `api` |
 | [`graphquery`](../tia/graphquery.py) | 156 | Direct questions to the code graph, for testing agents and people (no change needed) | `models` | `api` |
 | [`graphview`](../tia/graphview.py) | 264 | Code / dependency graph views for the UI (PRD 9.2 supporting visualisation). | `graph`, `models`, `resolve` | `api` |
+| [`regression`](../tia/regression.py) | 150 | Regression test selection (docs/MEETING-PAWAN.md, use case 1): "out of your 10 test cases, these 4 must be regression-tested". | `coverage`, `testscope` | `impact`, `report` |
+| [`configkeys`](../tia/configkeys.py) | 413 | Configuration and environment-variable changes (docs/MEETING-PAWAN.md, ask 1a: "he also added a new environment variable that other methods use - test these too"). | `exclude`, `gitutil` | `impact`, `report` |
 
 ### 3.6 Graph and identity resolution
 
@@ -177,9 +179,9 @@ Reads code as bytes and parses it into facts (endpoints, call sites, functions, 
 | [`extract_ui`](../tia/extract_ui.py) | 620 | Front-end adapter (UC-3, docs/CASE-STUDY.md): pages, their UI elements, how to locate each one uniquely, whether it is mandatory, its input rules, the values a dropdown offers, and the API calls a page makes. | `models` | `extract_python` |
 | [`sqllineage`](../tia/sqllineage.py) | 296 | SQL and stored-procedure data lineage (PRD FR-041, AC-037). | `extract_data` | `extract_python` |
 | [`streams`](../tia/streams.py) | 189 | Event-stream and data-pipeline lineage (PRD FR-042). | `extract_data`, `models` | `extract_python` |
-| [`testcases`](../tia/testcases.py) | 79 | Written (manual) test cases kept in a repository: `testcases/*.csv` / *.yaml / *.yml / *.json (UC-2, docs/CASE-STUDY.md). | none | `extract_python` |
+| [`testcases`](../tia/testcases.py) | 79 | Written (manual) test cases kept in a repository: `testcases/*.csv` / *.yaml / *.yml / *.json (UC-2, docs/CASE-STUDY.md). | none | `extract_python`, `impact` |
 | [`registry`](../tia/registry.py) | 109 | Ownership and criticality registry connector (PRD 7.3 criticality, FR-033 owner approval, FR-045 owning teams). | none | `api`, `extract_python` |
-| [`exclude`](../tia/exclude.py) | 57 | Tenant-configurable path exclusion for extraction (Pulse exclude-patterns port). | none | `extraction` |
+| [`exclude`](../tia/exclude.py) | 57 | Tenant-configurable path exclusion for extraction (Pulse exclude-patterns port). | none | `configkeys`, `extraction` |
 | [`lang`](../tia/lang/__init__.py) | 2 | Language adapters beyond Python and Java (PRD FR-040): C#/.NET, TypeScript/JavaScript, Go, Kotlin. | none | `adapters` |
 | [`lang/common`](../tia/lang/common.py) | 128 | Shared helpers for the tree-sitter based language adapters. | `__init__`, `models` | `lang/csharp`, `lang/golang`, `lang/kotlin`, `lang/typescript` |
 | [`lang/csharp`](../tia/lang/csharp.py) | 323 | C#/.NET adapter (PRD FR-040: ASP.NET Core, HttpClient). | `lang/common`, `models` | none |
@@ -224,7 +226,7 @@ Shared building blocks with no business logic: the data model, read-only git acc
 | Module | Lines | What it does | Uses | Used by |
 |---|---|---|---|---|
 | [`models`](../tia/models.py) | 267 | Canonical data structures (TECHNICAL-FRAMEWORK.md section 5). | none | 32 modules (layer 5: 9, layer 6: 4, layer 7: 15, layer 8: 2, layer 9: 2) |
-| [`gitutil`](../tia/gitutil.py) | 136 | Read-only git access. | none | `analysis_service`, `api`, `extraction`, `impact`, `repos` |
+| [`gitutil`](../tia/gitutil.py) | 136 | Read-only git access. | none | `analysis_service`, `api`, `configkeys`, `extraction`, `impact`, `repos` |
 | [`scrub`](../tia/scrub.py) | 179 | Keep secrets out of TIA's records and reports (PL-011; PRD 11.4 P0: "secrets, credentials ... must not be copied into graph records or reports"; TFD 11: credentials found in source files are never copied). | none | 11 modules (layer 1: 1, layer 2: 1, layer 3: 1, layer 5: 2, layer 7: 1, layer 8: 3, layer 10: 2) |
 | [`credentials`](../tia/credentials.py) | 248 | Where TIA's own secrets come from (PL-011): an approved secrets manager, never source code and never the database in clear. | `airgap` | 15 modules (layer 1: 3, layer 2: 1, layer 3: 1, layer 4: 3, layer 8: 5, layer 10: 2) |
 | [`transport`](../tia/transport.py) | 68 | Encryption in transit (PL-011): refuse insecure transport instead of discovering it later. | `airgap`, `credentials` | `migrate`, `server`, `tracing`, `webhooks`, `worker` |

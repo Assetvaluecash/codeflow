@@ -110,7 +110,8 @@ If your written test cases are kept in a repository, the report opens with **Reg
 | **Could not be mapped - review by hand** | the case names nothing TIA can match: no *Entry point* column, and no route or plain-language name in its text. It is never treated as unaffected. |
 | **Added or edited by this change** | the tester's new cases for the change itself: not regression. |
 
-For the best matches, fill the *Entry point* column with the HTTP method and route (`POST /payments`) or the screen's route (`/pay`).
+For the best matches, fill the *Entry point* column with the HTTP method and the route as the code declares them, or with the
+screen's route.
 The selection is static: *run again* means the change reaches what the case tests, not that the case will fail.
 
 ### Configuration and environment variables

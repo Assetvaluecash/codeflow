@@ -86,4 +86,6 @@ jobs:
       - name: No credential-shaped strings in the repository (tests build theirs at run time)
         run: python tools/ci.py --only secrets
       - name: "Dependencies with known vulnerabilities (security gate - no open critical/high)"
-        run: python -m pip_audit --strict --progress-spinner off
+        # --skip-editable: TIA itself is installed editable and is not on PyPI; --strict would fail on "tia could not be audited"
+        # every run. Every third-party dependency is still audited, and any finding still fails the job.
+        run: python -m pip_audit --strict --skip-editable --progress-spinner off

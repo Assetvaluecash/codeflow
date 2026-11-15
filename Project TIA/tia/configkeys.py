@@ -21,8 +21,12 @@ import json
 import posixpath
 import re
 import subprocess
-import tomllib
 from typing import Optional
+
+try:                                    # Python 3.11+; on 3.10 a TOML file is left to file-level analysis (it cannot be read here)
+    import tomllib
+except ModuleNotFoundError:             # pragma: no cover - exercised on Python 3.10 only
+    tomllib = None
 
 import yaml
 
@@ -123,6 +127,8 @@ def parse_config(path: str, text: str) -> dict:
         elif p.endswith(".json"):
             _flatten(json.loads(text), "", out)
         elif p.endswith(".toml"):
+            if tomllib is None:
+                raise ValueError("TOML needs Python 3.11 or later")
             _flatten(tomllib.loads(text), "", out)
         elif p.endswith((".ini", ".cfg")):
             cp = configparser.ConfigParser(interpolation=None, strict=False)
@@ -139,7 +145,7 @@ def parse_config(path: str, text: str) -> dict:
                 m = re.match(r"([^=:\s]+)\s*[=:]\s*(.*)$", s)
                 if m:
                     out[m.group(1)] = m.group(2).strip()
-    except (yaml.YAMLError, json.JSONDecodeError, tomllib.TOMLDecodeError, configparser.Error, UnicodeError) as e:
+    except (yaml.YAMLError, json.JSONDecodeError, configparser.Error, UnicodeError, *((tomllib.TOMLDecodeError,) if tomllib else ())) as e:
         raise ValueError(str(e)[:120])
     return out
 

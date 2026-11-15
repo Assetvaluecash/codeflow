@@ -355,15 +355,20 @@ def to_query_response(rep: dict, req: QueryRequest, t0: Optional[float] = None, 
     # the tester's view: what to test because of the change, ranked on its own (rule gaps first) and bounded by the same top_k
     tchunks = scope_chunks(rep, req.domain)
     tpaths = scope_paths(rep)
-    rank = {"regression_summary": 0, "regression_test": 1, "rule_gap": 2, "config_check": 3, "test_scope": 4, "consistency_check": 5,
-            "regression_unmapped": 6}
-    reranked_chunks = reranked_chunks + sorted(tchunks, key=lambda c: (rank[c.category], -c.score, c.block_id))[: req.top_k_semantic]
+    rank = {"rule_gap": 0, "test_scope": 1, "consistency_check": 2}
+    # the regression answer (which written test cases to rerun) and the configuration checks are ranked on their own, with their own top_k,
+    # so they never push the entry points to test out of the answer
+    rrank = {"regression_summary": 0, "regression_test": 1, "config_check": 2, "regression_unmapped": 3}
+    rchunks = [c for c in tchunks if c.category in rrank]
+    tchunks = [c for c in tchunks if c.category in rank]
+    reranked_chunks = (reranked_chunks + sorted(tchunks, key=lambda c: (rank[c.category], -c.score, c.block_id))[: req.top_k_semantic]
+                       + sorted(rchunks, key=lambda c: (rrank[c.category], -c.score, c.block_id))[: req.top_k_semantic])
     reranked_paths = (reranked_paths + sorted(tpaths, key=lambda p: (-p.score, p.source_block_id)))[: req.top_k_graph]
     # the tester pack: the gate verdict first, then gaps, API matrices and locator packs, each kind bounded by the same top_k
     pchunks = pack_chunks(pack, req.domain)
     for cat in PACK_RANK:
         reranked_chunks = reranked_chunks + [c for c in pchunks if c.category == cat][: req.top_k_semantic]
-    chunks, paths = chunks + tchunks + pchunks, paths + tpaths
+    chunks, paths = chunks + tchunks + rchunks + pchunks, paths + tpaths
     # unknowns are never ranked away: they ride along after the findings, whatever top_k says
     reranked_chunks = reranked_chunks + unknown_chunks
     errors = []

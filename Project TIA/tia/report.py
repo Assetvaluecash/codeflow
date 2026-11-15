@@ -35,8 +35,11 @@ def redact(report: dict, readable_repos) -> dict:
     if r.get("test_scope"):
         ts = redact_scope(r["test_scope"], readable)
         more = 0
-        if ts.get("regression"):
-            more += regression_redact(ts["regression"], readable)
+        if ts.get("regression"):                                  # hidden test cases are counted in the regression block itself
+            withheld = regression_redact(ts["regression"], readable)
+            if withheld:
+                ts["regression"]["withheld"] = {"test_cases": withheld,
+                                                "note": f"{withheld} test case(s) in repositories you cannot access are not shown."}
         if ts.get("config_checks"):
             ts["config_checks"], n = redact_checks(ts["config_checks"], readable)
             more += n
@@ -372,6 +375,8 @@ def _regression_md(reg: dict, max_rows: int) -> list:
         L.append("Test cases added or edited by this change (new tests for the change, not regression): "
                  + ", ".join(f"`{_md(c['id'])}`" for c in reg["changed_by_this_change"][:max_rows]))
         L.append("")
+    if reg.get("withheld"):
+        L += [f"_{_md(reg['withheld']['note'])}_", ""]
     return L
 
 
