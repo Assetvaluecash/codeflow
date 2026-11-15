@@ -5,6 +5,8 @@ import copy
 import json
 
 from .diagram import mermaid_markdown, redact_diagram
+from .configkeys import redact_checks
+from .regression import redact as regression_redact
 from .testscope import redact_scope
 
 MARKER = "<!-- tia-analysis -->"
@@ -31,7 +33,16 @@ def redact(report: dict, readable_repos) -> dict:
         kept.append(f)
     r["findings"] = kept
     if r.get("test_scope"):
-        redact_scope(r["test_scope"], readable)
+        ts = redact_scope(r["test_scope"], readable)
+        more = 0
+        if ts.get("regression"):
+            more += regression_redact(ts["regression"], readable)
+        if ts.get("config_checks"):
+            ts["config_checks"], n = redact_checks(ts["config_checks"], readable)
+            more += n
+        if more:
+            items = (ts.get("redacted") or {}).get("items", 0) + more
+            ts["redacted"] = {"items": items, "note": f"{items} test-scope item(s) involving repositories you cannot access were omitted."}
     if r.get("policy_results"):
         r["policy_results"] = redact_policy({"results": r["policy_results"]}, report, readable)["results"]
     visible_services = {f["component"] for f in kept} | {r["change"].get("service")}
@@ -55,6 +66,11 @@ def redact(report: dict, readable_repos) -> dict:
         d = r["deployments"]
         d["by_repo"] = {k: v for k, v in d["by_repo"].items() if k in readable}
         d["incomplete"] = [x for x in d["incomplete"] if x["repo"] in readable]
+    if r.get("builds"):
+        r["builds"]["by_repo"] = {k: v for k, v in r["builds"]["by_repo"].items() if k in readable}
+    if r.get("failure_signatures"):
+        # a failure seen in any repository the reader cannot read is withheld whole: its tests and runs would reveal that repository
+        r["failure_signatures"]["signatures"] = [s for s in r["failure_signatures"]["signatures"] if set(s["repos"]) <= set(readable)]
     for c in r["change"]["changed_components"]:
         if c.get("coverage"):
             c["coverage"]["tests_executing"] = c["coverage"]["tests_executing"] if r["change"]["repository"] in readable else []
@@ -303,9 +319,11 @@ def _evidence_md(report: dict) -> list:
 
 def _test_scope_md(ts: dict | None, max_rows: int, report: dict) -> list:
     """The tester's view first: which entry points to test because of this change, and the rule gaps and consistency checks it touches."""
-    if not ts or not (ts["entry_points"] or ts["code_without_entry_point"] or ts["rule_gaps"]):
+    reg = (ts or {}).get("regression") or {}
+    if not ts or not (ts["entry_points"] or ts["code_without_entry_point"] or ts["rule_gaps"] or ts.get("config_checks")
+                      or reg.get("selected") or reg.get("unmapped")):
         return []
-    L = []
+    L = _regression_md(reg, max_rows)
     rows = ts["entry_points"] + ts["code_without_entry_point"]
     if rows:
         L += ["**What to test** (entry points this change reaches)", "", "| Entry point | Service | Change effect | Tests found |", "|---|---|---|---|"]
@@ -323,11 +341,37 @@ def _test_scope_md(ts: dict | None, max_rows: int, report: dict) -> list:
         L.append(("- **Rule moved into the shared service** - " if gp.get("resolved_by_this_change") else "- **Possible rule gap** - ") + _md(gp["reason"]))
     for c in ts["consistency_checks"]:
         L.append(f"- **Consistency check** - {_md(c['check'])}")
-    if ts["rule_gaps"] or ts["consistency_checks"]:
+    for c in ts.get("config_checks", []):
+        eps = ", ".join(f"`{_md(e['entry_point'])}`" for e in c["entry_points"][:5])
+        L.append(f"- **Configuration** - {_md(c['check'])}" + (f" Entry points: {eps}." if eps else ""))
+    if ts["rule_gaps"] or ts["consistency_checks"] or ts.get("config_checks"):
         L.append("")
     L += _evidence_md(report)
     if (ts.get("redacted") or {}).get("items"):
         L += [f"_{ts['redacted']['note']}_", ""]
+    return L
+
+
+def _regression_md(reg: dict, max_rows: int) -> list:
+    """The regression answer first: which of the tester's written test cases to run again because of this change."""
+    s = reg.get("summary") or {}
+    if not s.get("test_cases"):
+        return []
+    L = [f"**{_md(s['headline'])}**", ""]
+    if reg["selected"]:
+        L += ["| Test case | Why | Change effect |", "|---|---|---|"]
+        for c in reg["selected"][:max_rows]:
+            L.append(f"| `{_md(c['id'])}` {_md(c['title'])} | {_md(c['reason'])} | {EFFECT_TEXT[c['change_effect']]} |")
+        if len(reg["selected"]) > max_rows:
+            L.append(f"| _+{len(reg['selected']) - max_rows} more in the full report_ | | |")
+        L.append("")
+    if reg["unmapped"]:
+        L.append("Could not be mapped (review by hand): " + ", ".join(f"`{_md(c['id'])}` {_md(c['title'])}" for c in reg["unmapped"][:max_rows]))
+        L.append("")
+    if reg.get("changed_by_this_change"):
+        L.append("Test cases added or edited by this change (new tests for the change, not regression): "
+                 + ", ".join(f"`{_md(c['id'])}`" for c in reg["changed_by_this_change"][:max_rows]))
+        L.append("")
     return L
 
 

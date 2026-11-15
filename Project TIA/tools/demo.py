@@ -1,10 +1,12 @@
 """Support script (not production code): build a demo landscape and analyse one PR branch.
 
-    python tools/demo.py [--landscape payments|lanes] [--branch BRANCH] [--format comment|json|both] [--dir PATH]
+    python tools/demo.py [--landscape payments|lanes|regression] [--branch BRANCH] [--format comment|json|both] [--dir PATH]
 
 payments: the 6-repository landscape (branches breaking, impl, tests_only, docs_only, syntax_error, removed_endpoint)
 lanes:    the UC-1 test-scope landscape, one shared endpoint and two consumers, one of which applies a rule the other does not
           (branches behaviour, move_rule, signature, signature_unfixed, docstring, contract); see docs/CASE-STUDY.md
+regression: one payments app with 10 written test cases and feature branches (feature/holds, feature/min-balance,
+          feature/fx-rounding): which test cases to regression-test for each change; see docs/MEETING-PAWAN.md
 """
 import argparse
 import sys
@@ -14,11 +16,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from fixtures import build_fixture, build_lanes_fixture  # noqa: E402
+from fixtures import build_fixture, build_lanes_fixture, build_regression_fixture  # noqa: E402
 from tia.cli import _emit  # noqa: E402
 from tia.impact import AnalysisRequest, analyze  # noqa: E402
 
-LANDSCAPES = {"payments": (build_fixture, "breaking"), "lanes": (build_lanes_fixture, "behaviour")}
+LANDSCAPES = {"payments": (build_fixture, "breaking"), "lanes": (build_lanes_fixture, "behaviour"),
+              "regression": (build_regression_fixture, "feature/holds")}
 
 
 def main():
@@ -34,7 +37,7 @@ def main():
     branch = a.branch or default_branch
     if branch not in fx["shas"] or branch == "base":
         raise SystemExit(f"unknown branch '{branch}' for {a.landscape}: one of {sorted(k for k in fx['shas'] if k != 'base')}")
-    rep = analyze(AnalysisRequest(repos=fx["paths"], target="payments-service", base=fx["shas"]["base"],
+    rep = analyze(AnalysisRequest(repos=fx["paths"], target=fx.get("target", "payments-service"), base=fx["shas"]["base"],
                                   head=fx["shas"][branch], pull_request=1842))
     _emit(rep, a.format, None, None)
     print(f"\n(fixture in {dest})", file=sys.stderr)

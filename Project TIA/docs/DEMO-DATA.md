@@ -287,6 +287,29 @@ customer-portal,team-portal,high
    - 1 finding (low);
    - What to test: `GET /loyalty/{account_id}/points` with test `test_loyalty_points`.
 
+## 8. Regression selection: main branch vs feature branch (command line)
+
+This is the demo Pawan asked for ([MEETING-PAWAN.md](MEETING-PAWAN.md)). One payments app, `payments-app`, has:
+- a main branch;
+- ten written functional test cases in `testcases/regression-suite.csv`, nine API cases and one Pay-screen case (TC-03);
+- TC-10, which names nothing TIA can match;
+- three feature branches.
+
+Run one branch at a time:
+
+```
+python tools/demo.py --landscape regression --branch feature/holds
+```
+
+| Branch | The change | You should see |
+|---|---|---|
+| `feature/holds` (default) | `balance_of()` subtracts held amounts when the new environment variable `HOLDS_ENABLED` is `true` | **Regression-test 4 of your 10**: TC-01, TC-02, TC-07, and TC-03 through the Pay screen. TC-10 under *review by hand*. A **Configuration** line: `balance_of` now reads `HOLDS_ENABLED`, no file sets it (make sure it is set in Dev), and `statement` already reads the same key. |
+| `feature/min-balance` | only `config/app.env` changes: `MIN_BALANCE` 80 to 100, and `FX_PROVIDER` | **3 of 10**: TC-01, TC-02, TC-03, reached through `can_pay`, which reads `MIN_BALANCE`. `FX_PROVIDER`: no analysed code reads it. Neither new value appears anywhere in the report. |
+| `feature/fx-rounding` | `convert()` rounds to 4 decimals; the branch also adds TC-11 | **2 of 10**: TC-08 and TC-09. TC-11 is listed as *added by this change*, not as regression. |
+
+`tests/test_regression.py` checks these numbers on every test run. Add `--format json` to see the full `test_scope.regression`
+and `test_scope.config_checks`.
+
 ## If your screen shows other numbers
 
 | Cause | What happens | Fix |

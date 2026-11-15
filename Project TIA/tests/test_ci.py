@@ -19,7 +19,7 @@ GOOD = textwrap.dedent("""
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
-          - uses: actions/checkout@v4
+          - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
           - run: echo hello
 """)
 
@@ -49,7 +49,8 @@ def test_a_good_workflow_passes(tmp_path, monkeypatch):
     (lambda t: t.replace("    timeout-minutes: 10\n", ""), "timeout"),
     (lambda t: t.replace("echo hello", "echo ${{ github.event.pull_request.title }}"), "script injection"),
     (lambda t: t.replace("echo hello", "echo ${{ github.head_ref }}"), "script injection"),
-    (lambda t: t.replace("actions/checkout@v4", "actions/checkout"), "not versioned"),
+    (lambda t: t.replace("actions/checkout@11d5960a326750d5838078e36cf38b85af677262", "actions/checkout"), "not versioned"),
+    (lambda t: t.replace("actions/checkout@11d5960a326750d5838078e36cf38b85af677262", "actions/checkout@v4"), "pin the commit SHA"),       # T19
     (lambda t: t.replace("echo hello", "echo ${{ secrets.TOKEN }}"), "secrets"),
 ])
 def test_unsafe_workflows_are_caught(tmp_path, monkeypatch, change, fragment):

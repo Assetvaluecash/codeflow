@@ -2352,6 +2352,46 @@
     "x-tia-permission": "read"
    }
   },
+  "/api/v1/evidence/builds": {
+   "post": {
+    "description": "Builds (FR-007): [{repo or service, revision, build_id, pipeline, status, artifacts: [{name, version, digest}], finished_at}].\nA deployment whose artifact matches a build's artifact is linked to that build in later analyses.",
+    "operationId": "evidence_builds_api_v1_evidence_builds_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "source",
+      "required": false,
+      "schema": {
+       "default": "ci",
+       "title": "Source",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Evidence Builds",
+    "x-tia-permission": "evidence_write"
+   }
+  },
   "/api/v1/evidence/coverage": {
    "post": {
     "description": "Coverage of one run (Cobertura XML, JaCoCo XML, or coverage.py JSON with --show-contexts for per-test execution).",

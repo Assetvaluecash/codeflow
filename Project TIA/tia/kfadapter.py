@@ -216,6 +216,36 @@ def scope_chunks(rep: dict, domain: str) -> list:
         out.append(ChunkItem(text=f"CONSISTENCY CHECK: {c['check']}", source_file="", category="consistency_check", score=0.5, weaviate_uuid="",
                              block_id=f"{aid}#check-{k}", page_number=None, block_index=None, block_type="tia_consistency_check",
                              kg_node_type="endpoint", domain=domain, extracted_fields=json.dumps(fields, sort_keys=True), extracted_knowledge=None))
+    for k, c in enumerate(ts.get("config_checks", [])):
+        fields = {"analysis_id": aid, "key": c["key"], "change": c["change"], "file": c["file"], "repository": c["repo"],
+                  "entry_points": [e["entry_point"] for e in c["entry_points"]]}
+        out.append(ChunkItem(text=f"CONFIGURATION CHECK: {c['check']}", source_file=str(c["file"]), category="config_check", score=0.7,
+                             weaviate_uuid="", block_id=f"{aid}#config-{k}", page_number=None, block_index=None, block_type="tia_config_check",
+                             kg_node_type="config_key", domain=domain, extracted_fields=json.dumps(fields, sort_keys=True), extracted_knowledge=None))
+    reg = ts.get("regression") or {}
+    if (reg.get("summary") or {}).get("test_cases"):
+        s = reg["summary"]
+        out.append(ChunkItem(text=f"REGRESSION SELECTION: {s['headline']} {reg['basis']}", source_file="", category="regression_summary",
+                             score=0.9, weaviate_uuid="", block_id=f"{aid}#regression", page_number=None, block_index=None,
+                             block_type="tia_regression_summary", kg_node_type="analysis", domain=domain,
+                             extracted_fields=json.dumps({"analysis_id": aid, **{k2: s[k2] for k2 in ("test_cases", "selected", "not_selected", "unmapped")}},
+                                                         sort_keys=True),
+                             extracted_knowledge=json.dumps({"selected": [c["id"] for c in reg["selected"]], "unmapped": [c["id"] for c in reg["unmapped"]],
+                                                             "not_selected": [c["id"] for c in reg["not_selected"]]}, sort_keys=True)))
+        for k, c in enumerate(reg["selected"]):
+            fields = {"analysis_id": aid, "test_case": c["id"], "title": c["title"], "priority": c["priority"], "repository": c["repo"],
+                      "change_effect": c["change_effect"], "entry_points": [r["entry_point"] for r in c["reasons"]]}
+            out.append(ChunkItem(text=f"REGRESSION TEST {c['id']} {c['title']}: {c['reason']}.", source_file=str(c.get("file") or ""),
+                                 category="regression_test", score=round(EFFECT_SCORE[c["change_effect"]], 4), weaviate_uuid="",
+                                 block_id=f"{aid}#regression-{k}", page_number=None, block_index=None, block_type="tia_regression_test",
+                                 kg_node_type="test_case", domain=domain, extracted_fields=json.dumps(fields, sort_keys=True),
+                                 extracted_knowledge=json.dumps({"reasons": c["reasons"]}, sort_keys=True, default=str)))
+        for k, c in enumerate(reg["unmapped"]):
+            out.append(ChunkItem(text=f"TEST CASE NOT MAPPED {c['id']} {c['title']}: {c['reason']}.", source_file=str(c.get("file") or ""),
+                                 category="regression_unmapped", score=0.4, weaviate_uuid="", block_id=f"{aid}#unmapped-{k}", page_number=None,
+                                 block_index=None, block_type="tia_regression_unmapped", kg_node_type="test_case", domain=domain,
+                                 extracted_fields=json.dumps({"analysis_id": aid, "test_case": c["id"], "repository": c["repo"]}, sort_keys=True),
+                                 extracted_knowledge=None))
     return out
 
 
@@ -325,7 +355,8 @@ def to_query_response(rep: dict, req: QueryRequest, t0: Optional[float] = None, 
     # the tester's view: what to test because of the change, ranked on its own (rule gaps first) and bounded by the same top_k
     tchunks = scope_chunks(rep, req.domain)
     tpaths = scope_paths(rep)
-    rank = {"rule_gap": 0, "test_scope": 1, "consistency_check": 2}
+    rank = {"regression_summary": 0, "regression_test": 1, "rule_gap": 2, "config_check": 3, "test_scope": 4, "consistency_check": 5,
+            "regression_unmapped": 6}
     reranked_chunks = reranked_chunks + sorted(tchunks, key=lambda c: (rank[c.category], -c.score, c.block_id))[: req.top_k_semantic]
     reranked_paths = (reranked_paths + sorted(tpaths, key=lambda p: (-p.score, p.source_block_id)))[: req.top_k_graph]
     # the tester pack: the gate verdict first, then gaps, API matrices and locator packs, each kind bounded by the same top_k

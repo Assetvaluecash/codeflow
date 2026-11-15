@@ -20,12 +20,12 @@ import threading
 import time
 from typing import Callable, Iterable, Optional
 
-from . import github
+from . import ado, github
 from .identity import Principal
 
 MODES = ("scm", "tenant", "restricted")
 READ_PERMS = frozenset(github.ROLE_ORDER)
-HOSTS = {"github": "github", "gitlab": "gitlab", "bitbucket": "bitbucket"}   # repository provider -> the host name on user profiles and in the mirror
+HOSTS = {"github": "github", "gitlab": "gitlab", "bitbucket": "bitbucket", "ado": "ado"}   # repository provider -> the host name on user profiles and in the mirror
 DEFAULT_MAX_AGE = 3600
 
 
@@ -37,8 +37,8 @@ def max_age() -> int:
 
 
 def default_mode(provider: str) -> str:
-    """GitHub: the host's own list. Uploads and local paths have no host and belong to the tenant. Any other hosted repository (Azure DevOps,
-    a plain git server) has no mirror yet, so nobody reads it until an administrator grants it: fail closed."""
+    """GitHub, GitLab, Bitbucket, Azure DevOps: the host's own list. Uploads and local paths have no host and belong to the tenant. Any other
+    hosted repository (a plain git server) has no mirror, so nobody reads it until an administrator grants it: fail closed."""
     if provider in HOSTS:
         return "scm"
     return "tenant" if provider in ("upload", "local") else "restricted"
@@ -113,7 +113,7 @@ class AccessStore:
                  "attempted_at": f(r[7]), "fresh": bool(r[8])} for r in rows]
 
     def sync(self, repos: list, token, api_url: str = "https://api.github.com", lister: Optional[Callable] = None,
-             describe: Optional[Callable] = None) -> list[dict]:
+             describe: Optional[Callable] = None, ado_cfg=None) -> list[dict]:
         """Refresh the mirror of every hosted repository from the host. One repository failing does not stop the others; its old rows are
         kept (so they age out and stop granting access) and the failure is recorded."""
         from .webhooks import github_full_name
@@ -124,12 +124,21 @@ class AccessStore:
         for r in repos:
             host = HOSTS.get(r.provider)
             hcfg = scmhosts.HostConfig.from_env(host) if host in ("gitlab", "bitbucket") else None
-            full = github_full_name(r.url) if host == "github" else scmhosts.full_name(hcfg, r.url) if hcfg else None
+            remote = ado.parse_remote(r.url) if host == "ado" else None
+            full = (github_full_name(r.url) if host == "github" else scmhosts.full_name(hcfg, r.url) if hcfg
+                    else f"{remote['project']}/{remote['repository']}" if remote else None)
             if not full:
                 continue
             try:
                 tok = token(r) if callable(token) else token                 # with a GitHub App the token differs per installation
-                if hcfg is not None:
+                if remote is not None:
+                    acfg = ado_cfg or ado.AdoConfig.from_env()
+                    if not tok:
+                        raise RuntimeError("no Azure DevOps token is configured (TIA_ADO_TOKEN, or the tenant's stored ado/token)")
+                    if not ado.allowed_host(acfg, remote["base_url"]):
+                        raise RuntimeError("the repository is not on an Azure DevOps host this server will call")
+                    collab, meta = ado.list_readers(acfg, tok, remote["base_url"], remote["project"], remote["repository"]), {}
+                elif hcfg is not None:
                     if not tok:
                         raise RuntimeError(f"no {host} token is configured (TIA_{host.upper()}_TOKEN, or the tenant's stored {host}/token)")
                     collab, meta = scmhosts.list_readers(hcfg, full, tok), {}

@@ -139,6 +139,23 @@ def _interp(n, named_clients: dict) -> tuple:
         if parts and parts[0][0] == "s":
             return template_path([("s", "/" + parts[0][1])] + parts[1:]) if not parts[0][1].startswith("/") else template_path(parts)
         return (None, None, None, "URL starts with an expression")
+    if n.type == "binary_expression" and text_of(n.child_by_field_name("operator")) == "+":
+        # "/orders/" + id + "/lines": literal pieces stay, anything else is a path parameter; a leading expression is not a guess
+        flat: list = []
+
+        def walk_plus(x):
+            if x.type == "binary_expression" and text_of(x.child_by_field_name("operator")) == "+":
+                walk_plus(x.child_by_field_name("left"))
+                walk_plus(x.child_by_field_name("right"))
+            elif x.type == "parenthesized_expression" and x.named_children:
+                walk_plus(x.named_children[0])
+            else:
+                s = string_value(x)
+                flat.append(("s", s) if s is not None else ("v", None))
+        walk_plus(n)
+        if flat and flat[0][0] == "s":
+            return template_path(flat if flat[0][1].startswith(("http://", "https://", "/")) else [("s", "/" + flat[0][1])] + flat[1:])
+        return (None, None, None, "URL starts with an expression")
     return (None, None, None, f"URL expression not statically resolvable: {text_of(n)[:60]}")
 
 
@@ -149,12 +166,25 @@ def extract_file(repo: str, service: str, path: str, text: str, strip: tuple = (
         out.files_failed.append({"file": path, "error": "C# source does not parse"})
         return out
     out.files_analysed = 1
-    named_clients = {}                                     # variable -> client name (CreateClient("orders"))
+    def created_client(n):
+        m = re.search(r"(\w+)\s*=\s*\w+\.CreateClient\(\s*\"([^\"]+)\"\s*\)", text_of(n.parent if n.type == "variable_declarator" else n))
+        return (m.group(1), m.group(2)) if m else None
+
+    def in_method(n) -> bool:
+        p = n.parent
+        while p is not None:
+            if p.type in ("method_declaration", "local_function_statement", "constructor_declaration", "lambda_expression"):
+                return True
+            p = p.parent
+        return False
+    # variable -> client name (CreateClient("orders")): fields and constructor assignments hold for the whole class; a local variable only
+    # inside its own method (two methods may both call their client `c`)
+    named_clients = {}
     for n in walk(root):
-        if n.type == "variable_declarator" or n.type == "assignment_expression":
-            m = re.search(r"(\w+)\s*=\s*\w+\.CreateClient\(\s*\"([^\"]+)\"\s*\)", text_of(n.parent if n.type == "variable_declarator" else n))
-            if m:
-                named_clients[m.group(1)] = m.group(2)
+        if n.type == "assignment_expression" or (n.type == "variable_declarator" and not in_method(n)):
+            got = created_client(n)
+            if got:
+                named_clients[got[0]] = got[1]
     for cls in walk(root):
         if cls.type not in ("class_declaration", "record_declaration"):
             continue
@@ -215,6 +245,12 @@ def extract_file(repo: str, service: str, path: str, text: str, strip: tuple = (
             attrs = _attrs(m)
             mbody = m.child_by_field_name("body")
             calls, http = [], []
+            local_clients = dict(named_clients)
+            for x in walk(mbody) if mbody is not None else []:
+                if x.type == "variable_declarator":
+                    got = created_client(x)
+                    if got:
+                        local_clients[got[0]] = got[1]
             for x in walk(mbody) if mbody is not None else []:
                 if x.type != "invocation_expression":
                     continue
@@ -226,9 +262,9 @@ def extract_file(repo: str, service: str, path: str, text: str, strip: tuple = (
                 args = [a.named_children[-1] for a in (argl.named_children if argl is not None else []) if a.named_children]
                 if last in CLIENT and args:
                     owner = fname.rsplit(".", 1)[0] if "." in fname else ""
-                    parts = _interp(args[0], named_clients)
-                    if parts[0] and parts[1] is None and owner.lstrip("_") in {k.lstrip("_") for k in named_clients}:
-                        key = next(v for k, v in named_clients.items() if k.lstrip("_") == owner.lstrip("_"))
+                    parts = _interp(args[0], local_clients)
+                    if parts[0] and parts[1] is None and owner.lstrip("_") in {k.lstrip("_") for k in local_clients}:
+                        key = next(v for k, v in local_clients.items() if k.lstrip("_") == owner.lstrip("_"))
                         parts = (parts[0], "config_key", key, None)
                     if is_test_class:
                         if parts[0]:

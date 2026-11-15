@@ -30,7 +30,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
-PROVIDERS = ("github", "ado")
+PROVIDERS = ("github", "ado", "gitlab", "bitbucket")     # gitlab / bitbucket: the namespace (top-level group, workspace, project key)
 COLS = ("id, name, display_name, plan, status, storage_quota_bytes, suspended_at, suspended_reason, created_at, offboarded_at")
 
 
@@ -263,6 +263,8 @@ class Tenants:
         if not str(installation_id).strip():
             raise TenantError("installation id is required")
         installation_id = str(installation_id).strip()
+        if provider in ("gitlab", "bitbucket"):
+            installation_id = installation_id.strip("/").split("/")[0].lower()      # the namespace, as webhooks are matched (scm_namespace)
         with self._connect() as c:
             t = self._resolve(c, ref)
             if t["status"] in ("offboarding", "offboarded"):
@@ -278,6 +280,8 @@ class Tenants:
         return {"tenant": t["name"], "provider": provider, "installation_id": installation_id, "account": account}
 
     def unmap_installation(self, ref: str, provider: str, installation_id: str) -> None:
+        if provider in ("gitlab", "bitbucket"):
+            installation_id = str(installation_id).strip().strip("/").split("/")[0].lower()
         with self._connect() as c:
             t = self._resolve(c, ref)
             n = c.execute("delete from tenant_installations where provider = %s and installation_id = %s and tenant_id = %s",

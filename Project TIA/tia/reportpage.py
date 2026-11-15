@@ -198,10 +198,45 @@ def _evidence_sections(report: dict) -> str:
         rows = "".join(f"<tr><td data-label=\"Repository\">{_e(r)}</td><td data-label=\"Environment\">{_e(env)}</td>"
                        f"<td data-label=\"Deployed\"><code>{_e(d['revision'][:12])}</code></td>"
                        f"<td data-label=\"Compared\">{'analysed revision' if d['is_analysed_revision'] else '<b>not the analysed revision</b>'}"
-                       f"{'; the proposed change' if d.get('is_proposed_revision') else ''}</td></tr>"
+                       f"{'; the proposed change' if d.get('is_proposed_revision') else ''}{_dep_notes(d)}</td></tr>"
                        for r, envs in sorted(dep["by_repo"].items()) for env, d in sorted(envs.items()))
         out += ("<h2>Deployments</h2><div class=\"wrap\"><table class=\"stack\"><tr><th>Repository</th><th>Environment</th><th>Deployed</th><th>Compared</th></tr>"
                 f"{rows}</table></div>") if rows else ""
+    bl = report.get("builds")                                                       # FR-007 build artifacts
+    if bl:
+        label = {"proposed_revision": "proposed", "base_revision": "base", "analysed_revision": "analysed"}
+        rows = ""
+        for r, kinds in sorted(bl["by_repo"].items()):
+            for k, b in kinds.items():
+                if b:
+                    arts = " ".join(f"<code>{_e(a['name'])}{':' + _e(a['version']) if a.get('version') else ''}</code>" for a in b.get("artifacts") or []) or "none recorded"
+                    status = "<b>failed</b>" if b["status"] == "failed" else _e(b["status"])
+                    rows += (f"<tr><td data-label=\"Repository\">{_e(r)}</td><td data-label=\"Revision\">{_e(label.get(k, k))} <code>{_e(b['revision'][:12])}</code></td>"
+                             f"<td data-label=\"Build\">{_e(b['build_id'])}</td><td data-label=\"Status\">{status}</td><td data-label=\"Artifacts\">{arts}</td></tr>")
+                else:
+                    rows += (f"<tr><td data-label=\"Repository\">{_e(r)}</td><td data-label=\"Revision\">{_e(label.get(k, k))}</td>"
+                             f"<td data-label=\"Build\" colspan=\"3\"><span class=\"mut\">no build recorded for this revision</span></td></tr>")
+        out += ("<h2>Builds</h2><div class=\"wrap\"><table class=\"stack\"><tr><th>Repository</th><th>Revision</th><th>Build</th><th>Status</th><th>Artifacts</th></tr>"
+                f"{rows}</table></div>") if rows else ""
+    fs = (report.get("failure_signatures") or {}).get("signatures") or []          # FR-007 failure signatures
+    if fs:
+        rows = "".join(f"<tr><td data-label=\"Failure\"><code>{_e(s['pattern'])}</code></td><td data-label=\"Assessment\">{_e(s['assessment'])}</td>"
+                       f"<td data-label=\"Runs\">{_e(str(s['runs']))}</td><td data-label=\"Tests\">{'<br>'.join(_e(t) for t in s['tests'])}</td>"
+                       f"<td data-label=\"Incidents\">{'<br>'.join(_e(i['id']) for i in s['incidents']) or 'none'}</td></tr>" for s in fs)
+        out += ("<h2>Failure signatures</h2><div class=\"wrap\"><table class=\"stack\"><tr><th>Failure (normalised)</th><th>Assessment</th><th>Runs</th>"
+                f"<th>Tests</th><th>Incidents</th></tr>{rows}</table></div><p class=\"mut\">{_e(report['failure_signatures']['note'])}</p>")
+    return out
+
+
+def _dep_notes(d: dict) -> str:
+    out = ""
+    if d.get("rollbacks"):
+        r = d["rollbacks"][-1]
+        out += f"<br><b>rolled back</b> to <code>{_e(r['to_revision'][:7])}</code> at {_e(r['at'])}"
+    if d.get("build"):
+        out += f"<br><span class=\"mut\">artifact built by {_e(d['build']['build_id'])} ({_e(d['build']['status'])})</span>"
+    if d.get("artifact_revision_mismatch"):
+        out += f"<br><b>the artifact was built from <code>{_e(d['build']['revision'][:7])}</code>, not this revision</b>"
     return out
 
 
@@ -233,9 +268,37 @@ def _test_scope(report: dict) -> str:
         out += f'<div class="banner"><b>{title}</b>: {_e(gp["reason"])}<ul>{have}{lack}</ul></div>'
     for c in ts["consistency_checks"]:
         out += f"<p><b>Consistency check</b>: {_e(c['check'])}</p>"
+    for c in ts.get("config_checks", []):
+        eps = ", ".join(f"<code>{_e(e['entry_point'])}</code>" for e in c["entry_points"])
+        out += f'<div class="banner"><b>Configuration</b>: {_e(c["check"])}' + (f"<br>Entry points: {eps}" if eps else "") + "</div>"
     if (ts.get("redacted") or {}).get("items"):
         out += f'<p class="mut">{_e(ts["redacted"]["note"])}</p>'
-    return out
+    return _regression(ts.get("regression") or {}) + out
+
+
+def _regression(reg: dict) -> str:
+    """Which of the tester's written test cases to run again, before the entry-point detail."""
+    s = reg.get("summary") or {}
+    if not s.get("test_cases"):
+        return ""
+    def row(c, why):
+        return (f"<tr><td data-label=\"Test case\"><code>{_e(c['id'])}</code> {_e(c['title'])}<br><span class=\"mut\">{_e(c.get('file') or '')}"
+                f"{' &middot; ' + _e(c['priority']) if c.get('priority') else ''}</span></td><td data-label=\"Why\">{why}</td></tr>")
+    sel = "".join(row(c, f"<span class=\"sev {EFFECT_CLASS[c['change_effect']]}\">{_e(EFFECT_TEXT[c['change_effect']])}</span> {_e(c['reason'])}")
+                  for c in reg["selected"])
+    out = f"<h3>{_e(s['headline'])}</h3>"
+    if sel:
+        out += f'<div class="wrap"><table class="stack report"><tr><th style="width:40%">Test case to run again</th><th>Why</th></tr>{sel}</table></div>'
+    if reg["unmapped"]:
+        out += ('<div class="banner"><b>Could not be mapped - review by hand</b><ul>'
+                + "".join(f"<li><code>{_e(c['id'])}</code> {_e(c['title'])}: {_e(c['reason'])}</li>" for c in reg["unmapped"]) + "</ul></div>")
+    if reg["not_selected"]:
+        out += ("<details><summary>Not affected by this change (" + str(len(reg["not_selected"])) + ")</summary><ul>"
+                + "".join(f"<li><code>{_e(c['id'])}</code> {_e(c['title'])}: {_e(c['reason'])}</li>" for c in reg["not_selected"]) + "</ul></details>")
+    if reg.get("changed_by_this_change"):
+        out += ("<p>Added or edited by this change (new tests for the change, not regression): "
+                + ", ".join(f"<code>{_e(c['id'])}</code> {_e(c['title'])}" for c in reg["changed_by_this_change"]) + "</p>")
+    return out + f'<p class="mut">{_e(reg["basis"])}</p>'
 
 
 def _components(report: dict) -> str:

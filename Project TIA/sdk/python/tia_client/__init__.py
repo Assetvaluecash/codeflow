@@ -134,6 +134,10 @@ class TiaClient:
     def push_deployments(self, deployments: list) -> dict:
         return self.call("POST", "/api/v1/evidence/deployments", data=json.dumps(deployments), content_type="application/json")
 
+    def push_builds(self, builds: list) -> dict:
+        """Builds and the artifacts they produced: [{repo, revision, build_id, pipeline, status, artifacts: [{name, version, digest}]}]."""
+        return self.call("POST", "/api/v1/evidence/builds", data=json.dumps(builds), content_type="application/json")
+
     # ---- releases, environments, incidents ------------------------------------------------------------------------------------------
     def record_release(self, name: str, revisions: dict, description: str = "") -> dict:
         return self.call("POST", "/api/v1/releases", data=json.dumps({"name": name, "revisions": revisions, "description": description}),

@@ -297,6 +297,14 @@ Request body:
 | `repo` | query | string|null | no |
 | `limit` | query | integer | no |
 
+### `POST /api/v1/evidence/builds`
+
+**Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  Builds (FR-007): [{repo or service, revision, build_id, pipeline, status, artifacts: [{name, version, digest}], finished_at}]. A deployment whose artifact matches a build's artifact is linked to that build in later analyses.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `source` | query | string | no |
+
 ### `POST /api/v1/evidence/coverage`
 
 **Needs:** `evidence_write` (`engineer`, `release_manager`, `administrator`).  Coverage of one run (Cobertura XML, JaCoCo XML, or coverage.py JSON with --show-contexts for per-test execution).

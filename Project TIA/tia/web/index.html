@@ -163,7 +163,7 @@
     <div><label>Repository containing the change</label><select id="target"></select></div>
     <div><label>Head: branch / tag / commit</label><input id="head" placeholder="feature/my-change" list="headchoices" autocomplete="off"><datalist id="headchoices"></datalist></div>
     <div><label>or Pull request number</label><input id="pr" type="number" min="1" placeholder="e.g. 42"></div>
-    <div><label>Base (default: default branch)</label><input id="base" placeholder="main"></div>
+    <div><label>Base (default: default branch)</label><input id="base" placeholder="main" list="headchoices" autocomplete="off"></div>
     <div><label>Token (only to fetch a private PR)</label><input id="atoken" type="password" autocomplete="off"></div>
   </div>
   <p><button id="run">Run analysis</button> <span id="runmsg"></span></p>
@@ -445,6 +445,11 @@ function fillHeadChoices() {
   $("head").placeholder = bs.length ? `e.g. ${bs.filter(b => b !== "main")[0] || bs[0]} (click to see all branches)` : "feature/my-change";
 }
 $("target").addEventListener("change", fillHeadChoices);
+// a browser's suggestion list only shows names that contain what is already typed, so a box holding "main" would hide develop:
+// on click, show every branch, and put the old text back if nothing was chosen
+["head", "base"].forEach(id => { const el = $(id);
+  el.addEventListener("focus", () => { el.dataset.prev = el.value; if (el.value && (REPO_BRANCHES[$("target").value] || []).length) el.value = ""; });
+  el.addEventListener("blur", () => { if (el.value === "" && el.dataset.prev) el.value = el.dataset.prev; delete el.dataset.prev; }); });
 async function syncRepo(n) { try { await api(`/api/v1/repositories/${encodeURIComponent(n)}/sync`, {method:"POST", body:{token: $("token").value || null}}); } catch(e) { alert(e.message) } loadRepos(); }
 async function delRepo(n) { if (confirm("Remove "+n+"?")) { await api(`/api/v1/repositories/${encodeURIComponent(n)}`, {method:"DELETE"}); loadRepos(); } }
 
@@ -892,13 +897,50 @@ function evidHtml(rep) {
   const dep = rep.deployments;
   if (dep) {
     const rows = Object.entries(dep.by_repo).flatMap(([r, envs]) => Object.entries(envs).map(([env, d]) =>
-      `<tr><td>${esc(r)}</td><td>${esc(env)}</td><td><code>${esc(d.revision.slice(0, 12))}</code></td><td>${d.is_analysed_revision ? "analysed revision" : '<span class="err">not the analysed revision</span>'}${d.is_proposed_revision ? "; the proposed change" : ""}</td></tr>`)).join("");
+      `<tr><td>${esc(r)}</td><td>${esc(env)}</td><td><code>${esc(d.revision.slice(0, 12))}</code></td><td>${d.is_analysed_revision ? "analysed revision" : '<span class="err">not the analysed revision</span>'}${d.is_proposed_revision ? "; the proposed change" : ""}` +
+      (d.rollbacks ? `<br><span class="err">rolled back to <code>${esc(d.rollbacks[d.rollbacks.length - 1].to_revision.slice(0, 7))}</code> at ${esc(d.rollbacks[d.rollbacks.length - 1].at)}${d.rollbacks[d.rollbacks.length - 1].explicit ? "" : " (returned to an earlier revision)"}</span>` : "") +
+      (d.build ? `<br><span class="mut">artifact built by ${esc(d.build.build_id)} (${esc(d.build.status)})</span>` : "") +
+      (d.artifact_revision_mismatch ? `<br><span class="err">the artifact was built from <code>${esc(d.build.revision.slice(0, 7))}</code>, not this revision</span>` : "") +
+      `</td></tr>`)).join("");
     if (rows) out += `<h2 style="margin-top:16px">Deployments</h2><table id="deptable"><thead><tr><th>Repository</th><th>Environment</th><th>Deployed</th><th>Compared</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
+  // FR-007: builds of the analysed revisions and the artifacts they produced
+  const bl = rep.builds;
+  if (bl) {
+    const label = {proposed_revision: "proposed", base_revision: "base", analysed_revision: "analysed"};
+    const rows = Object.entries(bl.by_repo).flatMap(([r, kinds]) => Object.entries(kinds).map(([k, b]) =>
+      `<tr><td>${esc(r)}</td><td>${esc(label[k] || k)}</td>` + (b ? `<td><code>${esc(b.revision.slice(0, 12))}</code></td><td>${esc(b.build_id)}${b.pipeline ? ` <span class="mut">(${esc(b.pipeline)})</span>` : ""}</td>
+       <td>${b.status === "failed" ? '<span class="err">failed</span>' : esc(b.status)}</td><td>${(b.artifacts || []).map(a => `<code>${esc(a.name)}${a.version ? ":" + esc(a.version) : ""}</code>`).join(" ") || '<span class="mut">none recorded</span>'}</td>`
+       : `<td colspan="4"><span class="mut">no build recorded for this revision</span></td>`) + `</tr>`)).join("");
+    if (rows) out += `<h2 style="margin-top:16px">Builds</h2><table id="buildtable"><thead><tr><th>Repository</th><th>Revision</th><th>Commit</th><th>Build</th><th>Status</th><th>Artifacts</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  // FR-007: the same failure across runs (and incidents), and whether it predates this change
+  const fs = (rep.failure_signatures || {}).signatures || [];
+  if (fs.length) out += `<h2 style="margin-top:16px">Failure signatures</h2><table id="sigtable"><thead><tr><th>Failure (normalised)</th><th>Assessment</th><th>Runs</th><th>Tests</th><th>Incidents</th></tr></thead><tbody>` +
+    fs.map(s => `<tr><td><code>${esc(s.pattern)}</code></td><td>${s.on_proposed_revision && !s.on_base_revision ? `<span class="err">${esc(s.assessment)}</span>` : esc(s.assessment)}</td><td>${esc(s.runs)}</td>
+      <td>${s.tests.map(esc).join("<br>")}</td><td>${s.incidents.map(i => `${esc(i.id)}${i.title ? ` <span class="mut">${esc(i.title)}</span>` : ""}`).join("<br>") || '<span class="mut">none</span>'}</td></tr>`).join("") +
+    `</tbody></table><p class="mut">${esc(rep.failure_signatures.note)}</p>`;
   return out;
 }
 function scopeHtml(ts) {
   if (!ts) return "";
+  return regressionHtml(ts.regression) + scopeCore(ts) +
+    (ts.config_checks || []).map(c => `<div class="banner"><b>Configuration</b>: ${esc(c.check)}${c.entry_points.length ? `<br>Entry points: ${c.entry_points.map(e => `<code>${esc(e.entry_point)}</code>`).join(", ")}` : ""}</div>`).join("");
+}
+// the regression answer (docs/MEETING-PAWAN.md): which written test cases to run again because of this change
+function regressionHtml(reg) {
+  if (!reg || !reg.summary || !reg.summary.test_cases) return "";
+  const li = c => `<li><code>${esc(c.id)}</code> ${esc(c.title)}: <span class="mut">${esc(c.reason)}</span></li>`;
+  return `<h2 style="margin-top:16px">${esc(reg.summary.headline)}</h2>` +
+    (reg.selected.length ? `<table id="regtable"><thead><tr><th style="width:34%">Test case to run again</th><th style="width:12%">Change effect</th><th>Why</th></tr></thead><tbody>` +
+      reg.selected.map(c => `<tr><td><code>${esc(c.id)}</code> ${esc(c.title)}${c.priority ? ` <span class="mut">(${esc(c.priority)})</span>` : ""}<br><span class="mut">${esc(c.file || "")}</span></td>
+        <td>${pill(c.change_effect, EFFECT[c.change_effect] || c.change_effect)}</td><td>${esc(c.reason)}</td></tr>`).join("") + `</tbody></table>` : "") +
+    (reg.unmapped.length ? `<div class="banner"><b>Could not be mapped - review by hand</b><ul>${reg.unmapped.map(li).join("")}</ul></div>` : "") +
+    (reg.not_selected.length ? `<details><summary>Not affected by this change (${reg.not_selected.length})</summary><ul>${reg.not_selected.map(li).join("")}</ul></details>` : "") +
+    ((reg.changed_by_this_change || []).length ? `<p>Added or edited by this change (new tests, not regression): ${reg.changed_by_this_change.map(c => `<code>${esc(c.id)}</code> ${esc(c.title)}`).join(", ")}</p>` : "") +
+    `<p class="mut">${esc(reg.basis)}</p>`;
+}
+function scopeCore(ts) {
   const rows = [...ts.entry_points, ...ts.code_without_entry_point];
   if (!rows.length && !ts.rule_gaps.length) return `<h2 style="margin-top:16px">What to test</h2><p class="mut">No entry point is reached by this change: nothing to retest.</p>`;
   return `<h2 style="margin-top:16px">What to test <span class="mut" style="font-weight:normal">(${ts.summary.entry_points} entry point(s), ${ts.summary.tests_linked} test(s) found)</span></h2>

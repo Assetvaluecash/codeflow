@@ -8,6 +8,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+import pickle
+import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -28,6 +32,59 @@ def _chain_hash(prev: str, seq: int, ts: str, event: str, payload: str, key: Opt
     return hmac.new(key, msg, hashlib.sha256).hexdigest() if key else hashlib.sha256(msg).hexdigest()
 
 
+class _RowCache:
+    """Decoded copies of large rows that are read far more often than written: repository extracts and graph versions (a worker running
+    a burst of analyses reads the same 500 extracts for every job). Each use is validated against the row's current version (PostgreSQL
+    xmin) in the caller's tenant-bound transaction, so a rewritten row (a full rescan, a rebuilt graph) is never served stale, and an entry
+    is only ever filled from a row-level-security-checked read of the same tenant, whose id is part of the key. Entries are kept serialized,
+    so every reader gets new objects it may change freely. Bounded by TIA_CACHE_MB (default 256; 0 turns it off); least recently used goes."""
+
+    def __init__(self, max_bytes: int):
+        self.max, self.used, self._d, self._lock = max_bytes, 0, OrderedDict(), threading.Lock()
+
+    def get(self, key, version):
+        if self.max <= 0:
+            return None
+        with self._lock:
+            e = self._d.get(key)
+            if e is None or e[0] != version:
+                return None
+            self._d.move_to_end(key)
+            blob = e[1]
+        return pickle.loads(blob)
+
+    def put(self, key, version, obj):
+        if self.max <= 0:
+            return
+        blob = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
+        if len(blob) > self.max // 4:
+            return
+        with self._lock:
+            old = self._d.pop(key, None)
+            if old:
+                self.used -= len(old[1])
+            self._d[key] = (version, blob)
+            self.used += len(blob)
+            while self.used > self.max and self._d:
+                _, (_, b) = self._d.popitem(last=False)
+                self.used -= len(b)
+
+    def clear(self):
+        with self._lock:
+            self._d.clear()
+            self.used = 0
+
+
+def _cache_bytes() -> int:
+    try:
+        return max(0, int(os.environ.get("TIA_CACHE_MB", "256"))) * 1024 * 1024
+    except ValueError:
+        return 256 * 1024 * 1024
+
+
+ROW_CACHE = _RowCache(_cache_bytes())
+
+
 class Store:
     def __init__(self, db: Database, tenant_id: str, audit_key: Optional[bytes] = None):
         self.db = db
@@ -41,11 +98,26 @@ class Store:
         return (f"{repo}@{commit}#{version}" + (f"|strip={','.join(strip)}" if strip else "")
                 + (f"|excl={','.join(exclude)}" if exclude else ""))
 
-    def get_extract(self, repo: str, commit: str, version: str, strip: tuple = (), exclude: tuple = ()) -> Optional[RepoExtract]:
+    def _cached_row(self, table: str, key: str, kind: str):
+        """The `data` of one row by key, through ROW_CACHE: a version check costs one small query; the large JSON is transferred and decoded
+        only when this process has not seen this version of the row."""
+        ck = (self.tenant_id, kind, key)
         with self.db.tx(self.tenant_id) as c:
-            r = c.execute("select data from extractions where key = %s",
-                          (self._key(repo, commit, version, tuple(strip), tuple(exclude)),)).fetchone()
-        return RepoExtract.from_dict(r[0]) if r else None
+            v = c.execute(f"select xmin::text from {table} where {'key' if table == 'extractions' else 'id'} = %s", (key,)).fetchone()
+            if not v:
+                return None
+            hit = ROW_CACHE.get(ck, v[0])
+            if hit is not None:
+                return hit
+            r = c.execute(f"select data, xmin::text from {table} where {'key' if table == 'extractions' else 'id'} = %s", (key,)).fetchone()
+        if not r:
+            return None
+        ROW_CACHE.put(ck, r[1], r[0])
+        return r[0]
+
+    def get_extract(self, repo: str, commit: str, version: str, strip: tuple = (), exclude: tuple = ()) -> Optional[RepoExtract]:
+        d = self._cached_row("extractions", self._key(repo, commit, version, tuple(strip), tuple(exclude)), "extract")
+        return RepoExtract.from_dict(d) if d else None
 
     def put_extract(self, ex: RepoExtract):
         with self.db.tx(self.tenant_id) as c:
@@ -90,9 +162,7 @@ class Store:
 
     # ---- persisted graph versions (immutable) and the current head --------------------------------------------
     def get_graph(self, graph_id: str) -> Optional[dict]:
-        with self.db.tx(self.tenant_id) as c:
-            r = c.execute("select data from graph_versions where id = %s", (graph_id,)).fetchone()
-        return r[0] if r else None
+        return self._cached_row("graph_versions", graph_id, "graph")
 
     def put_graph(self, graph_id: str, inputs: dict, stats: dict, data: dict, overwrite: bool = False):
         action = "do update set stats = excluded.stats, data = excluded.data" if overwrite else "do nothing"

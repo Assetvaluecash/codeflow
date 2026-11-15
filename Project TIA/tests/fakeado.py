@@ -3,6 +3,7 @@ import base64
 import json
 import re
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -14,6 +15,9 @@ class FakeAdo:
         self.requests: list = []
         self.fail_status = None
         self.next_id = 10
+        self.repos: dict = {}            # (project, name) -> {"id", "project": {"id"}}        (permission mirror)
+        self.acls: dict = {}             # security token -> {"inheritPermissions", "acesDictionary"}
+        self.identities: dict = {}       # descriptor -> identity {"descriptor", "isContainer", "members", "properties"}
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -36,6 +40,18 @@ class FakeAdo:
                 auth = self.headers.get("Authorization", "")
                 if auth != "Basic " + base64.b64encode(f":{outer.token}".encode()).decode():
                     return self._send(401, {"message": "TF400813: not authorized"})
+                q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                mr = re.fullmatch(r"/[^/]+/([^/]+)/_apis/git/repositories/([^/]+)", path)
+                if mr and method == "GET":
+                    r = outer.repos.get((urllib.parse.unquote(mr.group(1)), urllib.parse.unquote(mr.group(2))))
+                    return self._send(200, r) if r else self._send(404, {"message": "TF401019: repository not found"})
+                if re.fullmatch(r"/[^/]+/_apis/accesscontrollists/[0-9a-f-]+", path) and method == "GET":
+                    tok = q.get("token", [""])[0]
+                    acl = outer.acls.get(tok)
+                    return self._send(200, {"count": 1 if acl else 0, "value": [{"token": tok, **acl}] if acl else []})
+                if re.fullmatch(r"/[^/]+/_apis/identities", path) and method == "GET":
+                    descs = [d for d in q.get("descriptors", [""])[0].split(",") if d]
+                    return self._send(200, {"count": len(descs), "value": [outer.identities.get(d) for d in descs]})
                 m = re.fullmatch(r"/([^/]+)/([^/]+)/_apis/git/repositories/([^/]+)/pullRequests/(\d+)(/.*)", path)
                 if not m:
                     return self._send(404, {})

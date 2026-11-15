@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .evidence import in_ranges, match_file, test_keys, tia_test_keys
+from .evidence import artifact_names, failure_signature, in_ranges, match_file, test_keys, tia_test_keys
 from .graph import _path_matches
 from .models import CORROBORATED, RUNTIME_OBSERVED, SOURCE_CONFIRMED, Edge
 
@@ -132,6 +132,9 @@ class TestEvidence:
                           "environment": run["environment"], "at": run["observed_to"], "report": run["data"].get("report_ref"),
                           "evidence_id": run["id"]}
             out["result"] = res["result"] if res else "not_in_run"
+            sig = failure_signature(res.get("message")) if res and res["result"] in ("failed", "error") else None
+            if sig:
+                out["failure_signature"] = sig["id"]                  # see report["failure_signatures"] for how often and where it recurs
         else:
             out["result"] = "no_ci_results"
         cov = self.cov_of.get(repo)
@@ -233,18 +236,62 @@ def enrich_tests(g, report: dict, te: TestEvidence, base_fn: dict, target: str):
     return missing
 
 
+# ---- builds (FR-007 build artifact) -------------------------------------------------------------------------------------------------------------
+def _same_rev(a: Optional[str], b: Optional[str]) -> bool:
+    return bool(a) and bool(b) and (a.startswith(b) or b.startswith(a))
+
+
+def _repo_of(d: dict, extracts: dict) -> Optional[str]:
+    svc_repo = {ex.service: r for r, ex in extracts.items()}
+    return d.get("repo") if d.get("repo") in extracts else svc_repo.get(d.get("service") or "")
+
+
+def build_view(extracts: dict, records: list, analysed: dict, target: str, base: str, head: str) -> dict:
+    """Per repository: the most recent build of the analysed revision (for the changed repository: of the proposed and of the base
+    revision), its status and the artifacts it produced. A revision with no build record says so; it is not assumed to build."""
+    builds: dict = {}
+    for rec in sorted(records, key=lambda r: (r["data"].get("finished_at") or "", r["id"])):
+        d = rec["data"]
+        repo = _repo_of(d, extracts)
+        if repo:
+            builds.setdefault(repo, []).append({**{k: d.get(k) for k in ("build_id", "pipeline", "status", "revision", "artifacts", "finished_at", "url")},
+                                                "evidence_id": rec["id"]})
+
+    def of(repo, rev):
+        return next((b for b in reversed(builds.get(repo, [])) if _same_rev(b["revision"], rev)), None)
+    by_repo = {}
+    for repo in sorted(extracts):
+        if repo == target:
+            by_repo[repo] = {"proposed_revision": of(repo, head), "base_revision": of(repo, base)}
+        else:
+            by_repo[repo] = {"analysed_revision": of(repo, analysed.get(repo))}
+    t = by_repo.get(target, {})
+    return {"by_repo": by_repo, "records": len(records), "proposed_build_failed": (t.get("proposed_revision") or {}).get("status") == "failed",
+            "proposed_revision_unbuilt": target in by_repo and t.get("proposed_revision") is None, "_all": builds}
+
+
 # ---- deployments --------------------------------------------------------------------------------------------------------------------------------
-def deployment_view(extracts: dict, records: list, analysed: dict, target: str, base: str, head: str) -> dict:
-    """Per repository and environment: the revision deployed most recently, and how it compares with what was analysed."""
+def deployment_view(extracts: dict, records: list, analysed: dict, target: str, base: str, head: str, builds: Optional[dict] = None) -> dict:
+    """Per repository and environment: the revision deployed most recently, and how it compares with what was analysed; the rollbacks in
+    that environment (an explicit rollback, or a return to a revision deployed before the current one); the build that produced the
+    deployed artifact, when a build record names it."""
     svc_repo = {ex.service: r for r, ex in extracts.items()}
     latest: dict = {}
-    for rec in sorted(records, key=lambda r: (r["observed_to"] or "", r["id"])):
+    history: dict = {}
+    for rec in sorted(records, key=lambda r: (r["data"].get("deployed_at") or r["observed_to"] or "", r["id"])):
         d = rec["data"]
         repo = d.get("repo") or svc_repo.get(d.get("service") or "")
         if repo not in extracts:
             continue
+        history.setdefault((repo, d["environment"]), []).append((d, rec["id"]))
         latest.setdefault(repo, {})[d["environment"]] = {"revision": d["revision"], "deployed_at": d["deployed_at"], "artifact": d.get("artifact"),
                                                          "evidence_id": rec["id"]}
+    art_index = {}
+    for repo, bl in ((builds or {}).get("_all") or {}).items():
+        for b in bl:
+            for a in b.get("artifacts") or []:
+                for nm in artifact_names(a):
+                    art_index[nm] = b
     by_repo = {}
     for repo in sorted(extracts):
         envs = {}
@@ -253,6 +300,21 @@ def deployment_view(extracts: dict, records: list, analysed: dict, target: str, 
             same = lambda full: bool(full) and (full.startswith(rev) or rev.startswith(full))
             envs[env] = {**d, "is_analysed_revision": same(analysed.get(repo)),
                          **({"is_proposed_revision": same(head), "is_base_revision": same(base)} if repo == target else {})}
+            rolls, seen = [], []
+            for (dd, rid) in history.get((repo, env), []):
+                prev = seen[-1] if seen else None
+                back = prev is not None and dd["revision"] != prev and dd["revision"] in seen[:-1]
+                if dd.get("rollback") or back:
+                    rolls.append({"from_revision": prev, "to_revision": dd["revision"], "at": dd["deployed_at"], "explicit": bool(dd.get("rollback")),
+                                  "evidence_id": rid})
+                seen.append(dd["revision"])
+            if rolls:
+                envs[env]["rollbacks"] = rolls[-5:]
+            b = art_index.get(d.get("artifact") or "")
+            if b:
+                envs[env]["build"] = {"build_id": b["build_id"], "revision": b["revision"], "status": b["status"], "evidence_id": b["evidence_id"]}
+                if not _same_rev(b["revision"], rev):
+                    envs[env]["artifact_revision_mismatch"] = True
         by_repo[repo] = envs
     missing = [{"repo": r, "environments_without_record": [e for e in ENVIRONMENTS if e not in by_repo[r]]}
                for r in sorted(by_repo) if any(e not in by_repo[r] for e in ENVIRONMENTS)]
@@ -265,4 +327,50 @@ def deployment_limitations(f: dict, view: dict) -> list:
     for env, d in envs.items():
         if not d["is_analysed_revision"]:
             out.append(f"{env} runs {f['repository']} at {d['revision'][:7]}, not the analysed revision: the deployed consumer may differ")
+        if d.get("rollbacks"):
+            r = d["rollbacks"][-1]
+            out.append(f"{env} rolled {f['repository']} back to {r['to_revision'][:7]} at {r['at']}: what runs there is an earlier revision")
+        if d.get("artifact_revision_mismatch"):
+            out.append(f"the artifact deployed to {env} was built from {d['build']['revision'][:7]}, not the recorded revision {d['revision'][:7]}")
     return out
+
+
+# ---- failure signatures (FR-007) -----------------------------------------------------------------------------------------------------------------
+def failure_signatures(runs: list, incidents: list, target: str, base: str, head: str) -> dict:
+    """Failures grouped by signature across the pinned test-run history (and incidents with the same signature): how often, on which
+    revisions, whether the failure already happened on the base revision (so it is not caused by this change)."""
+    sigs: dict = {}
+    for run in runs:
+        for t in run["data"].get("tests") or []:
+            if t.get("result") not in ("failed", "error"):
+                continue
+            s = failure_signature(t.get("message"))
+            if not s:
+                continue
+            e = sigs.setdefault(s["id"], {"signature": s["id"], "pattern": s["pattern"], "tests": set(), "runs": set(), "revisions": set(),
+                                          "repos": set(), "first_seen": None, "last_seen": None, "incidents": []})
+            e["tests"].add(f"{t.get('file') or t.get('classname')}::{t.get('name')}")
+            e["runs"].add(run["id"])
+            e["repos"].add(run["repo"])
+            if run["revision"]:
+                e["revisions"].add(run["revision"])
+            at = run.get("observed_to")
+            e["first_seen"] = min(x for x in (e["first_seen"], at) if x) if (e["first_seen"] or at) else None
+            e["last_seen"] = max(x for x in (e["last_seen"], at) if x) if (e["last_seen"] or at) else None
+    for inc in incidents:
+        s = (inc.get("data") or {}).get("failure_signature")
+        if s and s["id"] in sigs:
+            sigs[s["id"]]["incidents"].append({"id": inc["data"]["id"], "title": inc["data"].get("title"), "evidence_id": inc["id"]})
+    out = []
+    for e in sigs.values():
+        revs = sorted(e["revisions"])
+        on_base = target in e["repos"] and any(_same_rev(r, base) for r in revs)
+        on_head = target in e["repos"] and any(_same_rev(r, head) for r in revs)
+        out.append({**e, "tests": sorted(e["tests"])[:20], "runs": len(e["runs"]), "revisions": revs[:20], "repos": sorted(e["repos"]),
+                    "on_base_revision": on_base, "on_proposed_revision": on_head,
+                    "assessment": ("already failing on the base revision: not introduced by this change" if on_base and on_head
+                                   else "new on the proposed revision" if on_head
+                                   else "recurring" if len(e["runs"]) > 1 else "seen once")})
+    out.sort(key=lambda x: (not x["on_proposed_revision"], -x["runs"], x["signature"]))
+    return {"signatures": out[:100], "note": "A signature groups failures whose first message line is the same once ids, numbers, values "
+                                             "and paths are removed. It says the failures look alike, not that they have one cause."}

@@ -86,12 +86,93 @@ def java_service(i: int, n: int, files: int, rng: random.Random, endpoints: int 
     return out
 
 
-def generate(root: Path, n: int, files: int, java_share: float, seed: int = 7) -> dict:
+def _work_files(ext: str, files: int, body) -> dict:
+    return {f"work/w{f:03d}.{ext}": body(f) for f in range(max(0, files - 4))}
+
+
+def go_service(i: int, n: int, files: int, rng: random.Random, endpoints: int = 4) -> dict:
+    name, peers = f"svc-{i:04d}", rng.sample([j for j in range(n) if j != i], min(3, n - 1))
+    out = {"tia-services.yaml": f"service: {name}\nowner: team-{i % 17}\nconfig_keys:\n" + "".join(f"  PEER_{j:04d}_URL: svc-{j:04d}\n" for j in peers)}
+    types = "".join(f'type Item{k} struct {{\n    ID string `json:"id"`\n    Name string `json:"name"`\n}}\n' for k in range(endpoints))
+    handlers = "".join(f'func get{k}(w http.ResponseWriter, r *http.Request) {{ json.NewEncoder(w).Encode(Item{k}{{ID: "1", Name: "n{k}"}}) }}\n' for k in range(endpoints))
+    vars_ = "".join(f'var peer{j:04d}URL = os.Getenv("PEER_{j:04d}_URL")\n' for j in peers)
+    calls = "".join(f'func fetch{j:04d}(id string) {{ http.Get(peer{j:04d}URL + "/svc-{j:04d}/items{rng.randrange(endpoints)}/" + id) }}\n' for j in peers)
+    routes = "".join(f'    http.HandleFunc("GET /{name}/items{k}/{{id}}", get{k})\n' for k in range(endpoints))
+    out["main.go"] = f'package main\nimport ("encoding/json"; "net/http"; "os")\n{vars_}{types}{handlers}{calls}func main() {{\n{routes}}}\n'
+    out.update(_work_files("go", files, lambda f: "package main\n" + "".join(
+        f"func work{f}_{g}(a int, b int) int {{ t := 0; for i := 0; i < a; i++ {{ t += i * b }}; return t }}\n" for g in range(6))))
+    return out
+
+
+def ts_service(i: int, n: int, files: int, rng: random.Random, endpoints: int = 4) -> dict:
+    name, peers = f"svc-{i:04d}", rng.sample([j for j in range(n) if j != i], min(3, n - 1))
+    out = {"tia-services.yaml": f"service: {name}\nowner: team-{i % 17}\nconfig_keys:\n" + "".join(f"  PEER_{j:04d}_URL: svc-{j:04d}\n" for j in peers)}
+    gets = "".join(f"  @Get('items{k}/:id')\n  async get{k}(@Param('id') id: string): Promise<Item{k}> {{ return {{ id, name: 'n{k}' }} as any; }}\n" for k in range(endpoints))
+    calls = "".join(f"  async fetch{j:04d}(id: string) {{ return fetch(`${{process.env.PEER_{j:04d}_URL}}/svc-{j:04d}/items{rng.randrange(endpoints)}/${{id}}`); }}\n" for j in peers)
+    dtos = "".join(f"export class Item{k} {{\n  id: string;\n  name: string;\n}}\n" for k in range(endpoints))
+    out["src/items.controller.ts"] = f"@Controller('{name}')\nexport class ItemsController {{\n{gets}{calls}}}\n{dtos}"
+    out.update(_work_files("ts", files, lambda f: "".join(
+        f"export function work{f}_{g}(a: number, b: number): number {{ let t = 0; for (let i = 0; i < a; i++) {{ t += i * b; }} return t; }}\n" for g in range(6))))
+    return out
+
+
+def cs_service(i: int, n: int, files: int, rng: random.Random, endpoints: int = 4) -> dict:
+    name, peers = f"svc-{i:04d}", rng.sample([j for j in range(n) if j != i], min(3, n - 1))
+    out = {"tia-services.yaml": f"service: {name}\nowner: team-{i % 17}\nconfig_keys:\n" + "".join(f"  peer{j:04d}: svc-{j:04d}\n" for j in peers)}
+    gets = "".join(f'    [HttpGet("items{k}/{{id}}")] public ActionResult<Item{k}> Get{k}(string id) {{ var n = "n{k}"; return null; }}\n' for k in range(endpoints))
+    calls = "".join(f'    public void Fetch{j:04d}(string id) {{ var c = factory.CreateClient("peer{j:04d}"); c.GetAsync("/svc-{j:04d}/items{rng.randrange(endpoints)}/" + id); }}\n' for j in peers)
+    dtos = "".join(f"public class Item{k} {{ public string Id {{ get; set; }} public string Name {{ get; set; }} }}\n" for k in range(endpoints))
+    out["Controllers/ItemsController.cs"] = f'[ApiController]\n[Route("{name}")]\npublic class ItemsController : ControllerBase {{\n{gets}{calls}}}\n{dtos}'
+    out.update(_work_files("cs", files, lambda f: f"public class Work{f:03d} {{\n" + "".join(
+        f"    public int Run{g}(int a, int b) {{ int t = 0; for (int i = 0; i < a; i++) {{ t += i * b; }} return t; }}\n" for g in range(6)) + "}\n"))
+    return out
+
+
+def kt_service(i: int, n: int, files: int, rng: random.Random, endpoints: int = 4) -> dict:
+    name, peers = f"svc-{i:04d}", rng.sample([j for j in range(n) if j != i], min(3, n - 1))
+    out = {"tia-services.yaml": f"service: {name}\nowner: team-{i % 17}\nconfig_keys:\n" + "".join(f"  peer.p{j:04d}.url: svc-{j:04d}\n" for j in peers)}
+    vals = "".join(f'    @Value("\\${{peer.p{j:04d}.url}}") lateinit var peer{j:04d}: String\n' for j in peers)
+    gets = "".join(f'    @GetMapping("/items{k}/{{id}}")\n    fun get{k}(@PathVariable id: String): Item{k} = Item{k}(id, "n{k}")\n' for k in range(endpoints))
+    calls = "".join(f'    fun fetch{j:04d}(id: String): Item0 = rest.getForObject("$peer{j:04d}/svc-{j:04d}/items{rng.randrange(endpoints)}/$id", Item0::class.java)!!\n' for j in peers)
+    dtos = "".join(f"data class Item{k}(val id: String, val name: String)\n" for k in range(endpoints))
+    out["src/main/kotlin/ItemsController.kt"] = f'@RestController\n@RequestMapping("/{name}")\nclass ItemsController(private val rest: RestTemplate) {{\n{vals}{gets}{calls}}}\n{dtos}'
+    out.update(_work_files("kt", files, lambda f: "".join(
+        f"fun work{f}_{g}(a: Int, b: Int): Int {{ var t = 0; for (i in 0 until a) {{ t += i * b }}; return t }}\n" for g in range(6))))
+    return out
+
+
+def with_data_and_events(out: dict, i: int, n: int, rng: random.Random) -> dict:
+    """SQL lineage (a table, a stored procedure, embedded SQL) and Kafka events (produce own topic, consume a peer's) for a Python service."""
+    peer = rng.choice([j for j in range(n) if j != i]) if n > 1 else i
+    out["tia-services.yaml"] += "database: core\n"
+    out["db/migration/V1__init.sql"] = f"CREATE TABLE items_{i:04d} (id text primary key, name text, qty integer);\n"
+    out["db/procedures/post_item.sql"] = (f"CREATE OR REPLACE FUNCTION post_item_{i:04d}(p_id text) RETURNS void AS $$\nBEGIN\n"
+                                          f"  UPDATE items_{i:04d} SET qty = qty + 1 WHERE id = p_id;\nEND;\n$$ LANGUAGE plpgsql;\n")
+    out["store.py"] = (f"def load_{i:04d}(cur, item_id):\n    cur.execute(\"SELECT id, name, qty FROM items_{i:04d} WHERE id = %s\", (item_id,))\n"
+                       f"    return cur.fetchone()\n\n\ndef bump_{i:04d}(cur, item_id):\n    cur.execute(\"{{call post_item_{i:04d}(?)}}\", (item_id,))\n")
+    out["events.py"] = (f"from kafka import KafkaConsumer, KafkaProducer\nproducer = KafkaProducer(bootstrap_servers=\"kafka:9092\")\n\n\n"
+                        f"def publish(item):\n    producer.send(\"svc{i:04d}.items\", item)\n\n\n"
+                        f"def consume():\n    consumer = KafkaConsumer(\"svc{peer:04d}.items\", group_id=\"svc{i:04d}\")\n    for msg in consumer:\n        publish(msg.value)\n")
+    return out
+
+
+LANGS = {"python": py_service, "java": java_service, "go": go_service, "typescript": ts_service, "csharp": cs_service, "kotlin": kt_service}
+MAIN_FILE = {"go": "main.go", "typescript": "src/items.controller.ts", "csharp": "Controllers/ItemsController.cs", "kotlin": "src/main/kotlin/ItemsController.kt"}
+
+
+def generate(root: Path, n: int, files: int, java_share: float, seed: int = 7, polyglot: bool = False) -> dict:
     rng = random.Random(seed)
     meta = {"repos": {}, "lines": 0, "files": 0}
+    order = list(LANGS)
     for i in range(n):
-        lang = "java" if rng.random() < java_share else "python"
-        tree = (java_service if lang == "java" else py_service)(i, n, files, rng)
+        if polyglot:                                       # every language in turn; Python services also carry SQL lineage and Kafka events
+            lang = order[i % len(order)]
+            tree = LANGS[lang](i, n, files, rng)
+            if lang == "python":
+                tree = with_data_and_events(tree, i, n, rng)
+        else:
+            lang = "java" if rng.random() < java_share else "python"
+            tree = (java_service if lang == "java" else py_service)(i, n, files, rng)
         p = root / f"svc-{i:04d}"
         p.mkdir(parents=True)
         for rel, text in tree.items():
@@ -112,7 +193,11 @@ def make_change(meta: dict, name: str, kind: str, rng: random.Random) -> str:
     p = Path(meta["repos"][name]["path"])
     git(p, "checkout", "-q", "-b", f"pr-{kind}", "main")
     lang = meta["repos"][name]["language"]
-    if lang == "python":
+    if lang in MAIN_FILE:                                  # Go, TypeScript, C#, Kotlin: rename the first route, or change a literal it returns
+        f = p / MAIN_FILE[lang]
+        t = f.read_text()
+        f.write_text(t.replace("items0", "items0v2") if kind == "rename" else t.replace("n0", "changed", 1))
+    elif lang == "python":
         f = p / "app.py"
         t = f.read_text()
         t = {"rename": t.replace("/items0/", "/items0v2/"), "impl": t, "field": t.replace("    qty: int\n", "    qty: int\n    extra: str = ''\n", 1)}[kind]
@@ -174,6 +259,7 @@ def main(argv=None) -> int:
     ap.add_argument("--report")
     ap.add_argument("--keep", help="keep the generated data in this directory")
     ap.add_argument("--enterprise", action="store_true", help="switch on the Release 2-4 work: evidence, enforcing policy, owners, notification")
+    ap.add_argument("--polyglot", action="store_true", help="Python, Java, Go, TypeScript, C# and Kotlin services in turn; Python ones with SQL lineage and Kafka events")
     a = ap.parse_args(argv)
 
     import pgserver
@@ -190,9 +276,10 @@ def main(argv=None) -> int:
     work.mkdir(parents=True, exist_ok=True)
     res: dict = {"parameters": vars(a), "machine": {"cpus": os.cpu_count()}}
     t0 = time.perf_counter()
-    meta = generate(work / "landscape", a.repos, a.files, a.java_share)
+    meta = generate(work / "landscape", a.repos, a.files, a.java_share, polyglot=a.polyglot)
     res["landscape"] = {"repositories": a.repos, "files": meta["files"], "lines_of_code": meta["lines"], "generated_in_s": round(time.perf_counter() - t0, 1),
-                        "java_repositories": sum(1 for r in meta["repos"].values() if r["language"] == "java")}
+                        "java_repositories": sum(1 for r in meta["repos"].values() if r["language"] == "java"),
+                        "by_language": {lg: sum(1 for r in meta["repos"].values() if r["language"] == lg) for lg in sorted({r["language"] for r in meta["repos"].values()})}}
     print(f"generated {a.repos} repositories, {meta['files']} files, {meta['lines']} lines in {res['landscape']['generated_in_s']} s", flush=True)
 
     srv = pgserver.get_server(str(work / "pg"), cleanup_mode="stop")

@@ -37,7 +37,7 @@ from .testscope import labels_of, rule_gaps, shared_components
 from .automation import api_inventory, summarise_api, ui_inventory
 from .coverage import assess_test_case, coverage_report, summary_of as summary_of_coverage
 from .graph import build_graph
-from .evidence import (KINDS as EVIDENCE_KINDS, RESULTS, EvidenceError, EvidenceStore, parse_coverage, parse_deployments,
+from .evidence import (KINDS as EVIDENCE_KINDS, RESULTS, EvidenceError, EvidenceStore, parse_builds, parse_coverage, parse_deployments,
                        parse_edges, parse_junit, parse_otlp, parse_test_json)
 from .enrich import deployment_view
 from .temporal import compare as temporal_compare, consumers_of, deployed_at
@@ -68,7 +68,7 @@ from .upload import CHUNK, Session, UploadConfig, UploadTooLarge
 from .report import evidence_view, permalink, redact, redact_snapshot, render_comment
 from .db import Database
 from .access import AccessStore, MODES as ACCESS_MODES
-from .githubapp import AppError, TokenSource, installation_tenant, my_installations
+from .githubapp import AppError, TokenSource, installation_tenant, my_installations, provider_mapped, scm_namespace
 from .ado import AdoConfig, AdoError
 from . import scmhosts
 from . import ado as ado_mod
@@ -771,15 +771,17 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
         if tokens.uses_app:
             def token(r):                                          # one installation token per repository's installation
                 return tokens.token_for(tid(), r.url)
-        elif not token and not any(r.provider in ("gitlab", "bitbucket") for r in svc.list()):
+        elif not token and not any(r.provider in ("gitlab", "bitbucket", "ado") for r in svc.list()):
             raise HTTPException(503, "no GitHub token is configured (TIA_GITHUB_TOKEN, or the tenant's stored github/token)")
         gh = token
 
-        def per_repo(r):                                           # GitLab / Bitbucket repositories use their host's token
+        def per_repo(r):                                           # GitLab / Bitbucket / Azure DevOps repositories use their host's token
             if r.provider in ("gitlab", "bitbucket"):
                 return host_token(r.provider)
+            if r.provider == "ado":
+                return ado_cfg.token or (ctx_for(tid()).secrets.get_text("ado/token") if ctx_for(tid()).secrets else None)
             return gh(r) if callable(gh) else gh
-        res = acc.sync(svc.list(), per_repo, scm_now().github_api_url)
+        res = acc.sync(svc.list(), per_repo, scm_now().github_api_url, ado_cfg=ado_cfg)
         store.audit("repo_access_synced", repositories=len(res), failed=[r["repo"] for r in res if not r["ok"]])
         return {"results": res}
 
@@ -1096,6 +1098,25 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
             ids = [ev_put("deployment", source, d, repo=d["repo"], service=d["service"], environment=d["environment"], revision=d["revision"],
                           observed_to=d["deployed_at"])["id"] for d in deps]
             return {"deployments": len(deps), "ids": ids}
+        return await run_in_threadpool(work)
+
+    @app.post("/api/v1/evidence/builds")
+    async def evidence_builds(request: Request, source: str = "ci"):
+        """Builds (FR-007): [{repo or service, revision, build_id, pipeline, status, artifacts: [{name, version, digest}], finished_at}].
+        A deployment whose artifact matches a build's artifact is linked to that build in later analyses."""
+        text = await evidence_body(request)
+
+        def work():
+            try:
+                items = parse_builds(json.loads(text))
+            except (EvidenceError, json.JSONDecodeError) as e:
+                raise HTTPException(400, f"builds: {e}")
+            for b in items:
+                if b["repo"]:
+                    require_registered(b["repo"])
+            ids = [ev_put("build", source, b, repo=b["repo"], service=b["service"], revision=b["revision"],
+                          observed_to=b["finished_at"])["id"] for b in items]
+            return {"builds": len(items), "ids": ids}
         return await run_in_threadpool(work)
 
     @app.get("/api/v1/usage")
@@ -1727,6 +1748,14 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
         if ev is None:
             response.status_code = 202
             return {"ignored": "event needs no analysis"}
+        # PL-003: the namespace (GitLab top-level group, Bitbucket workspace or project) says whose event this is
+        ns = scm_namespace(provider, ev["full_name"])
+        owner = await run_in_threadpool(installation_tenant, db, ns, provider)
+        if owner:
+            authapi.current_tenant.set(owner)
+        elif await run_in_threadpool(provider_mapped, db, provider):
+            response.status_code = 202                                   # never let an unmapped namespace fall into the default tenant
+            return {"ignored": f"the {provider} namespace is not linked to an organisation of this server"}
         await run_in_threadpool(room)
         repo = match_repo(svc.list(), ev["remote_url"])
         if repo is None:
@@ -1794,10 +1823,12 @@ def create_app(db: Database, tenant_id: str, workspace: str = ".tia-data/repos",
             return {"ignored": "event needs no analysis"}
         if not ado_mod.allowed_host(ado_cfg, ev["base_url"]):
             raise HTTPException(400, "the event's organisation is not on an Azure DevOps host this server will call")
-        if ev.get("collection_id"):
-            owner = await run_in_threadpool(installation_tenant, db, ev["collection_id"], "ado")
-            if owner:
-                authapi.current_tenant.set(owner)                               # the organisation is mapped to a tenant: its events go there
+        owner = await run_in_threadpool(installation_tenant, db, ev["collection_id"], "ado") if ev.get("collection_id") else None
+        if owner:
+            authapi.current_tenant.set(owner)                                   # the organisation is mapped to a tenant: its events go there
+        elif await run_in_threadpool(provider_mapped, db, "ado"):
+            response.status_code = 202                                          # PL-003: never into the default tenant once organisations are mapped
+            return {"ignored": "the Azure DevOps organisation is not linked to an organisation of this server"}
         await run_in_threadpool(room)
         repo = match_repo(svc.list(), ev["remote_url"])
         if repo is None:

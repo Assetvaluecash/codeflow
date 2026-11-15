@@ -98,7 +98,34 @@ In the web UI the tester's view is in two places:
 
 The same information is available from the API and the command line described below.
 
-The report starts with **What to test**: the things you can test without reading code. It has four parts.
+### Which of my test cases to run again (regression selection)
+
+If your written test cases are kept in a repository, the report opens with **Regression-test N of your M test case(s)**. Keep them in
+`testcases/*.csv`, `*.yaml` or `*.json`, the export format of most test-management tools. Each case lands in exactly one list:
+
+| List | Meaning |
+|---|---|
+| **Test case to run again** | the case names an API endpoint the change reaches, or a screen (page route) that calls one. The *why* names the endpoint, the change effect and the chain from the change. |
+| **Not affected by this change** | the case names endpoints or screens the change does not reach. |
+| **Could not be mapped - review by hand** | the case names nothing TIA can match: no *Entry point* column, and no route or plain-language name in its text. It is never treated as unaffected. |
+| **Added or edited by this change** | the tester's new cases for the change itself: not regression. |
+
+For the best matches, fill the *Entry point* column with the HTTP method and route (`POST /payments`) or the screen's route (`/pay`).
+The selection is static: *run again* means the change reaches what the case tests, not that the case will fail.
+
+### Configuration and environment variables
+
+The change may only change a setting, or start reading a new one. TIA reports both under **Configuration**:
+* **A configuration file changes a key.** TIA reads `.env`, `.properties`, YAML (including docker-compose `environment:` and Kubernetes `env:`), INI, TOML and `appsettings`/`config`/`settings` JSON. Every function that reads the key is reached, so its entry points and test cases are selected.
+* **The code starts reading a key.** TIA tells you which key, whether any configuration file in the repository sets it, and which other functions already read it. If no file sets it, the value must come from the environment, so make sure it is set in Dev before you test.
+
+Keys match regardless of case and separators (`payments.base-url` = `PAYMENTS_BASEURL`). Values are never shown, only *added*,
+*removed* or *changed*. Reads are found for Python, Java/Kotlin (`System.getenv`, `@Value`, `getProperty`), JavaScript/TypeScript
+(`process.env`), Go and .NET.
+
+### Entry points
+
+After the regression list, **What to test** shows the things you can test without reading code. It has four parts.
 
 * **Entry points to test**: every API endpoint the change reaches, in the changed service and in every analysed service that calls it. Each row gives:
   * the plain-language name its owners gave it, if any (see below);
@@ -215,7 +242,14 @@ When your pipelines push evidence to TIA (see the [administrator guide](ADMIN-GU
   example a caller outside the analysed repositories), with the environments, time window and versions. A dependency **not** observed is still reported:
   absence of an observation is not proof.
 * **Deployments**: per environment, the revision deployed and whether it is the analysed, the base or the proposed revision. A consumer running an older
-  revision in production is called out on its finding.
+  revision in production is called out on its finding. A **rollback** (an explicit one, or a return to a revision deployed before) is shown with when and to
+  what, and so is the **build that produced the deployed artifact**, flagged when that build was of another revision.
+* **Builds**: the build of the proposed and of the base revision (and of each consumer's analysed revision): status, pipeline and the artifacts it produced.
+  "No build recorded for this revision" means exactly that: it is not assumed to build.
+* **Failure signatures**: test failures grouped across the ingested runs by what failed (the first line of the message with ids, numbers, values and paths
+  removed). Each says how often it occurred, on which revisions, which incidents carry the same signature, and the assessment: *already failing on the base
+  revision* (so not introduced by this change), *new on the proposed revision*, *recurring* or *seen once*. A signature says failures look alike, not that they
+  have one cause.
 
 ## 4e. Contracts and events
 

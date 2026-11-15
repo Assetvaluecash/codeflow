@@ -49,7 +49,8 @@ def resolve(svc: RepoService, p: dict, fetch_pr: bool = True, cfg: Optional[Tena
     else:
         raise IngestError("provide 'head' (branch/sha) or 'pr' (number)")
     base_sha = svc.merge_base(target, svc.resolve(target, p.get("base")), head_sha)
-    scope = list(p.get("repos") or [r.name for r in svc.list()])
+    registry = {r.name: r for r in svc.list()}                   # one query for every repository record, not one per repository
+    scope = list(p.get("repos") or list(registry))
     if target not in scope:
         scope.append(target)
     scope = sorted(set(scope))
@@ -59,10 +60,10 @@ def resolve(svc: RepoService, p: dict, fetch_pr: bool = True, cfg: Optional[Tena
         from concurrent.futures import ThreadPoolExecutor
         # each task runs in a copy of THIS request's context, so the per-request tenant (which `svc` is bound to) follows it into the thread
         with ThreadPoolExecutor(max_workers=min(16, len(others))) as pool:
-            futs = [pool.submit(contextvars.copy_context().run, svc.resolve, n, (p.get("revisions") or {}).get(n)) for n in others]
+            futs = [pool.submit(contextvars.copy_context().run, svc.resolve, n, (p.get("revisions") or {}).get(n), registry.get(n)) for n in others]
             revs = {n: f.result() for n, f in zip(others, futs)}
     else:
-        revs = {n: svc.resolve(n, (p.get("revisions") or {}).get(n)) for n in others}
+        revs = {n: svc.resolve(n, (p.get("revisions") or {}).get(n), registry.get(n)) for n in others}
     return {"target": target, "base": base_sha, "head": head_sha, "scope": scope, "revisions": revs,
             "pr": p.get("pr"), "change_record": p.get("change_record"),
             "max_depth": min(int(p.get("max_depth") or cfg.max_depth), cfg.max_depth),
@@ -162,7 +163,7 @@ def execute(svc: RepoService, store: Store, c: dict, secrets=None) -> dict:
                                   freshness=freshness_of(svc, c["scope"], repos), stale_relationships=stale, config=cfg,
                                   evidence=EvidenceStore(store.db, store.tenant_id).for_analysis(paths, c["target"], c["head"])), store)
     if rep["status"] != "failed":
-        pin_analysis(svc, rep)
+        pin_analysis(svc, rep, repos)
         if cfg.coordination.get("auto_notify") and rep.get("findings"):
             try:
                 notify_owners(store, rep, secrets)
@@ -171,14 +172,14 @@ def execute(svc: RepoService, store: Store, c: dict, secrets=None) -> dict:
     return rep
 
 
-def pin_analysis(svc: RepoService, rep: dict):
+def pin_analysis(svc: RepoService, rep: dict, repos: Optional[dict] = None):
     """Keep every analysed commit (and the proposed head) reachable in TIA's clones."""
     commits = {r["repo"]: [r["commit"]] for r in rep["coverage"]["repositories_analysed"]}
     target = rep["change"]["repository"]
     commits.setdefault(target, []).extend([rep["change"]["base_revision"], rep["change"]["proposed_revision"]])
     for repo, shas in commits.items():
         try:
-            svc.pin_commits(repo, shas)
+            svc.pin_commits(repo, shas, (repos or {}).get(repo))
         except IngestError:
             continue
 

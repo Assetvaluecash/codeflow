@@ -182,6 +182,39 @@ def test_a_gitlab_merge_request_gets_one_note_and_a_status(world):
     assert rep["change"]["pull_request"] == 7 and rep["change"]["proposed_revision"] == world.fx["shas"]["impl"]
 
 
+def test_gitlab_and_bitbucket_events_go_to_the_tenant_owning_the_namespace(world):
+    """PL-003: the namespace (GitLab top-level group, Bitbucket project) routes the event; an unmapped one is ignored, not defaulted."""
+    from test_auth import tenant_named
+    from tia.repos import RepoService
+    from tia.tenants import Tenants
+    tid, name = tenant_named()
+    adm = Tenants(conftest.PG.admin)
+    RepoService(Store(conftest.PG.db, tid), str(world.tmp / "ws-ns"), allow_local=True).register(url=world.bare.as_uri(), name="payments-service")
+    adm.map_installation(name, "gitlab", "Payments/")                         # stored as the namespace: 'payments'
+    adm.map_installation(name, "bitbucket", "PAY")
+
+    def q(t):
+        with conftest.PG.db.tx(t) as c:
+            return c.execute("select count(*) from jobs where tenant_id = %s", (t,)).fetchone()[0]
+    try:
+        assert {(i["provider"], i["installation_id"]) for i in adm.installations(name)} == {("gitlab", "payments"), ("bitbucket", "pay")}
+        before_default = q(world.tenant)
+        r = world.c.post("/api/v1/webhooks/gitlab", content=json.dumps(gl_event(world.bare.as_uri(), world.fx["shas"]["breaking"])).encode(),
+                         headers={"X-Gitlab-Token": SECRET, "Content-Type": "application/json"})
+        assert r.status_code == 202 and r.json().get("pr") == 7 and q(tid) == 1 and q(world.tenant) == before_default
+        ev = gl_event(world.bare.as_uri(), world.fx["shas"]["breaking"])
+        ev["project"]["path_with_namespace"] = "someone-else/payments-service"
+        r = world.c.post("/api/v1/webhooks/gitlab", content=json.dumps(ev).encode(), headers={"X-Gitlab-Token": SECRET, "Content-Type": "application/json"})
+        assert r.status_code == 202 and "not linked" in r.json()["ignored"] and q(world.tenant) == before_default
+        raw = json.dumps(bb_event(world.bare.as_uri(), world.fx["shas"]["breaking"])).encode()
+        sig = "sha256=" + hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
+        r = world.c.post("/api/v1/webhooks/bitbucket", content=raw, headers={"X-Event-Key": "pr:opened", "X-Hub-Signature": sig, "Content-Type": "application/json"})
+        assert r.status_code == 202 and q(tid) == 2 and q(world.tenant) == before_default
+    finally:
+        adm.unmap_installation(name, "gitlab", "Payments")                    # normalised the same way as when mapped
+        adm.unmap_installation(name, "bitbucket", "pay")
+
+
 def test_a_bitbucket_pull_request_gets_one_comment_and_a_build_status(world):
     as_provider(world, "bitbucket")
     ev = bb_event(world.bare.as_uri(), world.fx["shas"]["breaking"])

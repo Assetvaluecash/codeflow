@@ -1,6 +1,7 @@
 # CI for TIA itself (UC1-29). The same steps run locally with:  python "Project TIA/tools/ci.py"
 # Nothing here needs a secret: the tests use an embedded PostgreSQL (pgserver), local git repositories and in-process fakes of GitHub,
-# an OpenID Connect provider and a SAML identity provider. Third-party actions are pinned by tag (see Project TIA/docs/CI.md on SHA pinning).
+# an OpenID Connect provider and a SAML identity provider. Third-party actions are pinned by commit SHA, the release named in a comment
+# (SECURITY T19: a tag can be moved by its owner, a commit cannot); tools/ci.py --only workflow refuses an action pinned any other way.
 name: tia-ci
 
 on:
@@ -29,8 +30,8 @@ jobs:
       matrix:
         python: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -41,7 +42,7 @@ jobs:
           python -m pip install -e ".[api,dev]"
       - name: "Tests (functional gate - every acceptance test, real PostgreSQL with row-level security)"
         run: python -m pytest tests -q -p no:cacheprovider --junitxml=test-results.xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with:
           name: test-results-py${{ matrix.python }}
@@ -52,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Build the image
         run: docker build -f deploy/Dockerfile -t tia:ci .
       - name: The image runs as a non-root user and every command starts
@@ -70,8 +71,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.11"
       - name: Install

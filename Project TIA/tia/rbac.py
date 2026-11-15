@@ -71,6 +71,7 @@ ROUTES = {
     # ingested evidence (FR-022 to FR-029)
     ("POST", "/api/v1/evidence/test-results"): "evidence_write", ("POST", "/api/v1/evidence/coverage"): "evidence_write",
     ("POST", "/api/v1/evidence/runtime"): "evidence_write", ("POST", "/api/v1/evidence/deployments"): "evidence_write",
+    ("POST", "/api/v1/evidence/builds"): "evidence_write",
     ("GET", "/api/v1/impact-analyses/{aid}/policy"): "read", ("POST", "/api/v1/impact-analyses/{aid}/approvals"): "analyze",
     ("POST", "/api/v1/registry/import"): "config_write",
     ("POST", "/api/v1/impact-analyses/{aid}/change-record"): "analyze",

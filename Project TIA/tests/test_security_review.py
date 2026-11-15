@@ -292,6 +292,6 @@ def test_deleting_a_repository_removes_its_access_rows(fx, tmp_path):
 
 
 # ---- M8: hosted repositories without a mirror are not readable by the whole tenant -----------------------------------------------------------
-@pytest.mark.parametrize("provider,mode", [("github", "scm"), ("local", "tenant"), ("upload", "tenant"), ("ado", "restricted"), ("git", "restricted"), ("something-new", "restricted")])
+@pytest.mark.parametrize("provider,mode", [("github", "scm"), ("local", "tenant"), ("upload", "tenant"), ("ado", "scm"), ("git", "restricted"), ("something-new", "restricted")])
 def test_default_access_fails_closed_for_hosts_without_a_mirror(provider, mode):
     assert default_mode(provider) == mode

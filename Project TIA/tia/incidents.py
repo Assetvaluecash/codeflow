@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from .evidence import failure_signature
 from .testscope import dependencies
 
 ASSOCIATIONS = ("directly_recorded", "time_correlated", "dependency_derived", "manually_validated")
@@ -31,6 +32,10 @@ def parse_incident(d: dict) -> dict:
            "environment": (d.get("environment") or "production").lower(), "started_at": _ts(d["started_at"]).isoformat(timespec="seconds"),
            "ended_at": _ts(d["ended_at"]).isoformat(timespec="seconds") if d.get("ended_at") else None, "severity": d.get("severity"),
            "changes": [c for c in (d.get("changes") or []) if isinstance(c, dict)][:50]}
+    err = d.get("error") or d.get("error_message")
+    if err:
+        out["error"] = str(err)[:400]
+        out["failure_signature"] = failure_signature(err)            # FR-007: the same failure seen in a test run links to this incident
     return out
 
 

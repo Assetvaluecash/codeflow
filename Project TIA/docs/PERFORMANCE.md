@@ -32,7 +32,39 @@ pins evidence, enriches tests, resolves deployments and runtime edges, and evalu
 | Determinism | identical | 5 of 5 | yes |
 
 The generated changes rarely produce material findings (median 0 per analysis), so team notification was seldom triggered in the timed path.
-SQL lineage, event lineage and the new language adapters are not part of the generated landscape.
+SQL lineage, event lineage and the new language adapters are not part of this landscape; see the polyglot run below.
+
+## Polyglot, with the Release 2-4 work switched on (2026-11-12)
+
+`python tools/benchmark.py --repos 500 --files 40 --prs 40 --burst 50 --workers 8 --enterprise --polyglot`: Python, Java, Go, TypeScript, C# and
+Kotlin services in turn (83-84 of each); the Python services also carry a table, a stored procedure, embedded SQL and Kafka producers and consumers.
+Landscape: **500 repositories, 19 672 files, 269 659 lines**. Same evidence, policy, owners and notification as the run above.
+
+| PRD 12 requirement | Target | Measured | Met |
+|---|---|---|---|
+| Incremental PR analysis | P95 <= 120 s | P50 5.7 s, **P95 8.4 s**, max 8.8 s (39 analyses) | yes |
+| Interactive report | P95 <= 5 s | **P95 0.12 s** (200 requests) | yes |
+| Concurrent analyses / PR-comment latency | >= 50 concurrent; P95 <= 180 s | 50 jobs, 8 workers: all completed, P95 188.2 s, last after 194.9 s | no (8 s over; fixed, see below) |
+| Initial scan | <= 4 h / 20 M LOC | 0.27 M LOC in **379 s** (register 125 s + extract and graph 254 s); peak 252 MB | not demonstrated at 20 M LOC |
+| Determinism | identical | 5 of 5 | yes |
+
+That first run missed the burst target by 8 seconds. Profiling one job showed where the time went: every analysis re-read and re-decoded the
+cached extract of all 500 repositories and the stored graph from the database, looked up each repository record separately (500 queries), and,
+for cloned repositories, started a `git` process per repository to pin commits that were already pinned. Fixes: an in-process cache of extracts
+and graph versions (`store.ROW_CACHE`, bounded by `TIA_CACHE_MB`; every use is validated against the row's current version, so a rewritten row is
+never served stale, and each reader gets its own copy), one query for the repository records, and pins skipped when they already exist.
+Re-run on the same landscape:
+
+| PRD 12 requirement | Target | Measured after the fixes | Met |
+|---|---|---|---|
+| Incremental PR analysis | P95 <= 120 s | P50 4.3 s, **P95 6.0 s**, max 6.2 s (39 analyses) | yes |
+| Interactive report | P95 <= 5 s | **P95 0.13 s** (200 requests) | yes |
+| Concurrent analyses / PR-comment latency | >= 50 concurrent; P95 <= 180 s | **50 jobs, 8 workers: all completed, P95 139.8 s, last after 145.5 s** | **yes** |
+| Initial scan | <= 4 h / 20 M LOC | 0.27 M LOC in **396 s**; peak 253 MB | not demonstrated at 20 M LOC |
+| Determinism | identical | 5 of 5 | yes |
+
+Before the run, a small polyglot landscape resolved **54 of 54** outbound calls across all six languages; getting there exposed and fixed three
+extractor gaps (a Python base URL held in a local variable; C# client variables leaking across methods; C# URLs built by concatenation).
 
 ## What this does and does not show
 

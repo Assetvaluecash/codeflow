@@ -282,7 +282,7 @@ class TestEnforcement:
 # =====================================================================================================================================
 class TestGoverning:
     def test_default_modes(self):
-        assert default_mode("github") == "scm" and default_mode("local") == "tenant" and default_mode("upload") == "tenant" and default_mode("git") == "restricted" and default_mode("ado") == "restricted"
+        assert default_mode("github") == "scm" and default_mode("local") == "tenant" and default_mode("upload") == "tenant" and default_mode("git") == "restricted" and default_mode("ado") == "scm"
 
     def test_tenant_mode_opens_a_repository_to_every_member(self, world):
         world.sync()

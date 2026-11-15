@@ -332,14 +332,18 @@ class RepoService:
                 last = e
         raise IngestError(f"could not fetch pull request {number}: {last}")
 
-    def pin_commits(self, name: str, shas) -> int:
+    def pin_commits(self, name: str, shas, repo: Optional[Repo] = None) -> int:
         """Keep analysed commits reachable (refs/tia/pin/<sha>) so evidence survives force-pushes and garbage collection.
-        Only TIA's own clones are touched; a local repository is read in place and never modified."""
-        repo = self.get(name)
+        Only TIA's own clones are touched; a local repository is read in place and never modified. A commit already pinned costs no git
+        process (most repositories are at the same commit analysis after analysis)."""
+        repo = repo or self.get(name)
         if repo.kind == "local":
             return 0
+        gd = gitutil._git_dir(repo.path)
         n = 0
         for sha in sorted(set(shas)):
+            if gd is not None and gitutil._read_ref(gd, f"refs/tia/pin/{sha}") == sha:
+                continue
             try:
                 gitutil._git(repo.path, "update-ref", f"refs/tia/pin/{sha}", sha)
                 n += 1
@@ -347,8 +351,8 @@ class RepoService:
                 continue
         return n
 
-    def resolve(self, name: str, ref: Optional[str]) -> str:
-        repo = self.get(name)
+    def resolve(self, name: str, ref: Optional[str], repo: Optional[Repo] = None) -> str:
+        repo = repo or self.get(name)
         for cand in ([ref] if ref else [repo.default_branch]) + ([f"refs/heads/{ref}", f"origin/{ref}"] if ref else []):
             try:
                 return gitutil.resolve_rev(repo.path, cand)

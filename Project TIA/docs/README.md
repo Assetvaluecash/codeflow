@@ -8,115 +8,47 @@ This folder contains the **Architecture Diagram** and **Interactive Codebase Min
 
 | Document | Format | Description |
 | :--- | :--- | :--- |
-| 🌐 [**Interactive Architecture Diagram**](architecture-diagram.html) | HTML (Mermaid.js + Interactive Controls) | Layer-by-layer breakdown: API, Services, AST Extractors, Graph Store, Analysis & Impact Engine, Database & Webhooks. |
-| 🧠 [**Interactive Codebase Mind Map**](mind-map.html) | HTML (Interactive Tabs & Module Cards) | Conceptual mind map covering core domains, lifecycle pipelines, data models, and module reference cards. |
+| [**Architecture as built**](ARCHITECTURE-AS-BUILT.md) ([HTML, open in a browser](ARCHITECTURE-AS-BUILT.html)) | Markdown & HTML (generated from the code) | The system as it is coded: the system picture, the 10 layers with every module in them, the layer rule (checked against the real imports on every test run), how work flows, every database table and its tenant isolation, deployment, and where the build differs from the design. |
+| 🌐 [Interactive Architecture Diagram](architecture-diagram.html) · 🧠 [Codebase Mind Map](mind-map.html) | HTML (needs internet for Mermaid) | Early pictures from 30 Oct 2026, covering about 30 of today's 97 modules. Right as far as they go, but incomplete; use the as-built architecture above. |
 | 📄 [**PRD (Product Requirements Document)**](PRD.md) ([PDF](PRD.pdf)) | Markdown & PDF | Complete product specification, user journeys, release phases, and acceptance criteria. |
 | 🏛️ [**Architecture Specification**](ARCHITECTURE.md) ([PDF](ARCHITECTURE.pdf)) | Markdown & PDF | High-level system design, multi-tenant isolation, data flows, and component models. |
 | ⚙️ [**Technical Framework**](TECHNICAL-FRAMEWORK.md) ([PDF](TECHNICAL-FRAMEWORK.pdf)) | Markdown & PDF | Technical implementation framework, algorithm specifications, and integration requirements. |
+| [**Customer demo walkthrough**](DEMO-WALKTHROUGH.md) ([HTML, open in a browser](DEMO-WALKTHROUGH.html)) · [Demo data](DEMO-DATA.md) | Markdown & HTML | A 100-minute end-to-end technical demo: the code walkthrough layer by layer with real records, the UI script, agents and operations, and the hard questions. Demo data lists exact inputs and the numbers to expect. |
 | [Administrator guide](ADMIN-GUIDE.md) · [User guide](USER-GUIDE.md) | Markdown | Installing, configuring and operating TIA; using its reports and views. |
 | [API reference](API.md) · [OpenAPI](openapi.json) · [Python client](../sdk/python/tia_client/__init__.py) | Markdown, JSON | Every route with its permission (generated). |
 | [Operations: HA, backup, DR](OPERATIONS.md) · [Compliance mapping](COMPLIANCE.md) · [Security](SECURITY.md) | Markdown | RPO/RTO runbook, SOC 2 / ISO 27001 control mapping, threat model. |
 | [Language adapter SDK](ADAPTER-SDK.md) · [Graph store decision](GRAPH-STORE.md) · [Performance](PERFORMANCE.md) · [Release gates](RELEASE-GATES.md) | Markdown | Adding languages; why PostgreSQL holds the graph; benchmark results; gate assessment. |
 
-> **Tip:** You can double-click either `.html` file in Windows Explorer or open them in any browser (Chrome, Edge, etc.) for full pan/zoom, interactive filtering, and styled Mermaid visualisations.
+> **Tip:** double-click any `.html` file in Windows Explorer, or open it in any browser. The as-built architecture and the demo walkthrough work offline.
 
 ---
 
 ## 🏛️ High-Level System Architecture
 
+The full picture, with every module, is [ARCHITECTURE-AS-BUILT](ARCHITECTURE-AS-BUILT.html). In short: ten layers, and a module may use only its own layer or the ones below it.
+
 ```mermaid
 flowchart TB
-    subgraph Clients["Entry Points & Clients"]
-        CLI["CLI Tool (cli.py)"]
-        WEB["Web UI & Dashboard (web/)"]
-        CI["CI/CD & GitHub Webhooks (webhooks.py, github.py)"]
-    end
-
-    subgraph API["HTTP & Routing Layer"]
-        SRV["Flask Server (server.py)"]
-        ROUTES["REST API Routes (api.py)"]
-        UP["File Uploads / Repos (upload.py, repos.py)"]
-    end
-
-    subgraph Core["Core Business Services"]
-        SVC["Analysis Service (analysis_service.py)"]
-        IMP["Impact Analysis Engine (impact.py)"]
-        SEV["Severity Engine (severity.py)"]
-        REP["Report Generator (report.py)"]
-        JOB["Job Queue / Workers (jobs.py, worker.py)"]
-    end
-
-    subgraph Extractors["AST & Schema Extraction"]
-        EX_PY["Python AST Extractor (extract_python.py)"]
-        EX_JAVA["Java Parser (extract_java.py)"]
-        EX_DATA["Data/SQL Extractor (extract_data.py)"]
-        EX_ORM["ORM Mapping Extractor (extract_orm.py)"]
-        EX_BASE["Extraction Pipeline (extraction.py)"]
-        GIT["Git Diffs & Blame (gitutil.py)"]
-    end
-
-    subgraph Storage["Data, Graph & Persistence Layer"]
-        GRAPH["Code Dependency Graph (graph.py, graphview.py)"]
-        GSTORE["Graph Store (graphstore.py, store.py)"]
-        DB["Relational Database & Models (db.py, models.py, migrate.py)"]
-        CONTRACTS["Data Contracts & Types (contracts.py, data.py, relationships.py)"]
-    end
-
-    Clients --> API
-    API --> Core
-    Core --> Extractors
-    Core --> Storage
-    Extractors --> Storage
-```
-
----
-
-## 🧠 Codebase Mind Map (Quick Reference)
-
-```mermaid
-mindmap
-  root((TIA Codebase))
-    Entry Points & Web
-      cli.py["CLI: Run scans, query impacts"]
-      server.py["Flask app factory & middleware"]
-      api.py["Endpoints: Upload, scan, impact, jobs"]
-      web/["HTML templates & static assets"]
-      webhooks.py["GitHub webhook payload handling"]
-    Extraction & Ingestion
-      extraction.py["Multi-language dispatcher"]
-      extract_python.py["Python AST: classes, methods, calls"]
-      extract_java.py["Java AST: classes, methods, annotations"]
-      extract_data.py["SQL queries, table lineage"]
-      extract_orm.py["ORM models (SQLAlchemy, Hibernate)"]
-      gitutil.py["Diff parsing & commit range inspection"]
-      repos.py["Repo cloning & filesystem management"]
-    Graph & Models
-      graph.py["In-memory directed dependency graph"]
-      graphview.py["Graph filtering, subgraphs, views"]
-      graphstore.py["Graph persistence adapter"]
-      models.py["SQLAlchemy models: Scan, Impact, Commit"]
-      contracts.py["Schema contracts & DTO validation"]
-      relationships.py["Edge types: calls, imports, mutates"]
-    Analysis & Intelligence
-      analysis_service.py["Orchestrates full scan pipeline"]
-      impact.py["Graph traversal, reachability & blast radius"]
-      severity.py["Calculates risk score & severity rating"]
-      report.py["Formats JSON, Markdown, HTML test reports"]
-      resolve.py["Fuzzy method and module resolution"]
-    Async & Infrastructure
-      jobs.py["Job tracking & status state machine"]
-      worker.py["Background task execution loop"]
-      db.py["Database engine & session management"]
-      migrate.py["Schema migrations runner"]
+    E["1 · Entry points: server (FastAPI on uvicorn), worker, cli, migrate"]
+    S["2 · API, web UI, agents: api, authapi (OIDC, SAML), rbac route table, mcp, kfadapter, reportpage"]
+    O["3 · Orchestration and jobs: analysis_service, jobs (PostgreSQL queue), repos, upload"]
+    C["4 · Connectors: webhooks, githubapp, publish, scmhosts (GitLab, Bitbucket), ado, itsm, access"]
+    I["5 · Impact engine and tester views: impact, enrich, evidence, report, testscope, coverage, automation, testerpack, graphquery"]
+    G["6 · Graph and resolution: graph, resolve, graphstore, data"]
+    X["7 · Extraction: extract_python, extract_java, extract_data, extract_ui, lang/ (C#, Go, Kotlin, TypeScript)"]
+    T["8 · Tenancy and storage: db (tenant-bound transactions), store, tenants, tenantconfig, identity, secretstore, kms"]
+    R["9 · Rules: severity, policy, contracts, events, coordination"]
+    F["10 · Foundations: models, gitutil (read-only), scrub, netsafe, airgap, metrics, tracing"]
+    E --> S --> O --> C --> I --> G --> X --> T --> R --> F
 ```
 
 ---
 
 ## ⚡ How It Works: End-to-End Pipeline
 
-1. **Ingestion & Git Diff:** A commit or PR arrives via `webhooks.py` or the CLI (`cli.py`). `gitutil.py` inspects the diff to determine modified files, lines, and methods.
-2. **Extraction:** Specialized extractors (`extract_python.py`, `extract_java.py`, `extract_data.py`, `extract_orm.py`) parse the codebases into unified nodes (classes, functions, endpoints, tables, queries) and edges (calls, imports, reads, writes).
-3. **Graph Construction:** `graph.py` and `relationships.py` link callers, callees, data tables, and test cases into a queryable dependency graph.
-4. **Impact Analysis:** `impact.py` performs reverse reachability traversals starting from changed nodes to identify all affected tests, APIs, and downstream consumers.
-5. **Severity & Scoring:** `severity.py` calculates risk metrics based on change magnitude, critical paths, and test coverage.
-6. **Reporting & Feedback:** `report.py` emits targeted test sets to run in CI, saving test execution time.
+1. **Request:** a person (web UI or REST), a pull-request webhook (`webhooks.py`, `githubapp.py`, `scmhosts.py`, `ado.py`) or the CLI (`cli.py`) asks for an analysis. `authapi.py` checks the caller against the `rbac.py` route table (an unlisted route is refused) and binds the work to one tenant; webhooks are queued (`jobs.py`) and run by `worker.py`.
+2. **Resolve:** `analysis_service.py` turns branch names into exact commits (`gitutil.py`, read-only git) and caps the limits with the tenant's configuration (`tenantconfig.py`).
+3. **Extraction:** `extraction.py` parses only files whose git blob it has not seen: `extract_python.py` (`ast`), `extract_java.py` and `lang/` (tree-sitter), `extract_data.py` and `extract_orm.py` (tables and migrations), `extract_ui.py` (pages and elements). Code is read as bytes; it is never imported or run.
+4. **Graph:** `graph.py` and `resolve.py` connect the facts across repositories into one typed graph; every edge carries how it was resolved and its evidence. `graphstore.py` records the version.
+5. **Impact:** `impact.py` diffs contracts, data and functions, walks the graph within explicit bounds, adds ingested CI, coverage, deployment and runtime evidence (`enrich.py`), and scores each finding with the fixed rule table in `severity.py` (no AI). `policy.py` evaluates release rules.
+6. **Report:** `report.py` renders it with the tester views (`testscope.py`, `coverage.py`, `automation.py`, `testerpack.py`); `store.py` saves it with an evidence snapshot id and an audit hash-chain entry; `publish.py` updates the PR comment and check run. The same inputs always give the same report (`POST .../reproduce` proves it).

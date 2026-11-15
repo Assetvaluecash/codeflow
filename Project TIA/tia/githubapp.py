@@ -216,6 +216,17 @@ def installation_tenant(db, installation_id, provider: str = "github") -> Option
     return str(r) if r else None
 
 
+def provider_mapped(db, provider: str) -> bool:
+    """Whether the operator has mapped any namespace of this provider to a tenant (PL-003). Says nothing about who owns which."""
+    with db.plain() as c:
+        return bool(c.execute("select tia_provider_mapped(%s)", (provider,)).fetchone()[0])
+
+
+def scm_namespace(provider: str, full_name: str) -> str:
+    """The part of a repository's full name a tenant owns: a GitLab top-level group, a Bitbucket workspace or Data Center project key."""
+    return (full_name or "").split("/")[0].strip().lower()
+
+
 class TokenSource:
     """Which GitHub credential to use for a repository of a tenant: an installation token when the App is configured (and the
     installation belongs to this tenant), otherwise the interim personal/stored token."""

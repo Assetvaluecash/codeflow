@@ -10,8 +10,10 @@ policy is never blocked), plus a pull-request STATUS in the "tia/impact-analysis
 never a gate. Calls carry the organisation's personal access token (TIA_ADO_TOKEN, or the tenant's stored secret `ado/token`) and are made
 only to Azure DevOps hosts (dev.azure.com, *.visualstudio.com) or the host configured in TIA_ADO_API_URL (Azure DevOps Server).
 
-Not built: permission mirroring from Azure DevOps (repositories from it are `restricted` until an administrator grants them), and
-organisation-to-tenant routing beyond the operator's installation mapping (`python -m tia.tenants map-installation <tenant> ado <collection id>`).
+Permission mirror (PL-002, FR-039): who may read a repository, from the Git Repositories security namespace - the access control lists at
+all-repositories, project and repository level (the most specific explicit setting wins; a deny beats an allow), groups expanded to their
+users through the identities service. Users are matched to TIA users by their Azure DevOps account (user principal name / e-mail).
+Organisations are routed to tenants by the operator's installation mapping (`python -m tia.tenants map-installation <tenant> ado <collection id>`).
 """
 from __future__ import annotations
 
@@ -76,7 +78,7 @@ def allowed_host(cfg: AdoConfig, url: str) -> bool:
     host = (u.hostname or "").lower()
     if cfg.api_url and host == (urllib.parse.urlsplit(cfg.api_url).hostname or "").lower():
         return u.scheme in ("https", "http")
-    return u.scheme == "https" and (host == "dev.azure.com" or host.endswith(".visualstudio.com"))
+    return u.scheme == "https" and (host in ("dev.azure.com", "vssps.dev.azure.com") or host.endswith(".visualstudio.com"))
 
 
 def parse_pull_request_event(payload: dict) -> Optional[dict]:
@@ -161,6 +163,103 @@ def publish(cfg: AdoConfig, token: str, report: dict, view: dict, ev: dict, publ
     except AdoError as e:
         out["status"] = {"skipped": str(e)}
     return out
+
+
+# ---- permission mirror -------------------------------------------------------------------------------------------------------------
+GIT_NAMESPACE = "2e9eb7ed-3c0a-47d4-87c1-0ffdd275fd87"         # the "Git Repositories" security namespace
+READ, CONTRIBUTE, MANAGE = 2, 4, 8192                            # GenericRead, GenericContribute, ManagePermissions
+BITS = (READ, CONTRIBUTE, MANAGE)
+
+
+def identity_base(base_url: str) -> str:
+    """Where the identities service of an organisation lives: vssps for the cloud, the collection itself for Azure DevOps Server."""
+    u = urllib.parse.urlsplit(base_url)
+    host = (u.hostname or "").lower()
+    if host == "dev.azure.com":
+        return f"https://vssps.dev.azure.com{u.path.rstrip('/')}"
+    if host.endswith(".visualstudio.com") and ".vssps." not in host:
+        return f"https://{host.split('.')[0]}.vssps.visualstudio.com"
+    return base_url.rstrip("/")
+
+
+def _effective(cfg: AdoConfig, token: str, base_url: str, project_id: str, repo_id: str) -> dict:
+    """descriptor -> {bit: 'allow' | 'deny'} after inheritance: all repositories, then the project, then the repository; a level with an
+    explicit setting for a bit replaces what it inherited, and a level that does not inherit starts from nothing."""
+    state: dict = {}
+    for tok in ("repoV2", f"repoV2/{project_id}", f"repoV2/{project_id}/{repo_id}"):
+        d = _call(cfg, "GET", f"{base_url}/_apis/accesscontrollists/{GIT_NAMESPACE}?token={urllib.parse.quote(tok, safe='')}&{API}", token) or {}
+        for acl in d.get("value") or []:
+            if acl.get("token") != tok:
+                continue
+            if acl.get("inheritPermissions") is False:
+                state = {}
+            for desc, ace in (acl.get("acesDictionary") or {}).items():
+                allow, deny = int(ace.get("allow") or 0), int(ace.get("deny") or 0)
+                cur = state.setdefault(desc, {})
+                for bit in BITS:
+                    if deny & bit:
+                        cur[bit] = "deny"
+                    elif allow & bit:
+                        cur[bit] = "allow"
+    return state
+
+
+def _identities(cfg: AdoConfig, token: str, base_url: str, descriptors: list) -> list:
+    out = []
+    ib = identity_base(base_url)
+    for i in range(0, len(descriptors), 50):
+        chunk = ",".join(descriptors[i:i + 50])
+        d = _call(cfg, "GET", f"{ib}/_apis/identities?descriptors={urllib.parse.quote(chunk, safe=',')}&queryMembership=Expanded&{API}", token) or {}
+        out += [x for x in (d.get("value") or []) if x]
+    return out
+
+
+def _login(identity: dict) -> Optional[str]:
+    props = identity.get("properties") or {}
+    acct = (props.get("Account") or {}).get("$value") or (props.get("Mail") or {}).get("$value")
+    return str(acct).lower() if acct else None
+
+
+def list_readers(cfg: AdoConfig, token: str, base_url: str, project: str, repository: str) -> list:
+    """[(login, permission in GitHub's vocabulary: pull | push | admin)] of everyone Azure DevOps lets read the repository's code."""
+    repo = _call(cfg, "GET", f"{base_url}/{urllib.parse.quote(project)}/_apis/git/repositories/{urllib.parse.quote(repository)}?{API}", token)
+    if not repo or not repo.get("id") or not (repo.get("project") or {}).get("id"):
+        raise AdoError(f"repository {project}/{repository} was not found", permanent=True)
+    state = _effective(cfg, token, base_url, repo["project"]["id"], repo["id"])
+    if not state:
+        return []
+    ids = _identities(cfg, token, base_url, sorted(state))
+    by_desc = {x.get("descriptor"): x for x in ids}
+    # every user and the descriptors that apply to them: their own, and every group (membership already expanded) they belong to
+    applies: dict = {}
+    pending_users = set()
+    for desc, ident in by_desc.items():
+        if ident.get("isContainer"):
+            for m in ident.get("members") or []:
+                applies.setdefault(m, set()).add(desc)
+                pending_users.add(m)
+        else:
+            applies.setdefault(desc, set()).add(desc)
+    unknown = sorted(m for m in pending_users if m not in by_desc)
+    for x in _identities(cfg, token, base_url, unknown) if unknown else []:
+        by_desc[x.get("descriptor")] = x
+    out = {}
+    for user, descs in applies.items():
+        ident = by_desc.get(user)
+        if not ident or ident.get("isContainer") or ident.get("isActive") is False:
+            continue
+        login = _login(ident)
+        if not login:
+            continue
+        granted = set()
+        for bit in BITS:
+            seen = [state.get(d, {}).get(bit) for d in descs]
+            if "allow" in seen and "deny" not in seen:                 # a deny on any of the user's identities wins
+                granted.add(bit)
+        if READ not in granted:
+            continue
+        out[login] = "admin" if MANAGE in granted else "push" if CONTRIBUTE in granted else "pull"
+    return sorted(out.items())
 
 
 def parse_remote(url: str) -> Optional[dict]:

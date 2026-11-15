@@ -28,7 +28,8 @@ TOOLS = [
                                                       "revision": {"type": "string"}}, "required": ["repository"], "additionalProperties": False},
      "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "get_test_scope", "title": "What to test for an analysis",
-     "description": "Entry points to test, rule gaps, consistency checks, recommended tests and test gaps of one analysis.",
+     "description": "Which written test cases to regression-test and why, entry points to test, configuration and environment-variable "
+                    "checks, rule gaps, consistency checks, recommended tests and test gaps of one analysis.",
      "inputSchema": {"type": "object", "properties": {"analysis_id": {"type": "string"}}, "required": ["analysis_id"], "additionalProperties": False},
      "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "get_policy_outcome", "title": "Release-policy outcome of an analysis",

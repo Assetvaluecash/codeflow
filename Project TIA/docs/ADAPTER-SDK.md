@@ -30,7 +30,9 @@ Paths are written as the framework writes them (`/orders/{id}`, `/orders/:id`); 
 | `kotlin` | kt-1 | `.kt`, `.kts` | Spring annotations, `@Value("${key}")` bases, RestTemplate, WebClient, Bean Validation, MockMvc |
 | `typescript` | ts-1 | `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs` | Express, NestJS (`@UseGuards` as auth), fetch, axios, `process.env.X` bases, class-validator DTOs, interfaces, jest/mocha + supertest |
 
-Python and Java are built into the core. Front-end files (Angular, React, Vue) are additionally read for pages and form rules.
+Python and Java are built into the core. Python routes come from FastAPI, Flask and Django / Django REST framework (url modules with `include()`, routers
+and viewsets, `@action`, `@api_view`, `APIView` and generic views, plain Django views; serializers are read as schemas); a route that cannot be resolved is
+reported as a route unknown. Front-end files (Angular, React, Vue) are additionally read for pages and form rules.
 Generated and vendored files (`node_modules`, `vendor`, `bin`, `obj`, `dist`, `build`, `*.d.ts`, `*.pb.go`, `*.g.cs`, minified bundles) are skipped.
 
 ## 3. Writing a third-party adapter

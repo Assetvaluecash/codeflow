@@ -32,7 +32,11 @@ from .scrub import scrub_json
 from .tenantconfig import DEFAULT, TenantConfig, diff as config_diff
 from .store import Store
 from .testscope import classify_function, test_scope
-from .enrich import TestEvidence, apply_runtime, deployment_limitations, deployment_view, enrich_tests, runtime_of
+from . import configkeys
+from . import regression
+from .testcases import is_testcase_file
+from .enrich import (TestEvidence, apply_runtime, build_view, deployment_limitations, deployment_view, enrich_tests, failure_signatures,
+                     runtime_of)
 from . import communities as communities_mod
 from . import diagram as diagram_mod
 from . import structure as structure_mod
@@ -203,7 +207,8 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     changed_components, seeds = [], []     # seeds: dict(node, kind, breaking, label)
     only_tests = True
     for status, path in changed_files:
-        is_test = path in test_files or "/tests/" in "/" + path or path.rsplit("/", 1)[-1].startswith("test_")
+        is_test = (path in test_files or "/tests/" in "/" + path or path.rsplit("/", 1)[-1].startswith("test_")
+                   or is_testcase_file(path))
         if not is_test:
             only_tests = False
     for c in contract_changes:
@@ -274,11 +279,39 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     for fid in added_fns:
         changed_components.append({"type": "function", "name": fid, "change": "added", "effect": "compatible_change",
                                    "detail": f"{head_fn[fid].qualname}: added"})
+    # configuration and environment variables: a changed key reaches every function that reads it; a new read is told to the tester
+    config_error = None
+    try:
+        cfg_change = configkeys.analyse(tpath, base_sha, head_sha, changed_files, base_ex.functions, head_ex.functions, excl)
+    except gitutil.GitError as e:
+        cfg_change, config_error = {"key_changes": [], "read_changes": [], "parsed_files": [], "unparsed_files": []}, str(e)[:200]
+    covered_files |= set(cfg_change["parsed_files"])
+    config_components = []
+    for c in cfg_change["key_changes"]:
+        readers = [r for r in c["readers"] if r["function"]]
+        comp = {"type": "config_key", "name": c["key"], "change": c["change"], "effect": "behaviour_change" if readers else "unknown",
+                "detail": f"configuration {c['key']} {configkeys.CHANGE_TEXT[c['change']]} {c['file']}"
+                          + (f"; read by {len(readers)} function(s)" if readers else "; no analysed code reads it"), "file": c["file"]}
+        config_components.append(comp)
+        for r in readers:
+            seeds.append({"node": r["function"], "kind": "nonbreaking", "breaking": False, "effect": "behaviour_change",
+                          "label": f"configuration {c['key']} {configkeys.CHANGE_TEXT[c['change']]} {c['file']}; "
+                                   f"{r['function'].split('::')[-1]} reads it"})
+    for r in cfg_change["read_changes"]:
+        config_components.append({"type": "config_key", "name": r["key"], "change": r["change"],
+                                  "effect": "behaviour_change" if r["change"] == "newly_read" else "compatible_change",
+                                  "detail": f"{(r['function'] or r['file']).split('::')[-1]} "
+                                            + ("now reads" if r["change"] == "newly_read" else "no longer reads") + f" configuration {r['key']}"
+                                            + ("" if r["change"] != "newly_read" else f" (set in {', '.join(r['set_in'][:2])})" if r["set_in"]
+                                               else " (not set in any configuration file of the repository)"),
+                                  "file": r["file"], "line": r["line"]})
+    changed_components += config_components
     file_level = []
     for status, path in changed_files:
         if path in covered_files:
             continue
-        is_test = path in test_files or "/tests/" in "/" + path or path.rsplit("/", 1)[-1].startswith("test_")
+        is_test = (path in test_files or "/tests/" in "/" + path or path.rsplit("/", 1)[-1].startswith("test_")
+                   or is_testcase_file(path))
         if is_test or path.endswith((".md", ".txt")):
             continue
         ctype = "config" if path.endswith((".yaml", ".yml", ".toml", ".cfg", ".json", ".ini")) else "file"
@@ -298,7 +331,7 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
         change_type = "event_change"
     elif data_changes:
         change_type = "data_change"
-    elif file_level:
+    elif file_level or (config_components and not fn_changes and not added_fns):
         change_type = "config_or_file_change"
     else:
         change_type = "implementation_change"
@@ -632,11 +665,15 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     for i, f in enumerate(findings, 1):
         f["id"] = f"F{i}"
     scope = test_scope(g, extracts, reached, seeds, tests_for, _path_status, req.target, head_ex, is_stale)
+    scope["config_checks"] = configkeys.checks(cfg_change, g, scope["entry_points"] + scope["code_without_entry_point"], req.target)
+    scope["regression"] = regression.select(scope, extracts, req.target, head_ex.manual_tests)
     for f in findings:
         rt = runtime_of(f, runtime_labels)
         if rt:
             f["runtime"] = rt
-    deploy = (deployment_view(extracts, ev.get("deployment", []), {r: e.commit for r, e in extracts.items()}, req.target, base_sha, head_sha)
+    analysed_revs = {r: e.commit for r, e in extracts.items()}
+    builds = build_view(extracts, ev.get("build", []), analysed_revs, req.target, base_sha, head_sha) if ev.get("build") else None
+    deploy = (deployment_view(extracts, ev.get("deployment", []), analysed_revs, req.target, base_sha, head_sha, builds)
               if ev.get("deployment") else None)
     if deploy:
         for f in findings:
@@ -735,6 +772,16 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
                          "reason": f"{len(overridden)} finding(s) have a severity set by this tenant's configuration ({cfg.id}) instead of the "
                                    "default rules; each records the default it replaced.",
                          "items": [{"rule": r, "count": n} for r, n in sorted(by_rule.items())]})
+    if config_error:
+        unknowns.append({"area": "configuration_not_analysed", "affects_confidence": True,
+                         "reason": f"Configuration keys and environment-variable reads could not be compared ({config_error}): functions that "
+                                   "read a changed setting may be missing from the impact."})
+    unset = sorted({r["key"] for r in cfg_change["read_changes"] if r["change"] == "newly_read" and not r["set_in"]})
+    if unset:
+        unknowns.append({"area": "configuration_outside_repository", "affects_confidence": False, "count": len(unset),
+                         "reason": "The change reads configuration that no file in the repository sets (" + ", ".join(unset[:10]) + "). Its value "
+                                   "comes from the environment, a pipeline or a vault, which TIA cannot see: confirm it is set wherever the "
+                                   "change is deployed.", "items": [{"key": k} for k in unset]})
     if file_level:
         unknowns.append({"area": "file_level_analysis", "affects_confidence": True,
                          "reason": "Symbol-level comparison unavailable for: " + ", ".join(file_level) + " (file-level analysis)."})
@@ -742,6 +789,11 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     if unsupported:
         unknowns.append({"area": "unsupported_language_files", "affects_confidence": True,
                          "reason": "Files in unsupported languages were not analysed.", "files_by_repo": unsupported})
+    routes_unk = [{"repo": r, **x} for r, e in sorted(extracts.items()) for x in e.route_unknowns]
+    if routes_unk:
+        unknowns.append({"area": "routes_not_resolved", "affects_confidence": True, "count": len(routes_unk),
+                         "reason": f"{len(routes_unk)} declared route(s) could not be resolved to a handler (an include, router or view TIA "
+                                   "cannot follow), so endpoints may be missing and their consumers unseen.", "items": routes_unk[:100]})
     http_libs = [{"repo": r, **x} for r, e in sorted(extracts.items()) for x in e.unsupported_clients]
     if http_libs:
         libs = sorted({x["library"] for x in http_libs})
@@ -887,6 +939,20 @@ def _analyze(req: AnalysisRequest, store: Optional[Store] = None, persist: bool 
     else:
         report["unknowns"].append({"area": "deployment_evidence_absent", "affects_confidence": False,
                                    "reason": "No deployment records have been ingested: the revision running in each environment is unknown."})
+    # FR-007: builds and their artifacts, failure signatures across the pinned test history (and incidents carrying the same signature)
+    if builds:
+        report["builds"] = {k: v for k, v in builds.items() if k != "_all"}
+        if builds["proposed_revision_unbuilt"]:
+            report["unknowns"].append({"area": "proposed_revision_not_built", "affects_confidence": False,
+                                       "reason": f"No build record exists for the proposed revision {head_sha[:7]} of {req.target}: whether it "
+                                                 "builds, and what it produces, is unknown."})
+    else:
+        report["unknowns"].append({"area": "build_evidence_absent", "affects_confidence": False,
+                                   "reason": "No build records have been ingested: build status and the artifacts each revision produced are unknown."})
+    if ev.get("test_run"):
+        fs = failure_signatures(ev["test_run"], ev.get("incident", []), req.target, base_sha, head_sha)
+        if fs["signatures"]:
+            report["failure_signatures"] = fs
     # FR-033/034/036: the tenant's release policy, evaluated on this report (owners: the tenant registry wins over tia-services.yaml)
     owners = {**{e.service: str(e.service_map["owner"]) for e in extracts.values() if (e.service_map or {}).get("owner")}, **cfg.ownership}
     report["owners"] = {s: owners[s] for s in sorted({f["component"] for f in report["findings"]} | {target_service}) if s in owners}

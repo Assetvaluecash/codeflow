@@ -19,7 +19,8 @@ from .models import normalize_path
 from .scrub import scrub_json
 
 KINDS = ("test_run", "coverage", "runtime_edge", "deployment", "incident", "verdict", "approval", "acknowledgement", "notification",
-         "itsm_attachment", "release", "incident_link")
+         "itsm_attachment", "release", "incident_link", "build")
+BUILD_STATUSES = ("succeeded", "failed", "cancelled", "running")
 MAX_BYTES = 25 * 1024 * 1024
 MAX_TESTS = 200_000
 RESULTS = ("passed", "failed", "error", "skipped")
@@ -298,8 +299,65 @@ def parse_deployments(items) -> list:
         if not re.fullmatch(r"[0-9a-f]{7,40}", rev):
             raise EvidenceError("revision must be a commit id (7 to 40 hex characters)")
         out.append({"repo": d.get("repo"), "service": d.get("service"), "environment": str(d["environment"]).strip().lower(), "revision": rev,
-                    "artifact": d.get("artifact"), "deployed_at": _iso(d.get("deployed_at")) or _now(), "pipeline": d.get("pipeline")})
+                    "artifact": d.get("artifact"), "deployed_at": _iso(d.get("deployed_at")) or _now(), "pipeline": d.get("pipeline"),
+                    **({"rollback": True} if d.get("rollback") is True else {})})
     return out
+
+
+# ---- builds and their artifacts (FR-007) -----------------------------------------------------------------------------------------------------
+def parse_builds(items) -> list:
+    """Builds: [{repo or service, revision, build_id, pipeline, status, artifacts: [{name, version, digest}], started_at, finished_at, url}]."""
+    if not isinstance(items, list) or not items:
+        raise EvidenceError("expected a non-empty list of builds")
+    out = []
+    for b in items:
+        if not isinstance(b, dict) or not (b.get("repo") or b.get("service")) or not b.get("revision") or not b.get("build_id"):
+            raise EvidenceError("each build needs repo or service, revision and build_id")
+        rev = str(b["revision"]).strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{7,40}", rev):
+            raise EvidenceError("revision must be a commit id (7 to 40 hex characters)")
+        status = str(b.get("status") or "succeeded").lower()
+        if status not in BUILD_STATUSES:
+            raise EvidenceError(f"status must be one of {', '.join(BUILD_STATUSES)}")
+        arts = []
+        for a in b.get("artifacts") or []:
+            if isinstance(a, str):
+                a = {"name": a}
+            if not isinstance(a, dict) or not a.get("name"):
+                raise EvidenceError("each artifact needs a name")
+            arts.append({k: str(a[k])[:300] for k in ("name", "version", "digest") if a.get(k)})
+        out.append({"repo": b.get("repo"), "service": b.get("service"), "revision": rev, "build_id": str(b["build_id"])[:200],
+                    "pipeline": b.get("pipeline"), "status": status, "artifacts": arts[:100], "started_at": _iso(b.get("started_at")),
+                    "finished_at": _iso(b.get("finished_at")) or _now(), "url": b.get("url")})
+    return out
+
+
+def artifact_names(a: dict) -> set:
+    """The ways a deployment record may name a built artifact: name, name:version, name@version, the digest."""
+    n, v, d = a.get("name"), a.get("version"), a.get("digest")
+    return {x for x in (n, f"{n}:{v}" if v else None, f"{n}@{v}" if v else None, d, f"{n}@{d}" if d else None) if x}
+
+
+# ---- failure signatures (FR-007) -------------------------------------------------------------------------------------------------------------
+_SIG_RULES = [(re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I), "<uuid>"),
+              (re.compile(r"\b0x[0-9a-f]+\b|\b[0-9a-f]{12,}\b", re.I), "<hex>"),
+              (re.compile(r"\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?"), "<time>"),
+              (re.compile(r"(['\"]).*?\1"), "<value>"),
+              (re.compile(r"(?:[A-Za-z]:)?[\w.-]*[/\\][\w./\\-]+"), "<path>"),
+              (re.compile(r"(?<![A-Za-z_<])\d+(\.\d+)?"), "<n>"),
+              (re.compile(r"\s+"), " ")]
+
+
+def failure_signature(message: Optional[str]) -> Optional[dict]:
+    """The same failure, recognised across runs and incidents: the first line of the message with ids, numbers, times, values and paths
+    replaced by placeholders. -> {id, pattern}; None without a message."""
+    if not message or not str(message).strip():
+        return None
+    pat = str(message).strip().splitlines()[0][:400]
+    for rx, rep in _SIG_RULES:
+        pat = rx.sub(rep, pat)
+    pat = pat.strip()[:200]
+    return {"id": "fs-" + hashlib.sha1(pat.encode()).hexdigest()[:12], "pattern": pat}
 
 
 # ---- the store ---------------------------------------------------------------------------------------------------------------------------
@@ -361,6 +419,8 @@ class EvidenceStore:
                 "coverage": self._rows("kind = 'coverage' and repo = any(%s)", (names,), 10 * max(len(names), 1)),
                 "runtime_edge": self._rows("kind = 'runtime_edge'", (), 5000),
                 "deployment": self._rows("kind = 'deployment'", (), 5000),
+                "build": self._rows("kind = 'build' and (repo = any(%s) or repo is null)", (names,), 50 * max(len(names), 1)),
+                "incident": self._rows("kind = 'incident'", (), 500),
                 "approval": self._rows("kind = 'approval' and repo = %s and revision = %s", (target, head), 500) if target and head else []}
 
     def approvals(self, repo: str, revision: str) -> list:

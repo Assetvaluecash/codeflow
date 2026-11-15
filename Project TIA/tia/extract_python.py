@@ -23,6 +23,7 @@ from .extract_orm import function_refs, model_entity
 from .extract_ui import assemble_pages, extract_ui_file, is_ui_file
 from .testcases import is_testcase_file, parse_testcases
 from .extract_openapi import extract_openapi, is_openapi_file
+from .extract_django import file_facts as django_file_facts, resolve as resolve_django
 from .registry import catalog_service_map
 from .events import TOPIC as EVENT_TOPIC, assign_topics, is_event_schema_file, parse_event_schema
 from .scrub import scrub_extract
@@ -323,6 +324,7 @@ class _FileVisitor:
         self.client_vars: dict[str, tuple[str, str]] = {}  # unparsed target -> (pkg, class)
         self.is_test = _is_test_file(path)
         self.is_migration = False        # Alembic / Django migration modules declare schema changes, not data access
+        self.local: dict = {}            # the current function's own resolvable names (see _local_consts)
 
     # ---- module-level pre-pass -------------------------------------------------
     def prepass(self):
@@ -444,12 +446,36 @@ class _FileVisitor:
             self.maybe_endpoint(node, fid, qual)
             if not self.is_migration:
                 self.out.data_refs += function_refs(node, fid, self.path, scope, self.out)
+            self.local = self._local_consts(node)
             for stmt in node.body:          # body only: decorators are route declarations, not calls
                 for sub in ast.walk(stmt):
                     if isinstance(sub, ast.Call):
                         self.maybe_callsite(sub, fid)
                         self.maybe_event(sub, fid)
+            self.local = {}
         # nested functions are attributed to the enclosing function (not separately extracted)
+
+    def _local_consts(self, fn) -> dict:
+        """Names a function assigns one resolvable value to (base = os.getenv("ORDERS_URL"), url = "https://..."), so a call built from
+        them resolves like one built from a module constant. A name assigned two different values is left out: never a guess."""
+        seen: dict = {}
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+                tgt, val = n.targets[0].id, n.value
+            elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
+                tgt, val = n.target.id, n.value
+            else:
+                continue
+            c = self._const_ref(val) if not (isinstance(val, ast.Name) and val.id in self.consts) else self.consts[val.id]
+            seen.setdefault(tgt, set()).add(c)
+        return {k: next(iter(v)) for k, v in seen.items() if len(v) == 1 and None not in v}
+
+    def _name_const(self, n):
+        if isinstance(n, ast.Name):
+            if n.id in getattr(self, "local", {}):
+                return self.local[n.id]                    # a local name shadows a module name, as in Python
+            return self.consts.get(n.id)
+        return None
 
     # ---- endpoints ------------------------------------------------------------------
     def maybe_endpoint(self, node, fid, qual):
@@ -577,8 +603,8 @@ class _FileVisitor:
             base_kind=bk, base_value=bv, reason=reason))
 
     def _base_of(self, n):
-        if isinstance(n, ast.Name) and n.id in self.consts:
-            return self.consts[n.id]
+        if self._name_const(n):
+            return self._name_const(n)
         if isinstance(n, ast.Attribute) and _unparse(n.value) in ("settings", "config", "cfg"):
             return ("config_key", n.attr)
         c = self._const_ref(n)
@@ -586,9 +612,10 @@ class _FileVisitor:
 
     def parse_url(self, n):
         """-> (path_template|None, base_kind, base_value, reason)"""
-        # resolve a bare name to a module constant
-        if isinstance(n, ast.Name) and n.id in self.consts and self.consts[n.id][0] == "literal":
-            n = ast.Constant(self.consts[n.id][1])
+        # resolve a bare name to a module constant (or a function-local one)
+        nc = self._name_const(n)
+        if nc and nc[0] == "literal":
+            n = ast.Constant(nc[1])
         s = _const_str(n)
         if s is not None:
             if s.startswith(("http://", "https://")):
@@ -956,6 +983,11 @@ def extract_file(repo: str, service: str, path: str, text: str, strip_prefixes: 
     v = _FileVisitor(repo, service, path, tree, out, strip_prefixes)
     v.is_migration = tool is not None
     v.run()
+    if not tool:
+        out.django_facts, view_config, serializers = django_file_facts(repo, path, tree, v.is_test, service)
+        out.functions += view_config
+        have = {s.name for s in out.schemas}
+        out.schemas += [s for s in serializers if s.name not in have]
     if tool:
         mig = (alembic_migration if tool == "alembic" else django_migration)(repo, service, path, tree)
         if mig is not None:
@@ -1015,6 +1047,8 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
             out.sql_access += part.sql_access
             out.procedures += part.procedures
             out.types += part.types
+            out.django_facts += part.django_facts
+            out.route_unknowns += part.route_unknowns
         elif path.startswith("contracts/") and path.endswith(".json"):
             try:
                 c = json.loads(small_files[path])
@@ -1024,6 +1058,7 @@ def assemble(repo: str, commit: str, tree_paths: list, smap: dict, service: str,
                 out.files_failed.append({"file": path, "error": "invalid JSON contract"})
         elif not path.endswith(TEXT_EXT + BINARY_EXT):
             out.non_python_files += 1
+    resolve_django(out, strip)                 # Django url modules point at views in other files: routes are known only now
     # a specification declares what the code may also declare: the code wins (the specification can be out of date)
     code_eps = {e.id for e in out.endpoints if e.source == "code"}
     out.endpoints = [e for e in out.endpoints if e.source == "code" or e.id not in code_eps]

@@ -47,8 +47,10 @@ class Key:
 
 
 class FakeIdp:
-    def __init__(self, client_id="tia-client", client_secret=None, issuer_path=""):
-        self.client_id, self.client_secret = client_id, client_secret
+    def __init__(self, client_id=None, client_secret=None, issuer_path=""):
+        # a fresh client id per provider: the issuer is http://127.0.0.1:<port> and the OS reuses ports across tests, so a fixed id could
+        # repeat an (issuer, audience) pair another test's tenant registered - which the database rightly refuses
+        self.client_id, self.client_secret = client_id or f"tia-client-{secrets.token_hex(4)}", client_secret
         self.keys = [Key("RSA", "k1")]
         self.codes: dict = {}
         self.user = {"sub": "u-1", "email": "ada@example.com", "name": "Ada", "groups": ["tia-engineers"]}

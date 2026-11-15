@@ -62,7 +62,7 @@ def _ts(*a):
 
 BUILTIN = (
     Adapter("go", "go-1", (".go",), _go, _not_generated, ("net/http", "chi", "gin", "echo", "gorilla/mux", "httptest")),
-    Adapter("csharp", "cs-1", (".cs",), _cs, _not_generated, ("ASP.NET Core controllers", "minimal APIs", "HttpClient", "DataAnnotations",
+    Adapter("csharp", "cs-2", (".cs",), _cs, _not_generated, ("ASP.NET Core controllers", "minimal APIs", "HttpClient", "DataAnnotations",
                                                               "xUnit", "NUnit", "MSTest")),
     Adapter("kotlin", "kt-1", (".kt", ".kts"), _kt, _not_generated, ("Spring", "RestTemplate", "WebClient", "Bean Validation", "MockMvc")),
     Adapter("typescript", "ts-1", (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"), _ts, _not_generated,

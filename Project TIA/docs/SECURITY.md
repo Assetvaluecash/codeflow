@@ -64,7 +64,7 @@ endpoints are controlled by tenant administrators** and are therefore treated as
 | T33 | GitLab / Bitbucket token sent elsewhere | Calls carrying the token go only to the configured host over https (http only to this machine); a token never enters the job queue. `tests/test_scmhosts.py::test_tokens_go_only_to_the_configured_host` |
 | T34 | Notifications leaking reports or reaching internal hosts | A team receives only the findings about the components it owns; webhook URLs are tenant secrets; webhooks go through `netsafe` (public addresses, no redirects) and the air-gap guard; e-mail requires STARTTLS off this machine. `tests/test_release4.py` |
 | T35 | Verdicts or trends used to rewrite history | Verdicts copy the finding's rules and never touch the report; rule changes apply to new analyses only (the stored report stays byte-identical); trends are read-only aggregates of what the caller may read. `tests/test_release4.py` |
-| T19 | Supply chain | Few dependencies; CI runs `pip-audit` and a credential scan (`tools/ci.py`); actions are pinned by tag, not by commit SHA (open item) |
+| T19 | Supply chain | Few dependencies; CI runs `pip-audit` and a credential scan (`tools/ci.py`); every third-party action is pinned by commit SHA with its release named in a comment, and `tools/ci.py --only workflow` refuses an action pinned by tag (closed 2026-11-12) |
 
 ## 4. Not covered or accepted
 

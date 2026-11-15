@@ -54,3 +54,15 @@ def test_severity_table():
 def test_github_marker_lookup():
     cs = [{"id": 1, "body": "hi"}, {"id": 2, "body": "x <!-- tia-analysis --> y"}]
     assert find_marker_comment(cs)["id"] == 2 and find_marker_comment(cs[:1]) is None
+
+
+def test_a_base_url_read_into_a_local_variable_resolves():
+    """base = os.getenv(...) inside the function resolves like a module constant; a local given two different values stays unresolved."""
+    src = ("import os\nimport requests\n\n\ndef status(pid):\n    base = os.getenv('PAYMENTS_URL', 'http://payments')\n"
+           "    return requests.get(f'{base}/payments/{pid}', timeout=3)\n\n\n"
+           "def either(pid, eu):\n    base = os.getenv('EU_URL')\n    if not eu:\n        base = os.getenv('US_URL')\n"
+           "    return requests.get(base + '/payments/' + pid)\n")
+    ex = extract_repo("r", "c", {"client.py": src})
+    by = {c.function_id.rsplit("::", 1)[-1]: c for c in ex.callsites}
+    assert (by["status"].base_kind, by["status"].base_value, by["status"].norm_path) == ("config_key", "PAYMENTS_URL", "/payments/{}")
+    assert by["either"].norm_path is None and "not resolvable" in by["either"].reason

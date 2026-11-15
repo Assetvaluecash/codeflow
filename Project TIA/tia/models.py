@@ -214,6 +214,8 @@ class RepoExtract:
     sql_access: list = field(default_factory=list)         # SQL in code (FR-041): [{function_id, op: read|write|call, target, file, line, sql, columns}]
     procedures: list = field(default_factory=list)         # SQL definitions (FR-041): [{name, kind, reads, writes, calls, columns, file, line, ...}]
     types: list = field(default_factory=list)              # TypeDecl: class/interface inheritance for blast edges
+    django_facts: list = field(default_factory=list)       # Django / DRF url modules, routers and views per file: assembly input
+    route_unknowns: list = field(default_factory=list)     # routes declared but not resolvable [{file, line, reason}]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -244,7 +246,8 @@ class RepoExtract:
             ui_facts=d.get("ui_facts", []), ui_pages=d.get("ui_pages", []), manual_tests=d.get("manual_tests", []),
             events=d.get("events", []), event_schemas=d.get("event_schemas", []),
             sql_access=d.get("sql_access", []), procedures=d.get("procedures", []),
-            types=[TypeDecl(**t) for t in d.get("types", [])])
+            types=[TypeDecl(**t) for t in d.get("types", [])],
+            django_facts=d.get("django_facts", []), route_unknowns=d.get("route_unknowns", []))
 
 
 def normalize_path(path: str, strip_prefixes: tuple = ()) -> str:

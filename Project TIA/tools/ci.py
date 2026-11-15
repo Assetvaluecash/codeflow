@@ -61,6 +61,8 @@ def step_workflow() -> list[str]:
             uses = st.get("uses", "")
             if uses and "@" not in uses:
                 problems.append(f"job '{name}' step {i + 1}: '{uses}' is not versioned")
+            elif uses and not uses.startswith("./") and not re.fullmatch(r"[0-9a-f]{40}", uses.rsplit("@", 1)[1]):
+                problems.append(f"job '{name}' step {i + 1}: '{uses}' is pinned by a tag, which its owner can move: pin the commit SHA (SECURITY T19)")
     if "secrets." in text:
         problems.append("the workflow reads repository secrets; CI must not need any")
     return problems

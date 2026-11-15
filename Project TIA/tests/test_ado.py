@@ -105,6 +105,56 @@ def test_one_thread_updated_in_place_and_an_advisory_status(fake):
     assert st["state"] == "notApplicable" and st["context"] == {"name": "impact-analysis", "genre": "tia"} and "Advisory" in st["description"]
 
 
+def _people(fake):
+    """An organisation as Azure DevOps models it: users, a group with expanded membership, ACLs at three levels."""
+    user = lambda d, acct, active=True: {"descriptor": d, "isContainer": False, "isActive": active,      # noqa: E731
+                                         "properties": {"Account": {"$value": acct}}}
+    fake.identities = {"u-alice": user("u-alice", "Alice@Bank.com"), "u-bob": user("u-bob", "bob@bank.com"),
+                       "u-carol": user("u-carol", "carol@bank.com"), "u-dave": user("u-dave", "dave@bank.com"),
+                       "u-gone": user("u-gone", "gone@bank.com", active=False),
+                       "g-readers": {"descriptor": "g-readers", "isContainer": True, "members": ["u-bob", "u-carol", "u-dave", "u-gone"]},
+                       "g-contrib": {"descriptor": "g-contrib", "isContainer": True, "members": ["u-carol"]}}
+    fake.repos[("Payments", "payments-service")] = {"id": "repo-guid", "name": "payments-service", "project": {"id": "proj-guid"}}
+    fake.acls = {"repoV2": {"inheritPermissions": True, "acesDictionary": {"u-alice": {"allow": 2 | 4 | 8192, "deny": 0}}},
+                 "repoV2/proj-guid": {"inheritPermissions": True, "acesDictionary": {"g-readers": {"allow": 2, "deny": 0}}},
+                 "repoV2/proj-guid/repo-guid": {"inheritPermissions": True, "acesDictionary": {
+                     "g-contrib": {"allow": 4, "deny": 0}, "u-dave": {"allow": 0, "deny": 2}}}}
+
+
+def test_the_permission_mirror_follows_azure_devops_acls(fake):
+    """PL-002 / FR-039: inherited allows, an explicit deny that wins over a group's allow, expanded groups, inactive users left out."""
+    _people(fake)
+    got = dict(ado.list_readers(cfg_for(fake), fake.token, fake.url + "/acme", "Payments", "payments-service"))
+    assert got == {"alice@bank.com": "admin", "bob@bank.com": "pull", "carol@bank.com": "push"}     # dave denied, gone inactive
+    fake.acls["repoV2/proj-guid/repo-guid"]["inheritPermissions"] = False                              # the repository stops inheriting
+    assert dict(ado.list_readers(cfg_for(fake), fake.token, fake.url + "/acme", "Payments", "payments-service")) == {}
+    with pytest.raises(AdoError, match="not found|404"):
+        ado.list_readers(cfg_for(fake), fake.token, fake.url + "/acme", "Payments", "missing")
+    assert ado.identity_base("https://dev.azure.com/acme") == "https://vssps.dev.azure.com/acme"
+    assert ado.identity_base("https://acme.visualstudio.com") == "https://acme.vssps.visualstudio.com"
+    assert ado.allowed_host(AdoConfig(), "https://vssps.dev.azure.com/acme/_apis/identities")
+
+
+def test_the_mirror_decides_who_reads_an_azure_devops_repository(fake):
+    """The synced mirror governs access (mode 'scm' by default for Azure DevOps): fail closed for anyone it does not name."""
+    from types import SimpleNamespace
+    from tia.access import AccessStore
+    from tia.identity import Principal
+    _people(fake)
+    tid = conftest.new_tenant()
+    acc = AccessStore(conftest.PG.db, tid)
+    repo = SimpleNamespace(name="payments-service", provider="ado", url=fake.url + "/acme/Payments/_git/payments-service")
+    res = acc.sync([repo], lambda r: fake.token, ado_cfg=cfg_for(fake))
+    assert res == [{"repo": "payments-service", "ok": True, "collaborators": 3, "private": None}]
+    who = lambda login: Principal(tid, "user", login or "x", frozenset({"viewer"}), user_id=str(uuid.uuid4()),        # noqa: E731
+                                  scm_logins={"ado": login} if login else {})
+    assert acc.readable(who("bob@bank.com"), [repo]) == {"payments-service"}
+    assert acc.readable(who("dave@bank.com"), [repo]) == frozenset()                 # denied in Azure DevOps: denied here
+    assert acc.readable(who(None), [repo]) == frozenset()                            # no Azure DevOps login on the profile
+    bad = acc.sync([repo], lambda r: None, ado_cfg=cfg_for(fake))
+    assert not bad[0]["ok"] and "no Azure DevOps token" in bad[0]["error"]
+
+
 def test_permission_failures_are_permanent_and_explained(fake):
     with pytest.raises(AdoError) as e:
         ado.upsert_thread(cfg_for(fake), "wrong-pat", fake.url + "/acme", "P", "r", 1, "x")
@@ -187,11 +237,17 @@ def test_a_mapped_organisation_routes_events_to_its_tenant(world):
     tid, name = tenant_named()
     Tenants(conftest.PG.admin).map_installation(name, "ado", "coll-mapped-" + uuid.uuid4().hex[:6])
     coll = Tenants(conftest.PG.admin).installations(name)[0]["installation_id"]
-    st = Store(conftest.PG.db, tid)
-    from tia.repos import RepoService
-    RepoService(st, str(world.tmp / "ws2"), allow_local=True).register(url=world.bare.as_uri(), name="payments-service")
-    r = world.post(world.event(collection=coll))
-    assert r.status_code == 202 and len(queued(tid)) == 1 and queued(world.tenant) == []
+    try:
+        st = Store(conftest.PG.db, tid)
+        from tia.repos import RepoService
+        RepoService(st, str(world.tmp / "ws2"), allow_local=True).register(url=world.bare.as_uri(), name="payments-service")
+        r = world.post(world.event(collection=coll))
+        assert r.status_code == 202 and len(queued(tid)) == 1 and queued(world.tenant) == []
+        # PL-003: while organisations are mapped, an unmapped one is ignored, never routed to the default tenant
+        r = world.post(world.event(collection="coll-nobody"))
+        assert r.status_code == 202 and "not linked" in r.json()["ignored"] and queued(world.tenant) == []
+    finally:
+        Tenants(conftest.PG.admin).unmap_installation(name, "ado", coll)
 
 
 # ---- the job, end to end -------------------------------------------------------------------------------------------------------------

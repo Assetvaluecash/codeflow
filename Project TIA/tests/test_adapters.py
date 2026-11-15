@@ -82,6 +82,23 @@ public class OrderDto { public string Id { get; set; } }
     assert [(x.name, x.http_calls) for x in t.tests] == [("Gets", [["GET", "/api/orders/1"]])]
 
 
+def test_csharp_named_clients_belong_to_their_own_method():
+    """Two methods each name their client `c`: each call goes to its own method's client, not the last one declared in the file."""
+    src = '''public class Pricing {
+    private readonly HttpClient _ledger;
+    public Pricing(IHttpClientFactory f) { _ledger = f.CreateClient("ledger"); }
+    public void A() { var c = factory.CreateClient("orders"); c.GetAsync("/orders/1"); }
+    public void B() { var c = factory.CreateClient("payments"); c.GetAsync("/payments/1"); }
+    public void C(string id) { _ledger.GetAsync("/entries/" + id + "/lines"); }
+    public void D(string u) { _ledger.GetAsync(u + "/x"); }
+}
+'''
+    ex = csharp.extract_file("r", "svc", "Pricing.cs", src)
+    by = {c.function_id.rsplit(".", 1)[-1]: (c.norm_path, c.base_value) for c in ex.callsites}
+    assert by == {"A": ("/orders/1", "orders"), "B": ("/payments/1", "payments"), "C": ("/entries/{}/lines", "ledger"), "D": (None, None)}
+    assert next(c for c in ex.callsites if c.function_id.endswith(".D")).reason == "URL starts with an expression"     # never a guess
+
+
 def test_kotlin_spring_controllers_value_bases_and_dtos():
     src = '''@RestController
 @RequestMapping("/orders")
@@ -144,7 +161,7 @@ app.get('/users/:id', requireAuth, async (req, res) => { res.json(await axios.ge
 # ---- registry ------------------------------------------------------------------------------------------------------------------
 def test_registry_dispatch_versions_and_generated_files():
     assert {a.name for a in adapters.registry()} >= {"go", "csharp", "kotlin", "typescript"}
-    for name, ver in (("go", "go-1"), ("csharp", "cs-1"), ("kotlin", "kt-1"), ("typescript", "ts-1")):
+    for name, ver in (("go", "go-1"), ("csharp", "cs-2"), ("kotlin", "kt-1"), ("typescript", "ts-1")):
         assert EXTRACTOR_VERSIONS[name] == ver
     assert adapter_for("cmd/main.go").name == "go" and adapter_for("src/App.tsx").name == "typescript" and adapter_for("x.kts").name == "kotlin"
     assert adapter_for("vendor/x/y.go") is None and adapter_for("node_modules/a/b.js") is None and adapter_for("types.d.ts") is None

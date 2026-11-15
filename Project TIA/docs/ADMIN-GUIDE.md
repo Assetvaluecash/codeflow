@@ -232,7 +232,7 @@ Who may read which repository is decided per repository (`GET /api/v1/admin/repo
 
 | Mode | Readers | Default for |
 |---|---|---|
-| `scm` | the people the source-code host lists (collaborators, teams, organisation members), matched by the GitHub login on their profile | repositories hosted on GitHub |
+| `scm` | the people the source-code host lists (collaborators, teams, organisation members; Azure DevOps: its Git repository permissions), matched by the login on their profile for that host | repositories hosted on GitHub, GitLab, Bitbucket, Azure DevOps |
 | `restricted` | people explicitly granted by an administrator | - |
 | `tenant` | every member of the tenant | uploads and local paths |
 
@@ -270,11 +270,16 @@ Comments are **advisory**: they are one comment per pull request, updated in pla
 2. A personal access token with *Code: read* and *Pull request threads: read & write* in `TIA_ADO_TOKEN` (or each tenant's stored secret `ado/token`). Azure DevOps Server: `TIA_ADO_API_URL`.
    The token is only ever sent to `dev.azure.com`, `*.visualstudio.com` or that configured host.
 3. Register the repositories (Git URL, or **Discover** with provider `ado`). Events of an organisation that the operator mapped with
-   `python -m tia.tenants map-installation <tenant> ado <collection id>` go to that tenant; others go to the default tenant.
+   `python -m tia.tenants map-installation <tenant> ado <collection id>` go to that tenant. Once **any** organisation is mapped, an event from an unmapped one
+   is ignored (answered 202 with the reason), never routed to the default tenant; with no mapping at all (a single-tenant install) events go to the default tenant.
+4. **Access mirror.** `POST /api/v1/admin/repo-access/sync` reads the *Git Repositories* permissions of each repository: the access control lists at all-repositories,
+   project and repository level (the most specific explicit setting wins; a deny beats an allow), with groups expanded to their users. Read = `pull`,
+   Contribute = `push`, Manage permissions = `admin`. For the mirror the token also needs *Identity: Read* and *Security: Manage* (Azure DevOps puts reading
+   access control lists under that scope; TIA only reads them, and this has not been checked against a real organisation). People are matched by
+   their Azure DevOps account (user principal name or e-mail): add `"ado": "<claim>"` to `scm_login_claims` (usually `upn` or `email`).
 
 Each pull request gets **one comment thread**, updated in place and created *closed* so a "resolve all comments" policy is never blocked, and a pull-request **status**
-(`tia/impact-analysis`) whose state is always `notApplicable`: advisory, never a gate. Repository access is not mirrored from Azure DevOps: its repositories are `restricted`
-until an administrator grants them, and comments name only the pull request's own repository.
+(`tia/impact-analysis`) whose state is always `notApplicable`: advisory, never a gate. Azure DevOps repositories are governed by the mirror (`scm`) like GitHub ones.
 
 **Knowledge Fabric V2.5 agents** can read finished reports through `POST /query/tia`; see [the adapter page](KF-ADAPTER.md).
 
@@ -325,7 +330,7 @@ No dashboards or alert rules are shipped.
 ## 14. What TIA does not do
 
 * No WAF and no account lockout (use the gateway; `deploy/terraform/azure` puts Front Door's WAF in front). Rate limiting is per API replica, not global.
-* No permission mirroring from Azure DevOps (its repositories are restricted until granted); the Azure DevOps connector has only been tested against a stand-in.
+* The Azure DevOps connector, including its permission mirror, has only been tested against a stand-in of the Azure DevOps REST API.
 * Group changes at the identity provider reach a signed-in person at their next sign-in; an administrator's edits reach bearer-token users within 30 seconds.
 * It never queries CI, telemetry or deployment systems during an analysis: evidence is pushed to TIA first (section 15).
 * Events are analysed for Kafka only (code and declarations); other messaging is reported as an unknown.
@@ -341,9 +346,13 @@ which records it used, so a reproduction gives the same result. Use a service to
 | `POST /api/v1/evidence/test-results?repo=R&revision=SHA&build_id=B&environment=E` | JUnit XML (`format=junit`, default) or JSON (`format=json`: pytest-json-report, or `[{name, classname, result}]`) |
 | `POST /api/v1/evidence/coverage?repo=R&revision=SHA` | Cobertura XML, JaCoCo XML, or coverage.py JSON (`coverage json --show-contexts` also says which test executed each line) |
 | `POST /api/v1/evidence/runtime?format=otlp` | OpenTelemetry traces as OTLP/JSON (or `format=edges`: `[{from_service, to_service, method, path, environment, from_ts, to_ts, count}]`) |
-| `POST /api/v1/evidence/deployments` | `[{repo or service, environment, revision, artifact, deployed_at}]` |
+| `POST /api/v1/evidence/deployments` | `[{repo or service, environment, revision, artifact, deployed_at, rollback}]`; `rollback: true` marks an explicit rollback (a return to an earlier revision is recognised anyway) |
+| `POST /api/v1/evidence/builds` | `[{repo or service, revision, build_id, pipeline, status: succeeded / failed / cancelled / running, artifacts: [{name, version, digest}], finished_at, url}]` |
+| `POST /api/v1/incidents` | an incident; with `error` (its error text) it carries a **failure signature**, and test failures with the same signature are linked to it |
 
-Bodies are capped at 25 MB; XML with a DOCTYPE is refused. `GET /api/v1/evidence?kind=...` lists records, `DELETE /api/v1/evidence/{rid}` removes one,
+A deployment whose `artifact` names a built artifact (`name`, `name:version`, `name@version` or the digest) is linked to that build in the report, and flagged when
+the build was of another revision. Failure signatures group test failures across the ingested runs by their first message line with ids, numbers, values and paths
+removed; the report says whether a failure already happened on the base revision. Bodies are capped at 25 MB; XML with a DOCTYPE is refused. `GET /api/v1/evidence?kind=...` lists records, `DELETE /api/v1/evidence/{rid}` removes one,
 `GET /api/v1/environments` shows what runs where.
 
 ## 16. Release policy
@@ -410,6 +419,10 @@ python -m tia.tenants meter acme-bank --month 2026-10 --format csv
 Register repositories by their clone URL; the provider is recognised from the host (gitlab.com, bitbucket.org, or the configured server). People are matched
 by their login on that host: add `"gitlab": "<claim>"` or `"bitbucket": "<claim>"` to `scm_login_claims`. The status is advisory (success) unless the
 policy is enforcing. Tested against stand-ins only.
+
+**Which tenant an event belongs to.** Map each customer's namespace to its tenant: the GitLab top-level group, the Bitbucket Cloud workspace or the Data Center
+project key, e.g. `python -m tia.tenants map-installation acme-bank gitlab acme-group` or `... bitbucket PAY` (stored lower-case). Events are then processed for
+that tenant. Once any namespace of a provider is mapped, an event from an unmapped namespace is ignored, never routed to the default tenant.
 
 ## 17b. Team coordination
 
@@ -507,6 +520,7 @@ are installed as Python packages that declare a `tia.adapters` entry point; inst
 | `TIA_ALLOW_PRIVATE_IDP_HOSTS` | development: allow identity-provider endpoints on http or private addresses |
 | `TIA_IDP_CA_FILE` | CA bundle for identity providers behind a private authority |
 | `TIA_ACCESS_MAX_AGE_S` | freshness limit of the repository-access mirror (3600) |
+| `TIA_CACHE_MB` | per-process memory for cached repository extracts and graph versions (256; `0` turns the cache off). Each use is checked against the row's current version, so it is never stale |
 | `TIA_HOST`, `TIA_PORT` | bind address (127.0.0.1:8080) |
 | `TIA_WORKSPACE` | where repositories are cloned (`./.tia-data/repos`) |
 | `TIA_ALLOW_LOCAL_PATHS` | allow registering local paths and `file://` URLs (development) |
